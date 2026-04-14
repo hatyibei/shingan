@@ -2,17 +2,19 @@
 
 All notable changes to Shingan are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [SemVer](https://semver.org/).
 
-## [Unreleased]
-
-### Added
-- PII Leak Scanner rule (v0.3 preview) for enterprise compliance (RAG→external tool path detection)
-- functiontool.New() 経由で登録したToolのAST検出対応（error_handler_checker強化）
-- Playwright スクリーンショット自動化スクリプト (`scripts/screenshots/`)
-
 ## [0.1.0] - 2026-04-15
 
 ### Added
-- 6 analysis rules:
+- 7 analysis rules:
+  - `pii_leak_scanner` (v0.3 preview) — RAG→外部送信パスでHuman gateなし
+- functiontool.New() 経由で登録したToolのAST検出対応（error_handler_checker強化）
+- Playwright スクリーンショット自動化スクリプト (`scripts/screenshots/`、10枚)
+- Marp 面接プレゼンスライド15枚 (HTML生成済、`slides/pitch.md`)
+- GitHub Action (`action.yml`) — `uses: hatyibei/shingan@v0.1.0`
+- Multi-stage Dockerfile (distroless, 4バイナリ)
+- Performance benchmarks (`domain/rules/bench_test.go`, `application/bench_test.go`, `infrastructure/parser/bench_test.go`) + `docs/benchmarks.md`
+- Self-dogfood verification (`docs/self-dogfood.md`) — 既知誤検知5件の文書化
+- 6 base analysis rules:
   - `cycle_detection` — 非Controlノードのサイクル、LoopAgent管理下のサイクル
   - `loop_guard` — Control型ノードのMaxIterations未設定検出（独立ルール）
   - `unreachable_node` — エントリから到達不能なLLM/Tool
