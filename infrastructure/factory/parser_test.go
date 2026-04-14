@@ -35,6 +35,42 @@ func TestParserFactory_ADKGo(t *testing.T) {
 	}
 }
 
+func TestParserFactory_Samurai(t *testing.T) {
+	f := factory.NewParserFactory()
+	p, err := f.Create("samurai")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := p.(*parser.SamuraiParser); !ok {
+		t.Errorf("expected *parser.SamuraiParser, got %T", p)
+	}
+	if got := p.SupportedFormat(); got != "samurai" {
+		t.Errorf("SupportedFormat() = %q, want \"samurai\"", got)
+	}
+}
+
+func TestParserFactory_SamuraiParserCanParseValidInput(t *testing.T) {
+	f := factory.NewParserFactory()
+	p, err := f.Create("samurai")
+	if err != nil {
+		t.Fatalf("Create(samurai): %v", err)
+	}
+	input := []byte(`{
+		"version": "1.0",
+		"workflow_id": "wf_test",
+		"entry_node": "n1",
+		"nodes": [{"id": "n1", "type": "llm", "name": "テスト", "config": {}}],
+		"edges": []
+	}`)
+	graph, err := p.Parse(input)
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if graph.EntryNodeID != "n1" {
+		t.Errorf("EntryNodeID = %q, want \"n1\"", graph.EntryNodeID)
+	}
+}
+
 func TestParserFactory_UnknownFormat(t *testing.T) {
 	f := factory.NewParserFactory()
 	p, err := f.Create("yaml")

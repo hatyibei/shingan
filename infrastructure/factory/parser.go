@@ -16,7 +16,7 @@ func NewParserFactory() *ParserFactory {
 }
 
 // Create returns a WorkflowParser for the given format name.
-// Supported formats: "json", "adk-go".
+// Supported formats: "json", "adk-go", "samurai".
 // Returns an error for unknown format names.
 func (f *ParserFactory) Create(format string) (application.WorkflowParser, error) {
 	switch format {
@@ -24,7 +24,9 @@ func (f *ParserFactory) Create(format string) (application.WorkflowParser, error
 		return parser.NewJSONParser(), nil
 	case "adk-go":
 		return parser.NewADKGoParser(), nil
+	case "samurai":
+		return parser.NewSamuraiParser(), nil
 	default:
-		return nil, fmt.Errorf("unknown parser format %q: supported formats are \"json\", \"adk-go\"", format)
+		return nil, fmt.Errorf("unknown parser format %q: supported formats are \"json\", \"adk-go\", \"samurai\"", format)
 	}
 }

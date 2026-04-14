@@ -1,0 +1,169 @@
+{
+  "version": "1.0",
+  "workflow_id": "wf_samurai_full",
+  "entry_node": "node_classifier",
+  "nodes": [
+    {
+      "id": "node_classifier",
+      "type": "llm",
+      "name": "分類器",
+      "config": {
+        "model": "gemini-1.5-flash",
+        "prompt": "ユーザー入力を分類してください"
+      }
+    },
+    {
+      "id": "node_agent",
+      "type": "agent",
+      "name": "自律エージェント",
+      "config": {
+        "model": "gemini-1.5-pro"
+      }
+    },
+    {
+      "id": "node_auto_judge",
+      "type": "auto_judge",
+      "name": "自動判定",
+      "config": {
+        "model": "gemini-1.5-flash",
+        "intent": "成功/失敗の判定"
+      }
+    },
+    {
+      "id": "node_param_extract",
+      "type": "param_extract",
+      "name": "パラメータ抽出",
+      "config": {
+        "model": "gemini-1.5-flash",
+        "schema": "{\"name\": \"string\", \"amount\": \"number\"}"
+      }
+    },
+    {
+      "id": "node_browser",
+      "type": "browser",
+      "name": "ブラウザ操作",
+      "config": {
+        "action": "click",
+        "selector": "#submit"
+      }
+    },
+    {
+      "id": "node_connector",
+      "type": "connector",
+      "name": "外部連携コネクタ",
+      "config": {
+        "endpoint": "https://api.example.com/data",
+        "method": "POST"
+      }
+    },
+    {
+      "id": "node_api",
+      "type": "api",
+      "name": "外部API呼出",
+      "config": {
+        "endpoint": "https://api.example.com/v2/action",
+        "auth": "bearer"
+      }
+    },
+    {
+      "id": "node_mcp_tool",
+      "type": "mcp_tool",
+      "name": "MCP Tool",
+      "config": {
+        "server": "filesystem",
+        "tool": "read_file"
+      }
+    },
+    {
+      "id": "node_code",
+      "type": "code",
+      "name": "コード実行",
+      "config": {
+        "language": "python",
+        "script": "result = input_data['value'] * 2"
+      }
+    },
+    {
+      "id": "node_knowledge",
+      "type": "knowledge_search",
+      "name": "ナレッジベース検索",
+      "config": {
+        "index": "product_kb",
+        "top_k": 5
+      }
+    },
+    {
+      "id": "node_loop",
+      "type": "loop",
+      "name": "リトライループ",
+      "config": {}
+    },
+    {
+      "id": "node_condition",
+      "type": "condition",
+      "name": "成功判定",
+      "config": {
+        "expression": "result.status == 'success'"
+      }
+    },
+    {
+      "id": "node_approval",
+      "type": "approval",
+      "name": "承認フロー",
+      "config": {
+        "approver": "manager@example.com"
+      }
+    },
+    {
+      "id": "node_review",
+      "type": "review",
+      "name": "レビュー",
+      "config": {
+        "reviewer_role": "qa_team"
+      }
+    },
+    {
+      "id": "node_output",
+      "type": "output",
+      "name": "回答を出力",
+      "config": {
+        "format": "markdown"
+      }
+    },
+    {
+      "id": "node_answer",
+      "type": "answer",
+      "name": "回答ノード",
+      "config": {
+        "channel": "slack"
+      }
+    },
+    {
+      "id": "node_memo",
+      "type": "memo",
+      "name": "設計メモ",
+      "config": {
+        "note": "このノードは実行時に無視される"
+      }
+    }
+  ],
+  "edges": [
+    { "from": "node_classifier", "to": "node_agent" },
+    { "from": "node_agent", "to": "node_param_extract" },
+    { "from": "node_param_extract", "to": "node_browser" },
+    { "from": "node_browser", "to": "node_connector" },
+    { "from": "node_connector", "to": "node_api" },
+    { "from": "node_api", "to": "node_mcp_tool" },
+    { "from": "node_mcp_tool", "to": "node_code" },
+    { "from": "node_code", "to": "node_knowledge" },
+    { "from": "node_knowledge", "to": "node_loop" },
+    { "from": "node_loop", "to": "node_auto_judge" },
+    { "from": "node_auto_judge", "to": "node_condition" },
+    { "from": "node_condition", "to": "node_approval", "condition": "needs_approval" },
+    { "from": "node_condition", "to": "node_loop", "condition": "retry" },
+    { "from": "node_approval", "to": "node_review" },
+    { "from": "node_review", "to": "node_output" },
+    { "from": "node_output", "to": "node_answer" },
+    { "from": "node_memo", "to": "node_classifier" }
+  ]
+}
