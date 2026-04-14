@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"go/types"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -1112,16 +1113,24 @@ func readFileBytes(path string) ([]byte, error) {
 // to resolve the TArgs type argument of functiontool.New[TArgs, TResults] calls.
 // Returns an error if packages.Load fails or produces errors that prevent analysis.
 func (p *ADKGoParser) parseWithTypes(path string) (*domain.WorkflowGraph, error) {
+	// Resolve to absolute path so packages.Load can locate go.mod.
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve path %q: %w", path, err)
+	}
+
 	cfg := &packages.Config{
 		Mode: packages.NeedName |
 			packages.NeedFiles |
 			packages.NeedSyntax |
 			packages.NeedTypes |
-			packages.NeedTypesInfo,
+			packages.NeedTypesInfo |
+			packages.NeedDeps,
+		Dir:  filepath.Dir(absPath),
 		Fset: token.NewFileSet(),
 	}
 
-	pkgs, err := packages.Load(cfg, "file="+path)
+	pkgs, err := packages.Load(cfg, "file="+absPath)
 	if err != nil {
 		return nil, fmt.Errorf("go/packages load: %w", err)
 	}
@@ -1136,7 +1145,7 @@ func (p *ADKGoParser) parseWithTypes(path string) (*domain.WorkflowGraph, error)
 	}
 
 	// Read the source bytes from disk for the AST-only pass.
-	fileBytes, err := os.ReadFile(path)
+	fileBytes, err := os.ReadFile(absPath)
 	if err != nil {
 		return nil, fmt.Errorf("read file for AST pass: %w", err)
 	}
