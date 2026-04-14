@@ -1,33 +1,33 @@
-# Shingan v0.1.0 — 実装規模スナップショット
+# Shingan v0.2.0 — 実装規模スナップショット
 
-> 計測日: 2026-04-15
+> 計測日: 2026-04-15 (v0.2.0)
 > 計測コマンド: `git ls-files | xargs wc -l`
 
 ## コード量
 
-| 区分 | 行数 | 備考 |
-|---|---|---|
-| Go (全体) | **11,178** | 自動生成含む |
-| Go (テスト) | 4,774 | 43% をテストコードが占める |
-| Go (本体) | 6,404 | プロダクションコード |
-| Markdown | 2,674 | README / ADR / docs |
-| 合計 tracked files | 120 | |
+| 区分 | v0.1.0 | v0.2.0 | 増減 |
+|---|---|---|---|
+| Go (全体) | 11,178 | **14,339** | +3,161 |
+| Go (テスト含む) | 4,774 | 6,537 | +1,763 |
+| Go (本体) | 6,404 | 7,802 | +1,398 |
+| Markdown | 2,674 | 4,744 | +2,070 |
+| Tracked files | 120 | **183** | +63 |
 
 ## テスト
 
-| 区分 | 数 |
-|---|---|
-| テスト関数 | **206** |
-| テストパッケージ | 8 |
-| E2Eテスト (build tag `e2e`) | 含む |
-| Demo検証 (build tag `demo`) | 含む |
-| `go test -race` | 全グリーン維持 |
+| 区分 | v0.1.0 | v0.2.0 |
+|---|---|---|
+| Test/Benchmark 関数 | 206 | **298** |
+| テストパッケージ | 8 | 10 |
+| `go test -race` | 全green | 全green |
+| Benchmark 計測 | 21 | 21+ (PII最適化の実測再取得) |
 
-## エントリポイント (4バイナリ)
+## エントリポイント (5バイナリ)
 
 | バイナリ | 用途 |
 |---|---|
 | `shingan` | CLI 静的解析 |
+| `shingan-gen` | **NEW** サンプルワークフロー生成 (7パターン) |
 | `shingan-api` | goa v3 HTTP API + OpenAPI |
 | `shingan-runner` | Vertex AI Gemini safe-guard実行 |
 | `shingan-web` | ADK Web UI + Shingan middleware |
