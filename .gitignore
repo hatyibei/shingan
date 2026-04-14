@@ -18,6 +18,7 @@ vendor/
 /bin/
 /dist/
 /shingan
+/shingan-runner
 /shingan-cli
 /shingan-api
 
