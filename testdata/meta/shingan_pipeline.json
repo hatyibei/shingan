@@ -1,0 +1,165 @@
+{
+  "entry_node_id": "parse_input",
+  "nodes": [
+    {
+      "id": "parse_input",
+      "name": "ParserFactory.Create(format).Parse",
+      "type": "tool",
+      "config": {
+        "category": "code",
+        "description": "ADKGo/JSON/Samurai parser selected by --format flag"
+      }
+    },
+    {
+      "id": "parse_error_branch",
+      "name": "If parse fails, return structured error",
+      "type": "control",
+      "config": {
+        "expression": "err != nil"
+      }
+    },
+    {
+      "id": "orchestrator",
+      "name": "AnalysisOrchestrator.Analyze",
+      "type": "control",
+      "config": {
+        "max_iterations": 1,
+        "description": "Fan-out 7 rules in parallel via goroutine+WaitGroup"
+      }
+    },
+    {
+      "id": "rule_cycle",
+      "name": "CycleDetector",
+      "type": "llm",
+      "config": {
+        "model": "static",
+        "algorithm": "DFS back-edge detection with parent-control lookup"
+      }
+    },
+    {
+      "id": "rule_loop_guard",
+      "name": "LoopGuardChecker",
+      "type": "llm",
+      "config": {
+        "model": "static",
+        "algorithm": "Control node Config[max_iterations] presence check"
+      }
+    },
+    {
+      "id": "rule_reachability",
+      "name": "ReachabilityChecker",
+      "type": "llm",
+      "config": {
+        "model": "static",
+        "algorithm": "BFS from entry_node"
+      }
+    },
+    {
+      "id": "rule_error_handler",
+      "name": "ErrorHandlerChecker",
+      "type": "llm",
+      "config": {
+        "model": "static",
+        "algorithm": "Tool node outbound conditional edge check"
+      }
+    },
+    {
+      "id": "rule_cost",
+      "name": "CostAnalyzer",
+      "type": "llm",
+      "config": {
+        "model": "static",
+        "algorithm": "Loop detection + model price tier lookup"
+      }
+    },
+    {
+      "id": "rule_redundant",
+      "name": "RedundantLLMDetector",
+      "type": "llm",
+      "config": {
+        "model": "static",
+        "algorithm": "(model, prompt_template) dedup"
+      }
+    },
+    {
+      "id": "rule_pii",
+      "name": "PIILeakScanner",
+      "type": "llm",
+      "config": {
+        "model": "static",
+        "algorithm": "BFS from RAG node to external sink, Human gate check"
+      }
+    },
+    {
+      "id": "aggregate",
+      "name": "Collect Findings (chan []Finding)",
+      "type": "control",
+      "config": {
+        "max_iterations": 1,
+        "description": "Drain results channel"
+      }
+    },
+    {
+      "id": "sort_by_severity",
+      "name": "sort.SliceStable by Severity DESC, RuleName ASC",
+      "type": "tool",
+      "config": {
+        "category": "code"
+      }
+    },
+    {
+      "id": "format_output",
+      "name": "ReporterFactory.Create(format).Format",
+      "type": "tool",
+      "config": {
+        "category": "code",
+        "description": "JSON / Markdown / SARIF"
+      }
+    },
+    {
+      "id": "format_error_branch",
+      "name": "If format fails, fallback to raw JSON",
+      "type": "control",
+      "config": {
+        "expression": "err != nil"
+      }
+    },
+    {
+      "id": "output",
+      "name": "Write stdout or --output-file",
+      "type": "output"
+    },
+    {
+      "id": "error_out",
+      "name": "Exit code 3 with structured error",
+      "type": "output"
+    }
+  ],
+  "edges": [
+    { "from": "parse_input", "to": "parse_error_branch" },
+    { "from": "parse_error_branch", "to": "orchestrator", "condition": "err == nil" },
+    { "from": "parse_error_branch", "to": "error_out", "condition": "err != nil" },
+
+    { "from": "orchestrator", "to": "rule_cycle" },
+    { "from": "orchestrator", "to": "rule_loop_guard" },
+    { "from": "orchestrator", "to": "rule_reachability" },
+    { "from": "orchestrator", "to": "rule_error_handler" },
+    { "from": "orchestrator", "to": "rule_cost" },
+    { "from": "orchestrator", "to": "rule_redundant" },
+    { "from": "orchestrator", "to": "rule_pii" },
+
+    { "from": "rule_cycle", "to": "aggregate" },
+    { "from": "rule_loop_guard", "to": "aggregate" },
+    { "from": "rule_reachability", "to": "aggregate" },
+    { "from": "rule_error_handler", "to": "aggregate" },
+    { "from": "rule_cost", "to": "aggregate" },
+    { "from": "rule_redundant", "to": "aggregate" },
+    { "from": "rule_pii", "to": "aggregate" },
+
+    { "from": "aggregate", "to": "sort_by_severity" },
+    { "from": "sort_by_severity", "to": "format_output" },
+    { "from": "format_output", "to": "format_error_branch" },
+    { "from": "format_error_branch", "to": "output", "condition": "err == nil" },
+    { "from": "format_error_branch", "to": "error_out", "condition": "err != nil" }
+  ]
+}
