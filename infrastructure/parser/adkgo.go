@@ -34,11 +34,13 @@ func (p *ADKGoParser) Parse(input []byte) (*domain.WorkflowGraph, error) {
 	}
 
 	b := &adkgoBuilder{
-		fset:     fset,
-		file:     file,
-		nodes:    make(map[string]*domain.Node),
-		counter:  0,
-		varDecls: make(map[string]*ast.CompositeLit),
+		fset:        fset,
+		file:        file,
+		nodes:       make(map[string]*domain.Node),
+		counter:     0,
+		varDecls:    make(map[string]*ast.CompositeLit),
+		varCallArgs: make(map[string]*ast.CompositeLit),
+		varAgentIDs: make(map[string]string),
 	}
 
 	// Pre-scan package-level var declarations so identifier references can be resolved.
@@ -71,15 +73,19 @@ func (p *ADKGoParser) Parse(input []byte) (*domain.WorkflowGraph, error) {
 
 // adkgoBuilder holds parsing state while walking the AST.
 type adkgoBuilder struct {
-	fset     *token.FileSet
-	file     *ast.File
-	nodes    map[string]*domain.Node
-	edges    []domain.Edge
-	counter  int
-	varDecls map[string]*ast.CompositeLit // package-level var name -> composite literal
+	fset        *token.FileSet
+	file        *ast.File
+	nodes       map[string]*domain.Node
+	edges       []domain.Edge
+	counter     int
+	varDecls    map[string]*ast.CompositeLit // package-level var name -> composite literal (bare struct)
+	varCallArgs map[string]*ast.CompositeLit // var name -> Config literal passed to pkgname.New(cfg)
+	varAgentIDs map[string]string            // var name -> already-assigned nodeID (real-API style)
 }
 
 // collectVarDecls pre-scans the file for package-level var declarations of agent composite literals.
+// It handles both bare struct literals (`var x = &SequentialAgent{...}`) and
+// real ADK-Go SDK constructor calls (`var x, _ = loopagent.New(loopagent.Config{...})`).
 func (b *adkgoBuilder) collectVarDecls() {
 	for _, decl := range b.file.Decls {
 		gd, ok := decl.(*ast.GenDecl)
@@ -92,19 +98,84 @@ func (b *adkgoBuilder) collectVarDecls() {
 				continue
 			}
 			for i, name := range vs.Names {
-				if i < len(vs.Values) {
-					if cl := extractCompositeLit(vs.Values[i]); cl != nil {
-						b.varDecls[name.Name] = cl
-					}
+				if i >= len(vs.Values) {
+					continue
+				}
+				val := vs.Values[i]
+				if cl := extractCompositeLit(val); cl != nil {
+					b.varDecls[name.Name] = cl
+					continue
+				}
+				// Also handle pkgname.New(Config{...}) at package level.
+				if cfg := extractNewCallConfig(val); cfg != nil {
+					b.varCallArgs[name.Name] = cfg
 				}
 			}
 		}
 	}
 }
 
+// collectFuncVarDecls scans a function body for short variable declarations of
+// agent constructor calls: `x, _ := loopagent.New(loopagent.Config{...})`.
+// Must be called before processAgentLit so that sub-agent ident references can
+// be resolved.
+func (b *adkgoBuilder) collectFuncVarDecls(body *ast.BlockStmt) {
+	ast.Inspect(body, func(n ast.Node) bool {
+		stmt, ok := n.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		// Only short-variable declarations (:=).
+		if stmt.Tok != token.DEFINE {
+			return true
+		}
+		for i, lhs := range stmt.Lhs {
+			ident, ok := lhs.(*ast.Ident)
+			if !ok || ident.Name == "_" {
+				continue
+			}
+			if i >= len(stmt.Rhs) {
+				continue
+			}
+			if cfg := extractNewCallConfig(stmt.Rhs[i]); cfg != nil {
+				b.varCallArgs[ident.Name] = cfg
+			}
+		}
+		return true
+	})
+}
+
+// extractNewCallConfig extracts the first CompositeLit argument from a
+// pkgname.New(Config{...}) call expression, which is the pattern used by
+// google.golang.org/adk workflow and LLM agent constructors.
+func extractNewCallConfig(expr ast.Expr) *ast.CompositeLit {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return nil
+	}
+	// Function must be a SelectorExpr (pkgname.New or pkgname.New[...]).
+	fun := call.Fun
+	// Handle generic instantiation: pkgname.New[T, R](...)
+	if idx, ok2 := fun.(*ast.IndexListExpr); ok2 {
+		fun = idx.X
+	} else if idx, ok2 := fun.(*ast.IndexExpr); ok2 {
+		fun = idx.X
+	}
+	sel, ok := fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "New" {
+		return nil
+	}
+	// Ensure we have at least one argument that is a CompositeLit (or &CompositeLit).
+	if len(call.Args) == 0 {
+		return nil
+	}
+	return extractCompositeLit(call.Args[0])
+}
+
 // findEntryCandidates walks the AST to find all top-level orchestrator agents
 // (SequentialAgent, LoopAgent, ParallelAgent) and processes them into the graph.
 // Returns a list of node IDs in order of discovery.
+// Handles both bare struct literals and the real ADK-Go SDK constructor pattern.
 func (b *adkgoBuilder) findEntryCandidates() []string {
 	var candidates []string
 
@@ -121,44 +192,83 @@ func (b *adkgoBuilder) findEntryCandidates() []string {
 				if !ok {
 					continue
 				}
-				for idx := range vs.Names {
+				for idx, nameIdent := range vs.Names {
 					if idx >= len(vs.Values) {
 						continue
 					}
-					cl := extractCompositeLit(vs.Values[idx])
-					if cl == nil {
+					val := vs.Values[idx]
+
+					// Bare struct literal: var x = &SequentialAgent{...}
+					if cl := extractCompositeLit(val); cl != nil {
+						typeName := compositeLitTypeName(cl)
+						if isOrchestratorType(typeName) {
+							nodeID := b.processAgentLit(cl, nil)
+							if nodeID != "" {
+								candidates = append(candidates, nodeID)
+							}
+						}
 						continue
 					}
-					typeName := compositeLitTypeName(cl)
-					if isOrchestratorType(typeName) {
-						nodeID := b.processAgentLit(cl, nil)
-						if nodeID != "" {
-							candidates = append(candidates, nodeID)
+
+					// Real ADK-Go SDK call: var x, _ = loopagent.New(loopagent.Config{...})
+					if cfg, ok2 := b.varCallArgs[nameIdent.Name]; ok2 {
+						agentType := resolveConfigAgentType(val)
+						if isOrchestratorType(agentType) {
+							nodeID := b.processRealAPIConfig(cfg, agentType, val)
+							if nodeID != "" {
+								b.varAgentIDs[nameIdent.Name] = nodeID
+								candidates = append(candidates, nodeID)
+							}
 						}
 					}
 				}
 			}
 
 		case *ast.FuncDecl:
-			// Functions: look for local assignments like `myAgent := &SequentialAgent{...}`.
+			// Functions: look for local assignments.
 			if d.Body == nil {
 				continue
 			}
+			// First pass: collect all variable declarations in this function body
+			// so that sub-agent ident references resolve correctly.
+			b.collectFuncVarDecls(d.Body)
+
+			// Second pass: process LlmAgent vars so they're in varAgentIDs when
+			// orchestrators reference them as sub-agents.
+			b.processFuncLlmAgents(d.Body)
+
+			// Third pass: find orchestrators.
 			ast.Inspect(d.Body, func(n ast.Node) bool {
-				switch stmt := n.(type) {
-				case *ast.AssignStmt:
-					for _, rhs := range stmt.Rhs {
-						cl := extractCompositeLit(rhs)
-						if cl == nil {
-							continue
-						}
+				stmt, ok := n.(*ast.AssignStmt)
+				if !ok {
+					return true
+				}
+				for i, rhs := range stmt.Rhs {
+					// Bare struct literal path.
+					if cl := extractCompositeLit(rhs); cl != nil {
 						typeName := compositeLitTypeName(cl)
-						if !isOrchestratorType(typeName) {
-							continue
+						if isOrchestratorType(typeName) {
+							nodeID := b.processAgentLit(cl, nil)
+							if nodeID != "" {
+								candidates = append(candidates, nodeID)
+							}
 						}
-						nodeID := b.processAgentLit(cl, nil)
-						if nodeID != "" {
-							candidates = append(candidates, nodeID)
+						continue
+					}
+					// Real ADK-Go SDK call path.
+					if cfg := extractNewCallConfig(rhs); cfg != nil {
+						agentType := resolveConfigAgentType(rhs)
+						if isOrchestratorType(agentType) {
+							nodeID := b.processRealAPIConfig(cfg, agentType, rhs)
+							if nodeID != "" {
+								// Record variable name if lhs is a single ident.
+								if i < len(stmt.Lhs) {
+									if lhsIdent, ok2 := stmt.Lhs[i].(*ast.Ident); ok2 && lhsIdent.Name != "_" {
+										b.varAgentIDs[lhsIdent.Name] = nodeID
+									}
+								}
+								candidates = append(candidates, nodeID)
+							}
 						}
 					}
 				}
@@ -168,6 +278,274 @@ func (b *adkgoBuilder) findEntryCandidates() []string {
 	}
 
 	return candidates
+}
+
+// processFuncLlmAgents walks a function body and processes LlmAgent constructor
+// calls so their nodeIDs are recorded in varAgentIDs before orchestrators try
+// to resolve sub-agent references.
+func (b *adkgoBuilder) processFuncLlmAgents(body *ast.BlockStmt) {
+	ast.Inspect(body, func(n ast.Node) bool {
+		stmt, ok := n.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		for i, rhs := range stmt.Rhs {
+			cfg := extractNewCallConfig(rhs)
+			if cfg == nil {
+				continue
+			}
+			agentType := resolveConfigAgentType(rhs)
+			if agentType != "LlmAgent" {
+				continue
+			}
+			nodeID := b.processRealAPIConfig(cfg, agentType, rhs)
+			if nodeID != "" && i < len(stmt.Lhs) {
+				if lhsIdent, ok2 := stmt.Lhs[i].(*ast.Ident); ok2 && lhsIdent.Name != "_" {
+					b.varAgentIDs[lhsIdent.Name] = nodeID
+				}
+			}
+		}
+		return true
+	})
+}
+
+// resolveConfigAgentType determines the semantic agent type from a
+// pkgname.New(pkgname.Config{...}) call expression by inspecting the package
+// qualifier of the function being called.
+// Returns "SequentialAgent", "LoopAgent", "ParallelAgent", "LlmAgent", or "".
+func resolveConfigAgentType(expr ast.Expr) string {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return ""
+	}
+	fun := call.Fun
+	// Strip generic index expressions.
+	if idx, ok2 := fun.(*ast.IndexListExpr); ok2 {
+		fun = idx.X
+	} else if idx, ok2 := fun.(*ast.IndexExpr); ok2 {
+		fun = idx.X
+	}
+	sel, ok := fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "New" {
+		return ""
+	}
+	// X is the package identifier (e.g. "loopagent", "sequentialagent", "llmagent").
+	pkgIdent, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return ""
+	}
+	return agentTypeFromPackage(pkgIdent.Name)
+}
+
+// agentTypeFromPackage maps ADK-Go package names to Shingan agent type names.
+func agentTypeFromPackage(pkg string) string {
+	switch strings.ToLower(pkg) {
+	case "loopagent":
+		return "LoopAgent"
+	case "sequentialagent":
+		return "SequentialAgent"
+	case "parallelagent":
+		return "ParallelAgent"
+	case "llmagent":
+		return "LlmAgent"
+	}
+	return ""
+}
+
+// processRealAPIConfig processes the Config composite literal of an ADK-Go SDK
+// New() call and builds graph nodes accordingly.
+// For workflow agents, Name/SubAgents live in AgentConfig.
+// MaxIterations lives directly in loopagent.Config.
+func (b *adkgoBuilder) processRealAPIConfig(cfg *ast.CompositeLit, agentType string, callExpr ast.Expr) string {
+	topFields := extractKeyedFields(cfg)
+
+	// Resolve Name and SubAgents: for workflow agents they are inside AgentConfig.
+	var name string
+	var subAgentFields map[string]ast.Expr
+	if agentConfigExpr, ok := topFields["AgentConfig"]; ok {
+		// Workflow agent style: sequentialagent.Config{AgentConfig: agent.Config{...}}
+		if acCL := extractCompositeLit(agentConfigExpr); acCL != nil {
+			acFields := extractKeyedFields(acCL)
+			name = stringFieldValue(acFields, "Name")
+			subAgentFields = acFields
+		}
+	} else {
+		// LlmAgent style: all fields at top level.
+		name = stringFieldValue(topFields, "Name")
+		subAgentFields = topFields
+	}
+
+	nodeID := b.resolveNodeID(name)
+
+	switch agentType {
+	case "LlmAgent":
+		node := &domain.Node{
+			ID:     nodeID,
+			Name:   name,
+			Type:   domain.NodeTypeLLM,
+			Config: make(map[string]any),
+		}
+		if instr := stringFieldValue(topFields, "Instruction"); instr != "" {
+			node.Config["instruction"] = instr
+		}
+		b.nodes[nodeID] = node
+		b.processToolsRealAPI(topFields, nodeID)
+
+	case "SequentialAgent":
+		node := &domain.Node{
+			ID:     nodeID,
+			Name:   name,
+			Type:   domain.NodeTypeControl,
+			Config: make(map[string]any),
+		}
+		b.nodes[nodeID] = node
+		if subAgentFields != nil {
+			b.processSubAgentsSequentialReal(subAgentFields, nodeID)
+		}
+
+	case "LoopAgent":
+		node := &domain.Node{
+			ID:     nodeID,
+			Name:   name,
+			Type:   domain.NodeTypeControl,
+			Config: make(map[string]any),
+		}
+		// MaxIterations is in loopagent.Config directly (not inside AgentConfig).
+		if maxIter := intFieldValue(topFields, "MaxIterations"); maxIter != nil {
+			node.Config["max_iterations"] = *maxIter
+		}
+		b.nodes[nodeID] = node
+		if subAgentFields != nil {
+			b.processSubAgentsLoopReal(subAgentFields, nodeID)
+		}
+
+	case "ParallelAgent":
+		node := &domain.Node{
+			ID:     nodeID,
+			Name:   name,
+			Type:   domain.NodeTypeControl,
+			Config: make(map[string]any),
+		}
+		b.nodes[nodeID] = node
+		if subAgentFields != nil {
+			b.processSubAgentsParallelReal(subAgentFields, nodeID)
+		}
+
+	default:
+		node := &domain.Node{
+			ID:     nodeID,
+			Name:   name,
+			Type:   domain.NodeTypeLLM,
+			Config: make(map[string]any),
+		}
+		b.nodes[nodeID] = node
+	}
+
+	return nodeID
+}
+
+// processSubAgentsSequentialReal processes SubAgents for a SequentialAgent built with the real ADK API.
+func (b *adkgoBuilder) processSubAgentsSequentialReal(fields map[string]ast.Expr, parentID string) {
+	subAgents := b.extractRealSubAgents(fields)
+	var prevID string
+	for _, subID := range subAgents {
+		if subID == "" {
+			continue
+		}
+		if prevID == "" {
+			b.edges = append(b.edges, domain.Edge{From: parentID, To: subID})
+		} else {
+			b.edges = append(b.edges, domain.Edge{From: prevID, To: subID})
+		}
+		prevID = subID
+	}
+}
+
+// processSubAgentsLoopReal processes SubAgents for a LoopAgent built with the real ADK API.
+func (b *adkgoBuilder) processSubAgentsLoopReal(fields map[string]ast.Expr, parentID string) {
+	subAgents := b.extractRealSubAgents(fields)
+	var firstID, prevID string
+	for _, subID := range subAgents {
+		if subID == "" {
+			continue
+		}
+		if prevID == "" {
+			firstID = subID
+			b.edges = append(b.edges, domain.Edge{From: parentID, To: subID})
+		} else {
+			b.edges = append(b.edges, domain.Edge{From: prevID, To: subID})
+		}
+		prevID = subID
+	}
+	if prevID != "" && firstID != "" && prevID != firstID {
+		b.edges = append(b.edges, domain.Edge{From: prevID, To: firstID, Condition: "loop_back"})
+	} else if prevID != "" && prevID == firstID {
+		b.edges = append(b.edges, domain.Edge{From: prevID, To: firstID, Condition: "loop_back"})
+	}
+}
+
+// processSubAgentsParallelReal processes SubAgents for a ParallelAgent built with the real ADK API.
+func (b *adkgoBuilder) processSubAgentsParallelReal(fields map[string]ast.Expr, parentID string) {
+	subAgents := b.extractRealSubAgents(fields)
+	for _, subID := range subAgents {
+		if subID == "" {
+			continue
+		}
+		b.edges = append(b.edges, domain.Edge{From: parentID, To: subID, Condition: "parallel_branch"})
+	}
+}
+
+// extractRealSubAgents resolves the SubAgents slice in an agent.Config field.
+// Each element is an identifier referring to a variable whose nodeID is in varAgentIDs.
+func (b *adkgoBuilder) extractRealSubAgents(fields map[string]ast.Expr) []string {
+	expr, ok := fields["SubAgents"]
+	if !ok {
+		return nil
+	}
+	cl, ok := expr.(*ast.CompositeLit)
+	if !ok {
+		return nil
+	}
+	var result []string
+	for _, elt := range cl.Elts {
+		if ident, ok2 := elt.(*ast.Ident); ok2 {
+			if nodeID, found := b.varAgentIDs[ident.Name]; found {
+				result = append(result, nodeID)
+			} else {
+				// Unknown identifier — create a placeholder.
+				nodeID := toSnakeCase(ident.Name)
+				if _, exists := b.nodes[nodeID]; !exists {
+					b.nodes[nodeID] = &domain.Node{
+						ID:     nodeID,
+						Name:   ident.Name,
+						Type:   domain.NodeTypeLLM,
+						Config: make(map[string]any),
+					}
+				}
+				result = append(result, nodeID)
+			}
+		}
+	}
+	return result
+}
+
+// processToolsRealAPI handles the Tools field in llmagent.Config (real SDK style).
+func (b *adkgoBuilder) processToolsRealAPI(fields map[string]ast.Expr, ownerID string) {
+	toolsExpr, ok := fields["Tools"]
+	if !ok {
+		return
+	}
+	cl, ok := toolsExpr.(*ast.CompositeLit)
+	if !ok {
+		return
+	}
+	for _, elt := range cl.Elts {
+		toolID := b.processToolElement(elt)
+		if toolID == "" {
+			continue
+		}
+		b.edges = append(b.edges, domain.Edge{From: ownerID, To: toolID})
+	}
 }
 
 // findShingaEntryAnnotation looks for a //shingan:entry comment and returns the
@@ -326,6 +704,11 @@ func (b *adkgoBuilder) processSubAgent(expr ast.Expr) string {
 	}
 	// Identifier reference to a package-level var.
 	if ident, ok := expr.(*ast.Ident); ok {
+		// Check real-API varAgentIDs first (already-processed nodes).
+		if nodeID, found := b.varAgentIDs[ident.Name]; found {
+			return nodeID
+		}
+		// Check bare struct literal varDecls.
 		if cl, found := b.varDecls[ident.Name]; found {
 			return b.processAgentLit(cl, nil)
 		}

@@ -107,6 +107,38 @@ CI統合例（GitHub Actions）:
 - **v0.3**: SamuraiAIアダプター、PIIリークルール
 - **v1.0**: LangGraph/Dify対応、マルチフレームワーク安定版
 
+## 本物のADK-Goサンプルでのデモ
+
+`examples/real/` に配置した `google.golang.org/adk v1.1.0` SDK準拠のサンプル3種に対してShinganが検出するFinding:
+
+| Sample | Rule | Severity | 結果 |
+|---|---|---|---|
+| examples/real/infinite_loop.go | cycle_detection | Critical | loopagent.New + MaxIterations未設定で無限ループを検出 |
+| examples/real/unreachable.go | unreachable_node | Warning | orphan_analyzerが orchestratorのSubAgentsに未接続で到達不能を検出 |
+| examples/real/missing_handler.go | error_handler_checker | Warning | ※下記注記参照 |
+
+実行:
+
+```bash
+shingan analyze --format adk-go --input examples/real/infinite_loop.go --output markdown
+# exit code 2 (Critical)
+
+shingan analyze --format adk-go --input examples/real/unreachable.go --output markdown
+# exit code 1 (Warning)
+```
+
+**公式ADK-Go SDKとの差分・注記:**
+
+- `loopagent.New(loopagent.Config{AgentConfig: agent.Config{SubAgents: ...}})` パターンに対応済み（v1.1.0）
+- LlmAgent / SequentialAgent / LoopAgent の `New()` コンストラクタパターンを AST で検出
+- `functiontool.New(Config, handler)` で登録したツールのノード検出は未対応（ツールが `tool.Tool` interface 変数として渡される場合、call-site AST解析が必要）→ `missing_handler.go` の error_handler_checker は今後対応予定
+- ADK-Go SDK は v1.1.0 で `go 1.25.0` 以上が必要（go.mod のminimum versionに反映済み）
+
+```bash
+# demo タグでE2E自動検証
+go test -tags=demo -v -run TestDemo_ .
+```
+
 ## アーキテクチャ詳細
 
 - ADR全体 → [shingan-adr.md](./shingan-adr.md)
