@@ -1,0 +1,77 @@
+{
+  "nodes": [
+    {
+      "id": "cycle_llm_00",
+      "name": "cycle_llm_00",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini"
+      }
+    },
+    {
+      "id": "cycle_llm_01",
+      "name": "cycle_llm_01",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini"
+      }
+    },
+    {
+      "id": "cycle_llm_02",
+      "name": "cycle_llm_02",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini"
+      }
+    },
+    {
+      "id": "cycle_llm_03",
+      "name": "cycle_llm_03",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini"
+      }
+    },
+    {
+      "id": "cycle_llm_04",
+      "name": "cycle_llm_04",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini"
+      }
+    },
+    {
+      "id": "cycle_output",
+      "name": "output",
+      "type": "output"
+    }
+  ],
+  "edges": [
+    {
+      "from": "cycle_llm_00",
+      "to": "cycle_llm_01"
+    },
+    {
+      "from": "cycle_llm_01",
+      "to": "cycle_llm_02"
+    },
+    {
+      "from": "cycle_llm_02",
+      "to": "cycle_llm_03"
+    },
+    {
+      "from": "cycle_llm_03",
+      "to": "cycle_llm_04"
+    },
+    {
+      "from": "cycle_llm_04",
+      "to": "cycle_llm_00"
+    },
+    {
+      "from": "cycle_llm_04",
+      "to": "cycle_output",
+      "condition": "done"
+    }
+  ],
+  "entry_node_id": "cycle_llm_00"
+}

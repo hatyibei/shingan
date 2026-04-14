@@ -5,6 +5,20 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 ## [Unreleased]
 
 ### Added
+- `cmd/shingan-gen` CLI — 7パターンのワークフロー生成 (random, clean, buggy, infinite-loop, unreachable, pii-leak, cycle)
+  - `--pattern`, `--size`, `--seed`, `--output` フラグ対応
+  - `shingan analyze --format json` と完全互換のJSON出力（nodes配列形式）
+  - シード固定による再現性保証
+- `domain/testutil/generate.go` — 6つのパターン生成関数を追加
+  - `GenerateCleanGraph(n, seed)` — 全7ルールをパスする正常グラフ
+  - `GenerateInfiniteLoopGraph(seed)` — loop_guard + cycle_detection 発火
+  - `GenerateUnreachableGraph(n, seed)` — unreachable_node 発火
+  - `GeneratePIILeakGraph(seed)` — pii_leak_scanner 発火
+  - `GenerateCycleGraph(n, seed)` — cycle_detection (非Loopノード) 発火
+  - `GenerateBuggyGraph(seed)` — 全7ルール同時発火
+- `testdata/generated/` — 各パターンの生成済みサンプルJSON (7ファイル、合計約64KB)
+- `docs/sample-generator.md` — shingan-gen 使い方ガイド、パターン解説、教育目的活用法
+- `Makefile`: `gen-cli`、`sample-%` ターゲット追加
 - `infrastructure/parser/adkgo.go` に `go/types` ベースのセカンドパス追加。`functiontool.New[TArgs, TResults]` のジェネリクス型引数を `types.Info.Instances` で取得し、TArgs の struct 名・フィールド名から Tool カテゴリを推定。`ParseFile(path string)` API 経由で利用可能。ロード失敗時は自動で AST-only にフォールバック
 - `ADKGoParser` に `WithoutTypes()` オプション追加。型情報パスを無効化してAST-onlyパスを強制（テスト高速化、ネットワーク非接続環境向け）
 - `NodeTypeLoop` (iota=5) — LoopAgent相当。`max_iterations` 必須。ADK-Go の `LoopAgent` はこの型に解析される。

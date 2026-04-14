@@ -1,0 +1,142 @@
+{
+  "nodes": [
+    {
+      "id": "clean_entry",
+      "name": "entry_llm",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "prompt_template": "analyze_request"
+      }
+    },
+    {
+      "id": "clean_output",
+      "name": "final_output",
+      "type": "output"
+    },
+    {
+      "id": "clean_step_00",
+      "name": "step_00",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "prompt_template": "step_template_00"
+      }
+    },
+    {
+      "id": "clean_step_01",
+      "name": "step_01",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "step_template_01"
+      }
+    },
+    {
+      "id": "clean_step_02",
+      "name": "step_02",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "step_template_02"
+      }
+    },
+    {
+      "id": "clean_step_03",
+      "name": "step_03",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "prompt_template": "step_template_03"
+      }
+    },
+    {
+      "id": "clean_step_04",
+      "name": "step_04",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "step_template_04"
+      }
+    },
+    {
+      "id": "clean_step_05",
+      "name": "step_05",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "step_template_05"
+      }
+    },
+    {
+      "id": "clean_step_06",
+      "name": "step_06",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "prompt_template": "step_template_06"
+      }
+    },
+    {
+      "id": "clean_step_07",
+      "name": "step_07",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "step_template_07"
+      }
+    },
+    {
+      "id": "clean_step_08",
+      "name": "step_08",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "step_template_08"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "clean_entry",
+      "to": "clean_step_00"
+    },
+    {
+      "from": "clean_step_00",
+      "to": "clean_step_01"
+    },
+    {
+      "from": "clean_step_01",
+      "to": "clean_step_02"
+    },
+    {
+      "from": "clean_step_02",
+      "to": "clean_step_03"
+    },
+    {
+      "from": "clean_step_03",
+      "to": "clean_step_04"
+    },
+    {
+      "from": "clean_step_04",
+      "to": "clean_step_05"
+    },
+    {
+      "from": "clean_step_05",
+      "to": "clean_step_06"
+    },
+    {
+      "from": "clean_step_06",
+      "to": "clean_step_07"
+    },
+    {
+      "from": "clean_step_07",
+      "to": "clean_step_08"
+    },
+    {
+      "from": "clean_step_08",
+      "to": "clean_output"
+    }
+  ],
+  "entry_node_id": "clean_entry"
+}

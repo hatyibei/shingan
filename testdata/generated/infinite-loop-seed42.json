@@ -1,0 +1,40 @@
+{
+  "nodes": [
+    {
+      "id": "loop_node",
+      "name": "unbounded_loop",
+      "type": "loop"
+    },
+    {
+      "id": "worker_a",
+      "name": "worker_a",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini"
+      }
+    },
+    {
+      "id": "worker_b",
+      "name": "worker_b",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "loop_node",
+      "to": "worker_a"
+    },
+    {
+      "from": "worker_a",
+      "to": "worker_b"
+    },
+    {
+      "from": "worker_b",
+      "to": "loop_node"
+    }
+  ],
+  "entry_node_id": "loop_node"
+}

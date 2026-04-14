@@ -1,0 +1,262 @@
+{
+  "nodes": [
+    {
+      "id": "dangling_llm",
+      "name": "dangling_llm",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini"
+      }
+    },
+    {
+      "id": "dangling_tool",
+      "name": "dangling_tool",
+      "type": "tool",
+      "config": {
+        "category": "api"
+      }
+    },
+    {
+      "id": "entry_node",
+      "name": "entry",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "prompt_template": "entry_template"
+      }
+    },
+    {
+      "id": "reachable_00",
+      "name": "step_00",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "template_00"
+      }
+    },
+    {
+      "id": "reachable_01",
+      "name": "step_01",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "template_01"
+      }
+    },
+    {
+      "id": "reachable_02",
+      "name": "step_02",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "template_02"
+      }
+    },
+    {
+      "id": "reachable_03",
+      "name": "step_03",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "template_03"
+      }
+    },
+    {
+      "id": "reachable_04",
+      "name": "step_04",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "template_04"
+      }
+    },
+    {
+      "id": "reachable_05",
+      "name": "step_05",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "template_05"
+      }
+    },
+    {
+      "id": "reachable_06",
+      "name": "step_06",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "template_06"
+      }
+    },
+    {
+      "id": "reachable_07",
+      "name": "step_07",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "template_07"
+      }
+    },
+    {
+      "id": "reachable_08",
+      "name": "step_08",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "template_08"
+      }
+    },
+    {
+      "id": "reachable_09",
+      "name": "step_09",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "template_09"
+      }
+    },
+    {
+      "id": "reachable_10",
+      "name": "step_10",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "template_10"
+      }
+    },
+    {
+      "id": "reachable_11",
+      "name": "step_11",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "template_11"
+      }
+    },
+    {
+      "id": "reachable_12",
+      "name": "step_12",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "template_12"
+      }
+    },
+    {
+      "id": "reachable_13",
+      "name": "step_13",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "template_13"
+      }
+    },
+    {
+      "id": "reachable_14",
+      "name": "step_14",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "template_14"
+      }
+    },
+    {
+      "id": "reachable_15",
+      "name": "step_15",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "template_15"
+      }
+    },
+    {
+      "id": "reachable_16",
+      "name": "step_16",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku",
+        "prompt_template": "template_16"
+      }
+    },
+    {
+      "id": "reachable_output",
+      "name": "output",
+      "type": "output"
+    }
+  ],
+  "edges": [
+    {
+      "from": "entry_node",
+      "to": "reachable_00"
+    },
+    {
+      "from": "reachable_00",
+      "to": "reachable_01"
+    },
+    {
+      "from": "reachable_01",
+      "to": "reachable_02"
+    },
+    {
+      "from": "reachable_02",
+      "to": "reachable_03"
+    },
+    {
+      "from": "reachable_03",
+      "to": "reachable_04"
+    },
+    {
+      "from": "reachable_04",
+      "to": "reachable_05"
+    },
+    {
+      "from": "reachable_05",
+      "to": "reachable_06"
+    },
+    {
+      "from": "reachable_06",
+      "to": "reachable_07"
+    },
+    {
+      "from": "reachable_07",
+      "to": "reachable_08"
+    },
+    {
+      "from": "reachable_08",
+      "to": "reachable_09"
+    },
+    {
+      "from": "reachable_09",
+      "to": "reachable_10"
+    },
+    {
+      "from": "reachable_10",
+      "to": "reachable_11"
+    },
+    {
+      "from": "reachable_11",
+      "to": "reachable_12"
+    },
+    {
+      "from": "reachable_12",
+      "to": "reachable_13"
+    },
+    {
+      "from": "reachable_13",
+      "to": "reachable_14"
+    },
+    {
+      "from": "reachable_14",
+      "to": "reachable_15"
+    },
+    {
+      "from": "reachable_15",
+      "to": "reachable_16"
+    },
+    {
+      "from": "reachable_16",
+      "to": "reachable_output"
+    }
+  ],
+  "entry_node_id": "entry_node"
+}

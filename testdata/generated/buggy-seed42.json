@@ -1,0 +1,95 @@
+{
+  "nodes": [
+    {
+      "id": "api_tool",
+      "name": "api_tool",
+      "type": "tool",
+      "config": {
+        "category": "api"
+      }
+    },
+    {
+      "id": "buggy_api_sink",
+      "name": "external_api_sink",
+      "type": "tool",
+      "config": {
+        "category": "api"
+      }
+    },
+    {
+      "id": "buggy_loop",
+      "name": "buggy_loop",
+      "type": "loop"
+    },
+    {
+      "id": "buggy_output",
+      "name": "output",
+      "type": "output"
+    },
+    {
+      "id": "buggy_rag",
+      "name": "user_data_rag",
+      "type": "tool",
+      "config": {
+        "category": "rag"
+      }
+    },
+    {
+      "id": "dangling_node",
+      "name": "dangling_node",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-haiku"
+      }
+    },
+    {
+      "id": "duplicate_llm",
+      "name": "duplicate_llm",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o",
+        "prompt_template": "shared_template"
+      }
+    },
+    {
+      "id": "expensive_llm",
+      "name": "expensive_llm",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o",
+        "prompt_template": "shared_template"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "buggy_loop",
+      "to": "expensive_llm"
+    },
+    {
+      "from": "expensive_llm",
+      "to": "api_tool"
+    },
+    {
+      "from": "api_tool",
+      "to": "duplicate_llm"
+    },
+    {
+      "from": "duplicate_llm",
+      "to": "buggy_loop"
+    },
+    {
+      "from": "buggy_rag",
+      "to": "buggy_api_sink"
+    },
+    {
+      "from": "buggy_loop",
+      "to": "buggy_rag"
+    },
+    {
+      "from": "buggy_api_sink",
+      "to": "buggy_output"
+    }
+  ],
+  "entry_node_id": "buggy_loop"
+}

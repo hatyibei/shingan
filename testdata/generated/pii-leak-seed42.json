@@ -1,0 +1,48 @@
+{
+  "nodes": [
+    {
+      "id": "api_sink",
+      "name": "external_api",
+      "type": "tool",
+      "config": {
+        "category": "api"
+      }
+    },
+    {
+      "id": "llm_processor",
+      "name": "llm_processor",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini"
+      }
+    },
+    {
+      "id": "output",
+      "name": "output",
+      "type": "output"
+    },
+    {
+      "id": "rag_tool",
+      "name": "user_data_rag",
+      "type": "tool",
+      "config": {
+        "category": "rag"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "rag_tool",
+      "to": "llm_processor"
+    },
+    {
+      "from": "llm_processor",
+      "to": "api_sink"
+    },
+    {
+      "from": "api_sink",
+      "to": "output"
+    }
+  ],
+  "entry_node_id": "rag_tool"
+}

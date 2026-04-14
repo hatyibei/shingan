@@ -2,7 +2,7 @@ GOA     ?= $(HOME)/go/bin/goa
 DESIGN  := github.com/hatyibei/shingan/design
 BIN_DIR := /tmp
 
-.PHONY: gen test build-all bench bench-rules
+.PHONY: gen test build-all bench bench-rules gen-cli sample-%
 
 ## gen: regenerate goa HTTP handlers and OpenAPI spec from design/design.go
 gen:
@@ -16,6 +16,14 @@ test:
 build-all:
 	go build -o $(BIN_DIR)/shingan       ./cmd/shingan
 	go build -o $(BIN_DIR)/shingan-api   ./cmd/api
+
+## gen-cli: build shingan-gen sample generator CLI
+gen-cli:
+	go build -o $(BIN_DIR)/shingan-gen ./cmd/shingan-gen
+
+## sample-%: generate a sample workflow (e.g. make sample-buggy, make sample-clean)
+sample-%: gen-cli
+	@$(BIN_DIR)/shingan-gen --pattern $* --seed 42
 
 ## bench: run all benchmarks (excludes normal tests)
 bench:
