@@ -97,7 +97,8 @@ func run(ctx context.Context) error {
 		MemoryService:   config.MemoryService,
 		AgentLoader:     config.AgentLoader,
 		ArtifactService: config.ArtifactService,
-		DebugConfig:     &adkrest.DebugTelemetryConfig{}, // avoid nil pointer in v1.1.0
+		SSEWriteTimeout: 120 * time.Second, // match api.NewLauncher default; zero causes instant SSE timeout
+		DebugConfig:     &adkrest.DebugTelemetryConfig{}, // avoid nil pointer in ADK v1.1.0
 	})
 	if err != nil {
 		return fmt.Errorf("create ADK REST server: %w", err)
