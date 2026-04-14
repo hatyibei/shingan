@@ -117,6 +117,21 @@ bash scripts/demo.sh
 
 詳細は [docs/runtime-demo.md](./docs/runtime-demo.md) 参照。
 
+## ADK Web UI統合デモ (面接向け)
+
+SamuraiAI のような GUI ワークフローエディタに Shingan を統合した動作を見せるデモ。
+Google 公式の ADK Web UI を Shingan から起動し、Run API に **実行前静的解析ガード** を middleware 注入する。
+
+```bash
+bash scripts/web-demo.sh
+# ブラウザで http://localhost:8080 を開く
+```
+
+- Critical な問題を持つ Agent (`infinite_loop_unbounded`) → 実行ブロック、Web UI にエラー表示
+- クリーンな Agent (`infinite_loop_bounded`, `simple_hello`) → ADK Web UI から通常通り Vertex AI Gemini 実行
+
+詳細: [docs/adk-webui-integration.md](./docs/adk-webui-integration.md)
+
 ## 本物のADK-Goサンプルでのデモ
 
 `examples/real/` に配置した `google.golang.org/adk v1.1.0` SDK準拠のサンプル3種に対してShinganが検出するFinding:
