@@ -4,6 +4,8 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-15
+
 ### Added
 - `cmd/shingan-gen` CLI — 7パターンのワークフロー生成 (random, clean, buggy, infinite-loop, unreachable, pii-leak, cycle)
   - `--pattern`, `--size`, `--seed`, `--output` フラグ対応
