@@ -4,6 +4,20 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Added
+- `secret_exposure_scanner` rule — 8つのシークレットパターンを検出 (AWS/OpenAI/Anthropic/GitHub/Slack/JWT/Generic)
+  - Critical: AWS Access Key (`AKIA...`), PEM秘密鍵, OpenAI/Anthropic APIキー
+  - Warning: GitHub Token (`gh[pousr]_...`), Slack Bot Token (`xox[bpars]-...`)
+  - Info: JWT (`eyJ...`), Generic パターン (password=XXX, token=XXX)
+  - 除外ロジック: `${VAR}`, `{{placeholder}}`, `process.env.X`, `os.Getenv()` は誤検知なし
+  - 対象: `Node.Config` の string / map / slice 値を再帰的にスキャン
+- `testdata/secrets/exposed.json` — AWS/OpenAI/Anthropic キーをハードコードしたサンプル (Critical×3)
+- `testdata/secrets/safe.json` — 環境変数参照のみのサンプル (0件)
+- `domain/testutil/generate.go`: `GenerateSecretExposureGraph(seed)` — Critical 発火パターン生成関数追加
+- `cmd/shingan-gen`: `--pattern secret-exposure` オプション追加
+- `testdata/generated/secret-exposure-seed42.json` — シード42の生成済みサンプル
+- `docs/secret-detection.md` — 検出パターン一覧、Severity判定、除外ロジック解説、v0.4 entropy scanner 予定
+
 ## [0.2.0] - 2026-04-15
 
 ### Added

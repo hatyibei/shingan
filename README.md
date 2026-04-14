@@ -179,6 +179,8 @@ go test -tags=demo -v -run TestDemo_ .
 | error_handler_checker | 外部I/Oノード後のエラーハンドリング欠落 | Critical |
 | cost_estimation | ループ内の高額LLMモデル、単純タスクへの高額モデル適用 | Warning |
 | redundant_llm_call | 同一prompt_template×modelの重複呼出 | Warning |
+| pii_leak_scanner | RAG/PII源ノードから外部シンクへのHuman gate なしパス | Warning |
+| secret_exposure_scanner | Node.Config にハードコードされた APIキー・シークレット | Critical |
 
 ## サポートフォーマット
 

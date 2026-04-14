@@ -96,11 +96,11 @@ func TestCreate_RedundantLLMCall(t *testing.T) {
 	}
 }
 
-func TestCreateAll_ReturnsSevenRules(t *testing.T) {
+func TestCreateAll_ReturnsEightRules(t *testing.T) {
 	f := factory.NewAnalyzerFactory()
 	all := f.CreateAll()
-	if len(all) != 7 {
-		t.Fatalf("expected 7 rules, got %d", len(all))
+	if len(all) != 8 {
+		t.Fatalf("expected 8 rules, got %d", len(all))
 	}
 }
 
@@ -109,13 +109,14 @@ func TestCreateAll_ContainsExpectedNames(t *testing.T) {
 	all := f.CreateAll()
 
 	expected := map[string]bool{
-		"cycle_detection":       false,
-		"unreachable_node":      false,
-		"error_handler_checker": false,
-		"cost_estimation":       false,
-		"redundant_llm_call":    false,
-		"loop_guard":            false,
-		"pii_leak_scanner":      false,
+		"cycle_detection":         false,
+		"unreachable_node":        false,
+		"error_handler_checker":   false,
+		"cost_estimation":         false,
+		"redundant_llm_call":      false,
+		"loop_guard":              false,
+		"pii_leak_scanner":        false,
+		"secret_exposure_scanner": false,
 	}
 
 	for _, rule := range all {
@@ -156,6 +157,20 @@ func TestCreate_PIILeakScanner(t *testing.T) {
 		t.Errorf("expected *rules.PIILeakScanner, got %T", rule)
 	}
 	if rule.Name() != "pii_leak_scanner" {
+		t.Errorf("unexpected Name(): %s", rule.Name())
+	}
+}
+
+func TestCreate_SecretExposureScanner(t *testing.T) {
+	f := factory.NewAnalyzerFactory()
+	rule, err := f.Create("secret_exposure_scanner")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := rule.(*rules.SecretExposureScanner); !ok {
+		t.Errorf("expected *rules.SecretExposureScanner, got %T", rule)
+	}
+	if rule.Name() != "secret_exposure_scanner" {
 		t.Errorf("unexpected Name(): %s", rule.Name())
 	}
 }

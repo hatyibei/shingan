@@ -38,6 +38,7 @@ func allRules() []domain.AnalysisRule {
 		rules.NewCostAnalyzer(),
 		rules.NewRedundantLLMDetector(),
 		rules.NewPIILeakScanner(),
+		rules.NewSecretExposureScanner(),
 	}
 }
 
@@ -299,6 +300,50 @@ func TestGenerateBuggyGraph_AllSevenRulesFire(t *testing.T) {
 	for _, rule := range expectedRules {
 		if !firedRules[rule] {
 			t.Errorf("expected rule %q to fire, but got no findings for it", rule)
+		}
+	}
+}
+
+// ---- GenerateSecretExposureGraph ----
+
+func TestGenerateSecretExposureGraph_ReturnsValidGraph(t *testing.T) {
+	g := testutil.GenerateSecretExposureGraph(42)
+	if g == nil {
+		t.Fatal("expected non-nil graph")
+	}
+	if len(g.Nodes) == 0 {
+		t.Error("expected at least one node")
+	}
+	if g.EntryNodeID == "" {
+		t.Error("expected EntryNodeID to be set")
+	}
+	if _, ok := g.Nodes[g.EntryNodeID]; !ok {
+		t.Errorf("entry node %q not found in Nodes map", g.EntryNodeID)
+	}
+}
+
+func TestGenerateSecretExposureGraph_TriggersSecretExposureCritical(t *testing.T) {
+	g := testutil.GenerateSecretExposureGraph(42)
+	findings := rules.NewSecretExposureScanner().Analyze(g)
+	if !hasFinding(findings, "secret_exposure_scanner", domain.Critical) {
+		t.Errorf("expected secret_exposure_scanner Critical finding, got %d findings: %+v", len(findings), findings)
+	}
+}
+
+func TestGenerateSecretExposureGraph_OtherRulesClean(t *testing.T) {
+	g := testutil.GenerateSecretExposureGraph(42)
+	// All rules except secret_exposure_scanner should produce 0 findings
+	otherRules := []domain.AnalysisRule{
+		rules.NewCycleDetector(),
+		rules.NewLoopGuardChecker(),
+		rules.NewReachabilityChecker(),
+		rules.NewCostAnalyzer(),
+		rules.NewRedundantLLMDetector(),
+		rules.NewPIILeakScanner(),
+	}
+	for _, r := range otherRules {
+		if fs := r.Analyze(g); len(fs) != 0 {
+			t.Errorf("rule %q: expected 0 findings on secret-exposure graph, got %d: %+v", r.Name(), len(fs), fs)
 		}
 	}
 }

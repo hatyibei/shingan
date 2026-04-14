@@ -345,6 +345,52 @@ func GenerateCycleGraph(n int, seed int64) *domain.WorkflowGraph {
 	}
 }
 
+// GenerateSecretExposureGraph generates a WorkflowGraph that triggers the
+// secret_exposure_scanner rule with a Critical finding.
+//
+// Structure:
+//   - entry LlmAgent node whose Config["prompt"] contains a hardcoded OpenAI API key
+//
+// Expected findings:
+//   - secret_exposure_scanner: Critical (hardcoded sk- key in prompt field)
+func GenerateSecretExposureGraph(seed int64) *domain.WorkflowGraph {
+	_ = seed // deterministic pattern
+
+	nodes := make(map[string]*domain.Node)
+	var edges []domain.Edge
+
+	// LLM node with a hardcoded secret in its prompt field.
+	// The key "sk-abcdefghijklmnopqrstuvwxyz1234567890" matches the openai_api_key pattern
+	// (sk-[A-Za-z0-9]{20,}) and will produce a Critical finding.
+	nodes["secret_agent"] = &domain.Node{
+		ID:   "secret_agent",
+		Name: "secret_llm_agent",
+		Type: domain.NodeTypeLLM,
+		Config: map[string]any{
+			"model":  "gpt-4o-mini",
+			"prompt": "Use key sk-abcdefghijklmnopqrstuvwxyz1234567890 for auth",
+		},
+	}
+
+	// Output node
+	nodes["secret_output"] = &domain.Node{
+		ID:     "secret_output",
+		Name:   "output",
+		Type:   domain.NodeTypeOutput,
+		Config: map[string]any{},
+	}
+
+	edges = append(edges,
+		domain.Edge{From: "secret_agent", To: "secret_output"},
+	)
+
+	return &domain.WorkflowGraph{
+		Nodes:       nodes,
+		Edges:       edges,
+		EntryNodeID: "secret_agent",
+	}
+}
+
 // GenerateBuggyGraph generates a WorkflowGraph that fires all 7 analysis rules.
 //
 // Rules triggered:
