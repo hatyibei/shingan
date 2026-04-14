@@ -4,6 +4,8 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-15
+
 ### Added
 - `secret_exposure_scanner` rule — 8つのシークレットパターンを検出 (AWS/OpenAI/Anthropic/GitHub/Slack/JWT/Generic)
   - Critical: AWS Access Key (`AKIA...`), PEM秘密鍵, OpenAI/Anthropic APIキー
