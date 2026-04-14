@@ -20,7 +20,7 @@
     {
       "id": "loop_ctrl",
       "name": "Retry Loop",
-      "type": "control",
+      "type": "loop",
       "config": {}
     },
     {

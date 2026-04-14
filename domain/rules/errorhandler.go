@@ -26,10 +26,69 @@ func (e *ErrorHandlerChecker) Name() string {
 	return "error_handler_checker"
 }
 
+// hasConditionBranch returns true if the given node has at least one outgoing
+// conditional edge — meaning it has error-handling in place.
+func hasConditionBranch(graph *domain.WorkflowGraph, nodeID string) bool {
+	for _, e := range graph.OutgoingEdges(nodeID) {
+		if e.Condition != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// isConditionNode returns true for NodeTypeCondition and the deprecated NodeTypeControl
+// (which is treated as a loop but may also appear as a condition-like branch in old graphs).
+func isConditionNode(t domain.NodeType) bool {
+	return t == domain.NodeTypeCondition || t == domain.NodeTypeControl
+}
+
+// toolHasErrorHandling returns true if the given Tool node has error handling.
+// Error handling is detected in two ways:
+//  1. The Tool node itself has at least one conditional outgoing edge.
+//  2. The next hop is a Condition node (NodeTypeCondition or deprecated NodeTypeControl)
+//     and that Condition node has at least one conditional outgoing edge.
+func toolHasErrorHandling(graph *domain.WorkflowGraph, toolNode *domain.Node) bool {
+	outgoing := graph.OutgoingEdges(toolNode.ID)
+	if !allUnconditional(outgoing) {
+		// Tool has conditional edges directly — error handling present.
+		return true
+	}
+	// 2-hop check: if the next node is a Condition node with conditional edges, count as handled.
+	for _, edge := range outgoing {
+		next, ok := graph.Nodes[edge.To]
+		if !ok {
+			continue
+		}
+		if isConditionNode(next.Type) && hasConditionBranch(graph, next.ID) {
+			return true
+		}
+	}
+	return false
+}
+
+// isReliable returns true if the node has Config["reliable"] == true.
+// Reliable nodes (pure functions, deterministic algorithms) are excluded from
+// error-handler checks because they are not expected to fail.
+func isReliable(node *domain.Node) bool {
+	if node.Config == nil {
+		return false
+	}
+	v, ok := node.Config["reliable"]
+	if !ok {
+		return false
+	}
+	b, _ := v.(bool)
+	return b
+}
+
 // Analyze checks for missing error-handling in two complementary ways:
 //
 //  1. Tool nodes (NodeTypeTool) with outgoing edges that are all unconditional —
 //     the traditional check used when tool nodes have explicit outgoing edges.
+//     Exception: if the next hop is a Condition node with conditional edges,
+//     it counts as error handling (2-hop tracking).
+//     Exception: nodes with Config["reliable"]==true are skipped.
 //
 //  2. LLM nodes (NodeTypeLLM) that have at least one outgoing edge to a Tool node
 //     but whose outgoing edges are all unconditional — this covers the common ADK-Go
@@ -46,12 +105,16 @@ func (e *ErrorHandlerChecker) Analyze(graph *domain.WorkflowGraph) []domain.Find
 	for _, node := range graph.Nodes {
 		switch node.Type {
 		case domain.NodeTypeTool:
-			// Check 1: Tool node with non-empty, all-unconditional outgoing edges.
+			// Skip reliable (deterministic) tools — they are not expected to fail.
+			if isReliable(node) {
+				continue
+			}
+			// Check 1: Tool node with non-empty outgoing edges, no error handling detected.
 			outgoing := graph.OutgoingEdges(node.ID)
 			if len(outgoing) == 0 {
 				continue
 			}
-			if !allUnconditional(outgoing) {
+			if toolHasErrorHandling(graph, node) {
 				continue
 			}
 			category := toolCategory(node)

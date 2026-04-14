@@ -454,7 +454,7 @@ func (b *adkgoBuilder) processRealAPIConfig(cfg *ast.CompositeLit, agentType str
 		node := &domain.Node{
 			ID:     nodeID,
 			Name:   name,
-			Type:   domain.NodeTypeControl,
+			Type:   domain.NodeTypeLoop,
 			Config: make(map[string]any),
 		}
 		// MaxIterations is in loopagent.Config directly (not inside AgentConfig).
@@ -650,7 +650,7 @@ func (b *adkgoBuilder) processAgentLit(cl *ast.CompositeLit, parent *string) str
 		node := &domain.Node{
 			ID:     nodeID,
 			Name:   name,
-			Type:   domain.NodeTypeControl,
+			Type:   domain.NodeTypeLoop,
 			Config: make(map[string]any),
 		}
 		if maxIter := intFieldValue(fields, "MaxIterations"); maxIter != nil {

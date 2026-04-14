@@ -13,7 +13,7 @@
     {
       "id": "parse_error_branch",
       "name": "If parse fails, return structured error",
-      "type": "control",
+      "type": "condition",
       "config": {
         "expression": "err != nil"
       }
@@ -21,7 +21,7 @@
     {
       "id": "orchestrator",
       "name": "AnalysisOrchestrator.Analyze",
-      "type": "control",
+      "type": "loop",
       "config": {
         "max_iterations": 1,
         "description": "Fan-out 7 rules in parallel via goroutine+WaitGroup"
@@ -93,7 +93,7 @@
     {
       "id": "aggregate",
       "name": "Collect Findings (chan []Finding)",
-      "type": "control",
+      "type": "loop",
       "config": {
         "max_iterations": 1,
         "description": "Drain results channel"
@@ -104,7 +104,8 @@
       "name": "sort.SliceStable by Severity DESC, RuleName ASC",
       "type": "tool",
       "config": {
-        "category": "code"
+        "category": "code",
+        "reliable": true
       }
     },
     {
@@ -119,7 +120,7 @@
     {
       "id": "format_error_branch",
       "name": "If format fails, fallback to raw JSON",
-      "type": "control",
+      "type": "condition",
       "config": {
         "expression": "err != nil"
       }

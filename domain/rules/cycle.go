@@ -19,14 +19,18 @@ const (
 )
 
 // CycleDetector detects cycles in a WorkflowGraph and evaluates whether each
-// cycle is guarded by a Control node (LoopAgent equivalent) with a safe
+// cycle is guarded by a Loop node (LoopAgent equivalent) with a safe
 // max_iterations bound.
 //
 // Severity rules:
-//   - Control node in cycle, max_iterations not set → Critical
-//   - Control node in cycle, max_iterations >= 100 → Warning
-//   - Control node in cycle, max_iterations < 100 → no finding (safe loop)
-//   - Non-Control node forms a cycle → Critical (graph definition error)
+//   - Loop/Control node in cycle, max_iterations not set → Critical
+//   - Loop/Control node in cycle, max_iterations >= 100 → Warning
+//   - Loop/Control node in cycle, max_iterations < 100 → no finding (safe loop)
+//   - Condition node in cycle → Critical (graph definition error: conditions must not loop)
+//   - Non-Loop node forms a cycle inside a Loop with no max_iterations → Critical (unbounded)
+//   - Non-Loop node forms a cycle inside a Loop with max_iterations >= 100 → Info
+//   - Non-Loop node forms a cycle inside a Loop with max_iterations < 100 → no finding (safe)
+//   - Non-Loop node forms a cycle with no parent Loop guard → Critical (graph error)
 type CycleDetector struct{}
 
 // NewCycleDetector returns a ready-to-use CycleDetector.
@@ -103,11 +107,12 @@ func (c *CycleDetector) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
 }
 
 // findParentControl scans path (the DFS ancestor stack) in reverse to find the
-// nearest Control node that governs the cycle. Returns nil if not found.
+// nearest Loop or deprecated Control node that governs the cycle. Returns nil if not found.
+// NodeTypeCondition is intentionally excluded: condition branches are not loop guards.
 func (c *CycleDetector) findParentControl(graph *domain.WorkflowGraph, path []string) *domain.Node {
 	for i := len(path) - 1; i >= 0; i-- {
 		n, ok := graph.Nodes[path[i]]
-		if ok && n.Type == domain.NodeTypeControl {
+		if ok && isLoopNode(n.Type) {
 			return n
 		}
 	}
@@ -129,25 +134,25 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 		}
 	}
 
-	if node.Type != domain.NodeTypeControl {
-		// A cycle whose entry point is not a Control node.
-		// Check whether a parent Control node manages this cycle.
+	if !isLoopNode(node.Type) {
+		// A cycle whose entry point is not a Loop/Control node.
+		// Check whether a parent Loop/Control node manages this cycle.
 		parentControl := c.findParentControl(graph, path)
 		if parentControl != nil {
-			// The cycle is inside a Control (LoopAgent) node.
-			// Severity depends on max_iterations of the parent Control.
+			// The cycle is inside a Loop (LoopAgent) node.
+			// Severity depends on max_iterations of the parent Loop node.
 			raw, exists := parentControl.Config["max_iterations"]
 			if !exists || raw == nil {
+				// No max_iterations on the parent Loop — unbounded cycle → Critical.
 				return domain.Finding{
 					RuleName: c.Name(),
-					Severity: domain.Warning,
+					Severity: domain.Critical,
 					NodeID:   cycleNodeID,
 					Message: fmt.Sprintf(
-						"cycle detected inside Control node %q via sub-agent %q",
+						"cycle detected inside Loop node %q via sub-agent %q — MaxIterations not set: risk of infinite loop",
 						parentControl.ID, cycleNodeID,
 					),
-					Suggestion: "Set MaxIterations on the Control (LoopAgent) node to prevent infinite loops. " +
-						"Use loop_guard finding for the primary fix.",
+					Suggestion: "Set MaxIterations on the Loop (LoopAgent) node to prevent infinite loops.",
 				}
 			}
 			maxIter, err := toInt(raw)
@@ -157,7 +162,7 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 					Severity: domain.Info,
 					NodeID:   cycleNodeID,
 					Message: fmt.Sprintf(
-						"cycle detected inside Control node %q via sub-agent %q (max_iterations >= 100)",
+						"cycle detected inside Loop node %q via sub-agent %q (max_iterations >= 100)",
 						parentControl.ID, cycleNodeID,
 					),
 					Suggestion: "Consider reducing max_iterations below 100 to limit long-running workflows.",
@@ -166,21 +171,21 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 			// max_iterations is set and < 100 — safe loop, no finding.
 			return domain.Finding{}
 		}
-		// No parent Control found — genuine graph definition error.
+		// No parent Loop/Control found — genuine graph definition error.
 		return domain.Finding{
 			RuleName: c.Name(),
 			Severity: domain.Critical,
 			NodeID:   cycleNodeID,
 			Message: fmt.Sprintf(
-				"cycle detected at non-Control node %q (type=%v): graph definition error",
+				"cycle detected at non-Loop node %q (type=%v): graph definition error",
 				cycleNodeID, node.Type,
 			),
-			Suggestion: "Cycles must be managed by a Control (LoopAgent) node. " +
-				"Review the graph edges or add a Control node to guard the loop.",
+			Suggestion: "Cycles must be managed by a Loop (LoopAgent) node. " +
+				"Review the graph edges or add a Loop node to guard the cycle.",
 		}
 	}
 
-	// Control node — check max_iterations.
+	// Loop/Control node — check max_iterations.
 	raw, exists := node.Config["max_iterations"]
 	if !exists || raw == nil {
 		return domain.Finding{
@@ -188,10 +193,10 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 			Severity: domain.Critical,
 			NodeID:   cycleNodeID,
 			Message: fmt.Sprintf(
-				"Control node %q has a cycle but max_iterations is not set: risk of infinite loop",
+				"Loop node %q has a cycle but max_iterations is not set: risk of infinite loop",
 				cycleNodeID,
 			),
-			Suggestion: "Set max_iterations to a value less than 100 on the Control node.",
+			Suggestion: "Set max_iterations to a value less than 100 on the Loop node.",
 		}
 	}
 
@@ -203,7 +208,7 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 			Severity: domain.Critical,
 			NodeID:   cycleNodeID,
 			Message: fmt.Sprintf(
-				"Control node %q has max_iterations set to an unparseable value %q: risk of infinite loop",
+				"Loop node %q has max_iterations set to an unparseable value %q: risk of infinite loop",
 				cycleNodeID, fmt.Sprint(raw),
 			),
 			Suggestion: "Set max_iterations to a valid integer less than 100.",
@@ -216,7 +221,7 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 			Severity: domain.Warning,
 			NodeID:   cycleNodeID,
 			Message: fmt.Sprintf(
-				"Control node %q has max_iterations=%d (>= 100): high iteration count may cause long-running or expensive workflows",
+				"Loop node %q has max_iterations=%d (>= 100): high iteration count may cause long-running or expensive workflows",
 				cycleNodeID, maxIter,
 			),
 			Suggestion: "Consider reducing max_iterations below 100 or adding an early-exit condition.",

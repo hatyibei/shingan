@@ -16,20 +16,29 @@ const (
 	// NodeTypeTool represents a node that invokes an external tool or API.
 	NodeTypeTool
 	// NodeTypeControl represents a control-flow node (loop, conditional branch, etc.).
+	// Deprecated: use NodeTypeLoop or NodeTypeCondition instead.
+	// For backward compatibility, JSON "control" is parsed as NodeTypeLoop.
 	NodeTypeControl
 	// NodeTypeHuman represents a human-in-the-loop approval/review node.
 	NodeTypeHuman
 	// NodeTypeOutput represents a terminal output node.
 	NodeTypeOutput
+	// NodeTypeLoop represents a LoopAgent node (max_iterations required).
+	NodeTypeLoop
+	// NodeTypeCondition represents a conditional branch node (if/switch, max_iterations not required).
+	NodeTypeCondition
 )
 
 // nodeTypeStrings maps the canonical string names to NodeType values.
+// Note: "control" maps to NodeTypeLoop for backward compatibility.
 var nodeTypeStrings = map[string]NodeType{
-	"llm":     NodeTypeLLM,
-	"tool":    NodeTypeTool,
-	"control": NodeTypeControl,
-	"human":   NodeTypeHuman,
-	"output":  NodeTypeOutput,
+	"llm":       NodeTypeLLM,
+	"tool":      NodeTypeTool,
+	"control":   NodeTypeLoop,   // backward-compat: "control" → Loop
+	"human":     NodeTypeHuman,
+	"output":    NodeTypeOutput,
+	"loop":      NodeTypeLoop,
+	"condition": NodeTypeCondition,
 }
 
 // String returns the lowercase string representation of a NodeType.
@@ -45,6 +54,10 @@ func (t NodeType) String() string {
 		return "human"
 	case NodeTypeOutput:
 		return "output"
+	case NodeTypeLoop:
+		return "loop"
+	case NodeTypeCondition:
+		return "condition"
 	default:
 		return fmt.Sprintf("NodeType(%d)", int(t))
 	}
@@ -56,13 +69,14 @@ func (t NodeType) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON deserializes NodeType from either a string ("llm") or an integer (0).
+// The string "control" is accepted for backward compatibility and treated as Loop.
 func (t *NodeType) UnmarshalJSON(data []byte) error {
 	// Try string first.
 	var s string
 	if err := json.Unmarshal(data, &s); err == nil {
 		nt, ok := nodeTypeStrings[s]
 		if !ok {
-			return fmt.Errorf("unknown node type string %q: expected one of llm, tool, control, human, output", s)
+			return fmt.Errorf("unknown node type string %q: expected one of llm, tool, control, human, output, loop, condition", s)
 		}
 		*t = nt
 		return nil

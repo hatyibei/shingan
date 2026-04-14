@@ -172,8 +172,8 @@ go test -tags=demo -v -run TestDemo_ .
 
 | Rule ID | 検出対象 | 最高 Severity |
 |---|---|---|
-| cycle_detection | 非Controlノードのサイクル、LoopAgent管理下のサイクル | Critical |
-| loop_guard | LoopAgent (Control型) のMaxIterations未設定 | Critical |
+| cycle_detection | 非Loopノードのサイクル、LoopAgent管理下のサイクル | Critical |
+| loop_guard | LoopAgent (Loop型) のMaxIterations未設定 | Critical |
 | unreachable_node | エントリから到達不能なLLM/Toolノード | Warning |
 | error_handler_checker | 外部I/Oノード後のエラーハンドリング欠落 | Critical |
 | cost_estimation | ループ内の高額LLMモデル、単純タスクへの高額モデル適用 | Warning |

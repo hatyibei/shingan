@@ -33,7 +33,7 @@ func TestWorkflowGraph_GetNode(t *testing.T) {
 
 func TestWorkflowGraph_OutgoingEdges(t *testing.T) {
 	g, err := testutil.NewBuilder().
-		AddNode("root", domain.NodeTypeControl).
+		AddNode("root", domain.NodeTypeCondition).
 		AddNode("left", domain.NodeTypeLLM).
 		AddNode("right", domain.NodeTypeTool).
 		AddConditionalEdge("root", "left", "x > 0").
@@ -123,6 +123,7 @@ func TestSeverity_String(t *testing.T) {
 
 func TestNodeType_Values(t *testing.T) {
 	// Verify iota ordering doesn't change accidentally.
+	// NodeTypeControl(2) must remain 2 for backward compatibility.
 	types := []domain.NodeType{
 		domain.NodeTypeLLM,
 		domain.NodeTypeTool,
@@ -134,5 +135,47 @@ func TestNodeType_Values(t *testing.T) {
 		if int(nt) != i {
 			t.Errorf("NodeType[%d] has value %d, expected %d", i, nt, i)
 		}
+	}
+	// New types are appended; verify their absolute values.
+	if int(domain.NodeTypeLoop) != 5 {
+		t.Errorf("NodeTypeLoop = %d, want 5", int(domain.NodeTypeLoop))
+	}
+	if int(domain.NodeTypeCondition) != 6 {
+		t.Errorf("NodeTypeCondition = %d, want 6", int(domain.NodeTypeCondition))
+	}
+}
+
+func TestNodeType_String(t *testing.T) {
+	cases := []struct {
+		nt   domain.NodeType
+		want string
+	}{
+		{domain.NodeTypeLLM, "llm"},
+		{domain.NodeTypeTool, "tool"},
+		{domain.NodeTypeControl, "control"},
+		{domain.NodeTypeHuman, "human"},
+		{domain.NodeTypeOutput, "output"},
+		{domain.NodeTypeLoop, "loop"},
+		{domain.NodeTypeCondition, "condition"},
+	}
+	for _, c := range cases {
+		if got := c.nt.String(); got != c.want {
+			t.Errorf("NodeType(%d).String() = %q, want %q", int(c.nt), got, c.want)
+		}
+	}
+}
+
+func TestNodeType_UnmarshalJSON_BackwardCompat(t *testing.T) {
+	// "control" string must unmarshal to NodeTypeLoop for backward compatibility.
+	g, err := testutil.NewBuilder().
+		AddNode("n", domain.NodeTypeLoop).
+		Entry("n").
+		Build()
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	// Confirm graph with Loop type works fine.
+	if g.Nodes["n"].Type != domain.NodeTypeLoop {
+		t.Errorf("expected NodeTypeLoop, got %v", g.Nodes["n"].Type)
 	}
 }

@@ -124,6 +124,10 @@ func nodeTypeName(t domain.NodeType) string {
 		return "Tool"
 	case domain.NodeTypeControl:
 		return "Control"
+	case domain.NodeTypeLoop:
+		return "Loop"
+	case domain.NodeTypeCondition:
+		return "Condition"
 	case domain.NodeTypeHuman:
 		return "Human"
 	case domain.NodeTypeOutput:

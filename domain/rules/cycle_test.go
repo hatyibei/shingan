@@ -42,11 +42,11 @@ func TestCycleDetector_NoFindings_LinearGraph(t *testing.T) {
 	}
 }
 
-// Case 2: LoopAgent (Control) + max_iterations < 100 → 正常ループ、検出ゼロ
+// Case 2: LoopAgent (Loop) + max_iterations < 100 → 正常ループ、検出ゼロ
 func TestCycleDetector_NoFindings_SafeLoopAgent(t *testing.T) {
 	// entry → loop (Control, max_iterations=5) → work → loop (back edge)
 	g := mustBuild(t, testutil.NewBuilder().
-		AddNodeWithConfig("loop", domain.NodeTypeControl, map[string]any{"max_iterations": 5}).
+		AddNodeWithConfig("loop", domain.NodeTypeLoop, map[string]any{"max_iterations": 5}).
 		AddNode("work", domain.NodeTypeLLM).
 		AddNode("entry", domain.NodeTypeLLM).
 		AddEdge("entry", "loop").
@@ -60,11 +60,11 @@ func TestCycleDetector_NoFindings_SafeLoopAgent(t *testing.T) {
 	}
 }
 
-// Case 3: LoopAgent + max_iterations 未設定 → Critical
+// Case 3: LoopAgent (NodeTypeLoop) + max_iterations 未設定 → Critical
 func TestCycleDetector_Critical_LoopAgentNoMaxIterations(t *testing.T) {
 	// loop (Control, no max_iterations) ← self-loop
 	g := mustBuild(t, testutil.NewBuilder().
-		AddNode("loop", domain.NodeTypeControl).
+		AddNode("loop", domain.NodeTypeLoop).
 		AddNode("entry", domain.NodeTypeLLM).
 		AddEdge("entry", "loop").
 		AddEdge("loop", "loop"). // self-cycle
@@ -89,7 +89,7 @@ func TestCycleDetector_Critical_LoopAgentNoMaxIterations(t *testing.T) {
 // Case 4: LoopAgent + max_iterations >= 100 → Warning
 func TestCycleDetector_Warning_LoopAgentHighMaxIterations(t *testing.T) {
 	g := mustBuild(t, testutil.NewBuilder().
-		AddNodeWithConfig("loop", domain.NodeTypeControl, map[string]any{"max_iterations": 1000}).
+		AddNodeWithConfig("loop", domain.NodeTypeLoop, map[string]any{"max_iterations": 1000}).
 		AddNode("work", domain.NodeTypeTool).
 		AddNode("entry", domain.NodeTypeLLM).
 		AddEdge("entry", "loop").
@@ -133,7 +133,7 @@ func TestCycleDetector_Critical_NonControlCycle(t *testing.T) {
 // Case 6: max_iterations が境界値 99 → 正常（検出ゼロ）
 func TestCycleDetector_NoFindings_MaxIterations99(t *testing.T) {
 	g := mustBuild(t, testutil.NewBuilder().
-		AddNodeWithConfig("loop", domain.NodeTypeControl, map[string]any{"max_iterations": 99}).
+		AddNodeWithConfig("loop", domain.NodeTypeLoop, map[string]any{"max_iterations": 99}).
 		AddNode("work", domain.NodeTypeLLM).
 		AddEdge("loop", "work").
 		AddEdge("work", "loop").
@@ -148,7 +148,7 @@ func TestCycleDetector_NoFindings_MaxIterations99(t *testing.T) {
 // Case 7: max_iterations が境界値 100 → Warning
 func TestCycleDetector_Warning_MaxIterations100(t *testing.T) {
 	g := mustBuild(t, testutil.NewBuilder().
-		AddNodeWithConfig("loop", domain.NodeTypeControl, map[string]any{"max_iterations": 100}).
+		AddNodeWithConfig("loop", domain.NodeTypeLoop, map[string]any{"max_iterations": 100}).
 		AddNode("work", domain.NodeTypeLLM).
 		AddEdge("loop", "work").
 		AddEdge("work", "loop").
@@ -180,7 +180,7 @@ func TestCycleDetector_NilGraph(t *testing.T) {
 func TestCycleDetector_MaxIterationsFloat64(t *testing.T) {
 	// JSON unmarshal では数値が float64 になることがある
 	g := mustBuild(t, testutil.NewBuilder().
-		AddNodeWithConfig("loop", domain.NodeTypeControl, map[string]any{"max_iterations": float64(200)}).
+		AddNodeWithConfig("loop", domain.NodeTypeLoop, map[string]any{"max_iterations": float64(200)}).
 		AddNode("work", domain.NodeTypeLLM).
 		AddEdge("loop", "work").
 		AddEdge("work", "loop").
@@ -195,12 +195,12 @@ func TestCycleDetector_MaxIterationsFloat64(t *testing.T) {
 	}
 }
 
-// Case 10: LoopAgent管理下サブエージェントのサイクル（max_iter未設定）→ Warning
-// entry → loop (Control, no max_iter) → classifier (LLM) → classifier (back-edge)
-// DFSパスに Control ノード "loop" が存在 → Warning（Criticalではない）
-func TestCycleDetector_Warning_SubAgentCycleUnderLoopAgentNoMaxIter(t *testing.T) {
+// Case 10: LoopAgent管理下サブエージェントのサイクル（max_iter未設定）→ Critical
+// entry → loop (Loop, no max_iter) → classifier (LLM) → classifier (back-edge)
+// DFSパスに Loop ノード "loop" が存在するが max_iterations 未設定 → Critical（無制限ループリスク）
+func TestCycleDetector_Critical_SubAgentCycleUnderLoopAgentNoMaxIter(t *testing.T) {
 	g := mustBuild(t, testutil.NewBuilder().
-		AddNode("loop", domain.NodeTypeControl).
+		AddNode("loop", domain.NodeTypeLoop).
 		AddNode("entry", domain.NodeTypeLLM).
 		AddNode("classifier", domain.NodeTypeLLM).
 		AddEdge("entry", "loop").
@@ -210,11 +210,11 @@ func TestCycleDetector_Warning_SubAgentCycleUnderLoopAgentNoMaxIter(t *testing.T
 
 	findings := rules.NewCycleDetector().Analyze(g)
 	if len(findings) != 1 {
-		t.Fatalf("expected 1 finding (Warning for sub-agent under LoopAgent), got %d: %+v", len(findings), findings)
+		t.Fatalf("expected 1 finding (Critical for sub-agent under LoopAgent with no max_iter), got %d: %+v", len(findings), findings)
 	}
 	f := findings[0]
-	if f.Severity != domain.Warning {
-		t.Errorf("Severity = %v, want Warning (sub-agent cycle inside Control node)", f.Severity)
+	if f.Severity != domain.Critical {
+		t.Errorf("Severity = %v, want Critical (sub-agent cycle inside Loop node with no max_iterations)", f.Severity)
 	}
 	if f.NodeID != "classifier" {
 		t.Errorf("NodeID = %q, want %q", f.NodeID, "classifier")
@@ -224,7 +224,7 @@ func TestCycleDetector_Warning_SubAgentCycleUnderLoopAgentNoMaxIter(t *testing.T
 // Case 11: LoopAgent管理下サブエージェントのサイクル（max_iter >= 100）→ Info
 func TestCycleDetector_Info_SubAgentCycleUnderLoopAgentHighMaxIter(t *testing.T) {
 	g := mustBuild(t, testutil.NewBuilder().
-		AddNodeWithConfig("loop", domain.NodeTypeControl, map[string]any{"max_iterations": 200}).
+		AddNodeWithConfig("loop", domain.NodeTypeLoop, map[string]any{"max_iterations": 200}).
 		AddNode("entry", domain.NodeTypeLLM).
 		AddNode("classifier", domain.NodeTypeLLM).
 		AddEdge("entry", "loop").
@@ -245,7 +245,7 @@ func TestCycleDetector_Info_SubAgentCycleUnderLoopAgentHighMaxIter(t *testing.T)
 // Case 12: LoopAgent管理下サブエージェントのサイクル（max_iter < 100）→ 検出ゼロ（安全）
 func TestCycleDetector_NoFinding_SubAgentCycleUnderSafeLoopAgent(t *testing.T) {
 	g := mustBuild(t, testutil.NewBuilder().
-		AddNodeWithConfig("loop", domain.NodeTypeControl, map[string]any{"max_iterations": 5}).
+		AddNodeWithConfig("loop", domain.NodeTypeLoop, map[string]any{"max_iterations": 5}).
 		AddNode("entry", domain.NodeTypeLLM).
 		AddNode("classifier", domain.NodeTypeLLM).
 		AddEdge("entry", "loop").

@@ -111,9 +111,9 @@ func GenerateRandomGraph(n int, seed int64) *domain.WorkflowGraph {
 		nodes[ids[3]].Name = ids[3]
 	}
 
-	// 4. Control node without max_iterations in the loop region.
+	// 4. Loop node without max_iterations in the loop region (triggers loop_guard).
 	if n >= 3 {
-		nodes[ids[2]].Type = domain.NodeTypeControl
+		nodes[ids[2]].Type = domain.NodeTypeLoop
 		nodes[ids[2]].Config = map[string]any{} // no max_iterations
 		nodes[ids[2]].Name = ids[2]
 	}
@@ -161,8 +161,10 @@ func randomNodeType(rng *rand.Rand, idx, n int) domain.NodeType {
 		return domain.NodeTypeLLM
 	case r < 0.70:
 		return domain.NodeTypeTool
+	case r < 0.75:
+		return domain.NodeTypeLoop
 	case r < 0.80:
-		return domain.NodeTypeControl
+		return domain.NodeTypeCondition
 	case r < 0.85:
 		return domain.NodeTypeHuman
 	case r < 0.90:
@@ -184,11 +186,13 @@ func buildConfig(rng *rand.Rand, nt domain.NodeType, idx int) map[string]any {
 		if rng.Float64() < 0.3 {
 			cfg["prompt_template"] = fmt.Sprintf("template_%d", idx%5)
 		}
-	case domain.NodeTypeControl:
+	case domain.NodeTypeLoop:
 		// ~50% chance of having max_iterations set (the rest trigger loop_guard).
 		if rng.Float64() < 0.5 {
 			cfg["max_iterations"] = rng.Intn(150) + 1
 		}
+	case domain.NodeTypeCondition:
+		cfg["expression"] = fmt.Sprintf("cond_%d", idx)
 	case domain.NodeTypeTool:
 		categories := []string{"api", "mcp", "browser", "code", "rag"}
 		cfg["category"] = categories[rng.Intn(len(categories))]
@@ -203,8 +207,10 @@ func nameFor(id string, nt domain.NodeType, idx int) string {
 		return fmt.Sprintf("llm_%d", idx)
 	case domain.NodeTypeTool:
 		return fmt.Sprintf("tool_%d", idx)
-	case domain.NodeTypeControl:
+	case domain.NodeTypeLoop:
 		return fmt.Sprintf("loop_%d", idx)
+	case domain.NodeTypeCondition:
+		return fmt.Sprintf("cond_%d", idx)
 	case domain.NodeTypeHuman:
 		return fmt.Sprintf("human_%d", idx)
 	case domain.NodeTypeOutput:

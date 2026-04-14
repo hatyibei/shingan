@@ -15,10 +15,10 @@ func TestLoopGuardChecker_Name(t *testing.T) {
 	}
 }
 
-// Case 1: Control node with no max_iterations → Critical
+// Case 1: Loop node with no max_iterations → Critical
 func TestLoopGuardChecker_Critical_MissingMaxIterations(t *testing.T) {
 	g := mustBuild(t, testutil.NewBuilder().
-		AddNode("retry_loop", domain.NodeTypeControl).
+		AddNode("retry_loop", domain.NodeTypeLoop).
 		AddNode("work", domain.NodeTypeLLM).
 		AddEdge("retry_loop", "work").
 		Entry("retry_loop"))
@@ -39,10 +39,10 @@ func TestLoopGuardChecker_Critical_MissingMaxIterations(t *testing.T) {
 	}
 }
 
-// Case 2: Control node with max_iterations = 5 → no finding
+// Case 2: Loop node with max_iterations = 5 → no finding
 func TestLoopGuardChecker_NoFinding_MaxIterations5(t *testing.T) {
 	g := mustBuild(t, testutil.NewBuilder().
-		AddNodeWithConfig("retry_loop", domain.NodeTypeControl, map[string]any{"max_iterations": 5}).
+		AddLoopNode("retry_loop", 5).
 		AddNode("work", domain.NodeTypeLLM).
 		AddEdge("retry_loop", "work").
 		Entry("retry_loop"))
@@ -53,10 +53,10 @@ func TestLoopGuardChecker_NoFinding_MaxIterations5(t *testing.T) {
 	}
 }
 
-// Case 3: Control node with max_iterations = 100 → no finding (LoopGuardChecker only checks presence)
+// Case 3: Loop node with max_iterations = 100 → no finding (LoopGuardChecker only checks presence)
 func TestLoopGuardChecker_NoFinding_MaxIterations100(t *testing.T) {
 	g := mustBuild(t, testutil.NewBuilder().
-		AddNodeWithConfig("big_loop", domain.NodeTypeControl, map[string]any{"max_iterations": 100}).
+		AddLoopNode("big_loop", 100).
 		AddNode("work", domain.NodeTypeLLM).
 		AddEdge("big_loop", "work").
 		Entry("big_loop"))
@@ -67,8 +67,8 @@ func TestLoopGuardChecker_NoFinding_MaxIterations100(t *testing.T) {
 	}
 }
 
-// Case 4: Non-Control node → no finding
-func TestLoopGuardChecker_NoFinding_NonControlNode(t *testing.T) {
+// Case 4: Non-Loop node → no finding
+func TestLoopGuardChecker_NoFinding_NonLoopNode(t *testing.T) {
 	g := mustBuild(t, testutil.NewBuilder().
 		AddNode("llm_agent", domain.NodeTypeLLM).
 		AddNode("tool_node", domain.NodeTypeTool).
@@ -77,14 +77,30 @@ func TestLoopGuardChecker_NoFinding_NonControlNode(t *testing.T) {
 
 	findings := rules.NewLoopGuardChecker().Analyze(g)
 	if len(findings) != 0 {
-		t.Errorf("expected 0 findings for non-Control nodes, got %d: %+v", len(findings), findings)
+		t.Errorf("expected 0 findings for non-Loop nodes, got %d: %+v", len(findings), findings)
+	}
+}
+
+// Case 4b: Condition node (NodeTypeCondition) → no finding (max_iterations not required)
+func TestLoopGuardChecker_NoFinding_ConditionNode(t *testing.T) {
+	g := mustBuild(t, testutil.NewBuilder().
+		AddConditionNode("if_error", "err != nil").
+		AddNode("success", domain.NodeTypeOutput).
+		AddNode("failure", domain.NodeTypeOutput).
+		AddConditionalEdge("if_error", "success", "err == nil").
+		AddConditionalEdge("if_error", "failure", "err != nil").
+		Entry("if_error"))
+
+	findings := rules.NewLoopGuardChecker().Analyze(g)
+	if len(findings) != 0 {
+		t.Errorf("expected 0 findings for Condition node, got %d: %+v", len(findings), findings)
 	}
 }
 
 // Case 5: max_iterations is non-numeric string → Critical (treated as missing)
 func TestLoopGuardChecker_Critical_NonNumericMaxIterations(t *testing.T) {
 	g := mustBuild(t, testutil.NewBuilder().
-		AddNodeWithConfig("loop", domain.NodeTypeControl, map[string]any{"max_iterations": "unlimited"}).
+		AddNodeWithConfig("loop", domain.NodeTypeLoop, map[string]any{"max_iterations": "unlimited"}).
 		AddNode("work", domain.NodeTypeLLM).
 		AddEdge("loop", "work").
 		Entry("loop"))
@@ -111,11 +127,11 @@ func TestLoopGuardChecker_NilGraph(t *testing.T) {
 	}
 }
 
-// Case 7: Multiple Control nodes, only one missing max_iterations → 1 finding
-func TestLoopGuardChecker_MultipleControls_OneMissing(t *testing.T) {
+// Case 7: Multiple Loop nodes, only one missing max_iterations → 1 finding
+func TestLoopGuardChecker_MultipleLoops_OneMissing(t *testing.T) {
 	g := mustBuild(t, testutil.NewBuilder().
-		AddNodeWithConfig("safe_loop", domain.NodeTypeControl, map[string]any{"max_iterations": 10}).
-		AddNode("unsafe_loop", domain.NodeTypeControl).
+		AddLoopNode("safe_loop", 10).
+		AddNode("unsafe_loop", domain.NodeTypeLoop).
 		AddNode("work_a", domain.NodeTypeLLM).
 		AddNode("work_b", domain.NodeTypeLLM).
 		AddEdge("safe_loop", "work_a").
@@ -128,5 +144,22 @@ func TestLoopGuardChecker_MultipleControls_OneMissing(t *testing.T) {
 	}
 	if findings[0].NodeID != "unsafe_loop" {
 		t.Errorf("NodeID = %q, want %q", findings[0].NodeID, "unsafe_loop")
+	}
+}
+
+// Case 8: Deprecated NodeTypeControl (backward compat) without max_iterations → Critical
+func TestLoopGuardChecker_BackwardCompat_ControlIsLoop(t *testing.T) {
+	g := mustBuild(t, testutil.NewBuilder().
+		AddNode("old_ctrl", domain.NodeTypeControl).
+		AddNode("work", domain.NodeTypeLLM).
+		AddEdge("old_ctrl", "work").
+		Entry("old_ctrl"))
+
+	findings := rules.NewLoopGuardChecker().Analyze(g)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding for deprecated NodeTypeControl without max_iterations, got %d: %+v", len(findings), findings)
+	}
+	if findings[0].Severity != domain.Critical {
+		t.Errorf("Severity = %v, want Critical", findings[0].Severity)
 	}
 }

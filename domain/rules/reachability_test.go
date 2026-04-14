@@ -39,7 +39,7 @@ func TestReachabilityChecker_AllReachable(t *testing.T) {
 // Case 2: LLMノードが孤立 → Warning
 func TestReachabilityChecker_IsolatedLLMNode(t *testing.T) {
 	graph, err := testutil.NewBuilder().
-		AddNode("entry", domain.NodeTypeControl).
+		AddNode("entry", domain.NodeTypeCondition).
 		AddNode("orphan_llm", domain.NodeTypeLLM).
 		AddNode("out", domain.NodeTypeOutput).
 		AddEdge("entry", "out").
@@ -148,7 +148,7 @@ func TestReachabilityChecker_BranchBothReachable(t *testing.T) {
 	//               └→ pathB → out
 	graph, err := testutil.NewBuilder().
 		AddNode("entry", domain.NodeTypeLLM).
-		AddNode("branch", domain.NodeTypeControl).
+		AddNode("branch", domain.NodeTypeCondition).
 		AddNode("pathA", domain.NodeTypeTool).
 		AddNode("pathB", domain.NodeTypeTool).
 		AddNode("out", domain.NodeTypeOutput).
@@ -169,11 +169,11 @@ func TestReachabilityChecker_BranchBothReachable(t *testing.T) {
 	}
 }
 
-// Case 7: Control/Human/Outputノードが孤立 → Info（Warningではない）
+// Case 7: Loop/Condition/Human/Outputノードが孤立 → Info（Warningではない）
 func TestReachabilityChecker_IsolatedControlHumanOutputNodes(t *testing.T) {
 	graph, err := testutil.NewBuilder().
 		AddNode("entry", domain.NodeTypeLLM).
-		AddNode("orphan_ctrl", domain.NodeTypeControl).
+		AddNode("orphan_ctrl", domain.NodeTypeLoop).
 		AddNode("orphan_human", domain.NodeTypeHuman).
 		AddNode("orphan_out", domain.NodeTypeOutput).
 		Entry("entry").

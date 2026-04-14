@@ -67,7 +67,8 @@ func (p *SamuraiParser) SupportedFormat() string {
 // 変換規則 (ADR Appendix B に基づく):
 //   - "llm" / "auto_judge" / "param_extract" / "agent" → NodeTypeLLM
 //   - "browser" / "connector" / "api" / "mcp_tool" / "code" / "knowledge_search" → NodeTypeTool
-//   - "loop" / "condition" → NodeTypeControl
+//   - "loop"      → NodeTypeLoop      (max_iterations 必須)
+//   - "condition" → NodeTypeCondition (max_iterations 不要)
 //   - "approval" / "review" → NodeTypeHuman
 //   - "output" / "answer" → NodeTypeOutput
 //   - "memo" → スキップ（実行時無視ノード）
@@ -152,8 +153,8 @@ func (p *SamuraiParser) Parse(input []byte) (*domain.WorkflowGraph, error) {
 //	mcp_tool               → NodeTypeTool       "mcp"
 //	code                   → NodeTypeTool       "code"
 //	knowledge_search       → NodeTypeTool       "rag"
-//	loop                   → NodeTypeControl    ""
-//	condition              → NodeTypeControl    ""
+//	loop                   → NodeTypeLoop       ""
+//	condition              → NodeTypeCondition  ""
 //	approval / review      → NodeTypeHuman      ""
 //	output / answer        → NodeTypeOutput     ""
 //	memo                   → (caller でスキップ)
@@ -176,8 +177,10 @@ func mapSamuraiNodeType(t string) (domain.NodeType, string, error) {
 		return domain.NodeTypeTool, "rag", nil
 
 	// 制御系
-	case "loop", "condition":
-		return domain.NodeTypeControl, "", nil
+	case "loop":
+		return domain.NodeTypeLoop, "", nil
+	case "condition":
+		return domain.NodeTypeCondition, "", nil
 
 	// Human-in-the-loop
 	case "approval", "review":

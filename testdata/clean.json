@@ -20,9 +20,9 @@
     {
       "id": "error_branch",
       "name": "Error Handler Branch",
-      "type": "control",
+      "type": "condition",
       "config": {
-        "max_iterations": 1
+        "expression": "error == true"
       }
     },
     {
@@ -38,7 +38,7 @@
     {
       "id": "safe_loop",
       "name": "Safe Retry Loop",
-      "type": "control",
+      "type": "loop",
       "config": {
         "max_iterations": 5
       }

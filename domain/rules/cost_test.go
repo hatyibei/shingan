@@ -18,7 +18,7 @@ func TestCostAnalyzer_Name(t *testing.T) {
 // Case 1: 高額モデル(gpt-4o)がループ内 → Warning
 func TestCostAnalyzer_Warning_HighCostModelInLoop(t *testing.T) {
 	g := mustBuild(t, testutil.NewBuilder().
-		AddNodeWithConfig("loop", domain.NodeTypeControl, map[string]any{"max_iterations": 5}).
+		AddNodeWithConfig("loop", domain.NodeTypeLoop, map[string]any{"max_iterations": 5}).
 		AddNodeWithConfig("llm", domain.NodeTypeLLM, map[string]any{"model": "gpt-4o"}).
 		AddNode("entry", domain.NodeTypeLLM).
 		AddEdge("entry", "loop").
@@ -69,7 +69,7 @@ func TestCostAnalyzer_Info_HighCostModelSimpleTask(t *testing.T) {
 // Case 3: 低額モデル(gpt-4o-mini)がループ内 → 検出なし
 func TestCostAnalyzer_NoFindings_LowCostModelInLoop(t *testing.T) {
 	g := mustBuild(t, testutil.NewBuilder().
-		AddNodeWithConfig("loop", domain.NodeTypeControl, map[string]any{"max_iterations": 5}).
+		AddNodeWithConfig("loop", domain.NodeTypeLoop, map[string]any{"max_iterations": 5}).
 		AddNodeWithConfig("llm", domain.NodeTypeLLM, map[string]any{"model": "gpt-4o-mini"}).
 		AddEdge("loop", "llm").
 		AddEdge("llm", "loop").
@@ -84,7 +84,7 @@ func TestCostAnalyzer_NoFindings_LowCostModelInLoop(t *testing.T) {
 // Case 4: 未知モデルがループ内 → 中額扱いなので検出なし
 func TestCostAnalyzer_NoFindings_UnknownModelInLoop(t *testing.T) {
 	g := mustBuild(t, testutil.NewBuilder().
-		AddNodeWithConfig("loop", domain.NodeTypeControl, map[string]any{"max_iterations": 3}).
+		AddNodeWithConfig("loop", domain.NodeTypeLoop, map[string]any{"max_iterations": 3}).
 		AddNodeWithConfig("llm", domain.NodeTypeLLM, map[string]any{"model": "some-unknown-model"}).
 		AddEdge("loop", "llm").
 		AddEdge("llm", "loop").

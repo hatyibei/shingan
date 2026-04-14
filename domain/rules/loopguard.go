@@ -7,12 +7,15 @@ import (
 	"github.com/hatyibei/shingan/domain"
 )
 
-// LoopGuardChecker detects Control (LoopAgent) nodes that have no MaxIterations
+// LoopGuardChecker detects Loop (LoopAgent) nodes that have no MaxIterations
 // configured, which risks unbounded execution.
+//
+// This rule applies to NodeTypeLoop and the deprecated NodeTypeControl.
+// NodeTypeCondition is excluded because conditional branches do not iterate.
 //
 // This rule is complementary to CycleDetector:
 //   - CycleDetector finds cyclic graph structures and reports them with context.
-//   - LoopGuardChecker directly targets the missing safety guard on the Control node.
+//   - LoopGuardChecker directly targets the missing safety guard on the Loop node.
 type LoopGuardChecker struct{}
 
 // NewLoopGuardChecker returns a ready-to-use LoopGuardChecker.
@@ -25,7 +28,14 @@ func (l *LoopGuardChecker) Name() string {
 	return "loop_guard"
 }
 
-// Analyze scans all nodes and reports any Control node missing a valid max_iterations.
+// isLoopNode returns true for node types that require a max_iterations guard:
+// NodeTypeLoop (new) and NodeTypeControl (deprecated, backward-compat alias for Loop).
+func isLoopNode(t domain.NodeType) bool {
+	return t == domain.NodeTypeLoop || t == domain.NodeTypeControl
+}
+
+// Analyze scans all nodes and reports any Loop node missing a valid max_iterations.
+// NodeTypeCondition nodes are intentionally excluded.
 func (l *LoopGuardChecker) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
 	if graph == nil || len(graph.Nodes) == 0 {
 		return nil
@@ -34,7 +44,7 @@ func (l *LoopGuardChecker) Analyze(graph *domain.WorkflowGraph) []domain.Finding
 	var findings []domain.Finding
 
 	for _, node := range graph.Nodes {
-		if node.Type != domain.NodeTypeControl {
+		if !isLoopNode(node.Type) {
 			continue
 		}
 

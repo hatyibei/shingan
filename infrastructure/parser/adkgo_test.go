@@ -96,8 +96,8 @@ var loop = &LoopAgent{
 	if node == nil {
 		t.Fatalf("node 'retry_loop' not found; nodes=%v", nodeKeys(graph))
 	}
-	if node.Type != domain.NodeTypeControl {
-		t.Errorf("Type = %v, want NodeTypeControl", node.Type)
+	if node.Type != domain.NodeTypeLoop {
+		t.Errorf("Type = %v, want NodeTypeLoop", node.Type)
 	}
 	if got, ok := node.Config["max_iterations"]; !ok {
 		t.Error("Config[max_iterations] not set")
@@ -280,8 +280,8 @@ func BuildInfiniteLoop() {
 	if node == nil {
 		t.Fatalf("node 'retry_loop' not found; nodes=%v", nodeKeys(graph))
 	}
-	if node.Type != domain.NodeTypeControl {
-		t.Errorf("Type = %v, want NodeTypeControl", node.Type)
+	if node.Type != domain.NodeTypeLoop {
+		t.Errorf("Type = %v, want NodeTypeLoop", node.Type)
 	}
 	if _, ok := node.Config["max_iterations"]; ok {
 		t.Error("Config[max_iterations] should NOT be set when MaxIterations is absent")

@@ -54,8 +54,8 @@ func TestSamuraiParser_BasicFlow(t *testing.T) {
 	// NodeType マッピング検証
 	checkNodeType(t, graph, "node_1", domain.NodeTypeLLM)
 	checkNodeType(t, graph, "node_2", domain.NodeTypeTool)
-	checkNodeType(t, graph, "node_3", domain.NodeTypeControl)
-	checkNodeType(t, graph, "node_4", domain.NodeTypeControl)
+	checkNodeType(t, graph, "node_3", domain.NodeTypeLoop)
+	checkNodeType(t, graph, "node_4", domain.NodeTypeCondition)
 
 	// browser ノードに category = "browser" が付与されること
 	checkConfig(t, graph, "node_2", "category", "browser")
@@ -224,10 +224,8 @@ func TestSamuraiParser_FullGraph(t *testing.T) {
 		checkConfig(t, graph, id, "category", wantCat)
 	}
 
-	controlNodes := []string{"node_loop", "node_condition"}
-	for _, id := range controlNodes {
-		checkNodeType(t, graph, id, domain.NodeTypeControl)
-	}
+	checkNodeType(t, graph, "node_loop", domain.NodeTypeLoop)
+	checkNodeType(t, graph, "node_condition", domain.NodeTypeCondition)
 
 	humanNodes := []string{"node_approval", "node_review"}
 	for _, id := range humanNodes {
@@ -274,8 +272,8 @@ func TestSamuraiParser_AllNodeTypeMappings(t *testing.T) {
 		{"mcp_tool", domain.NodeTypeTool, "mcp"},
 		{"code", domain.NodeTypeTool, "code"},
 		{"knowledge_search", domain.NodeTypeTool, "rag"},
-		{"loop", domain.NodeTypeControl, ""},
-		{"condition", domain.NodeTypeControl, ""},
+		{"loop", domain.NodeTypeLoop, ""},
+		{"condition", domain.NodeTypeCondition, ""},
 		{"approval", domain.NodeTypeHuman, ""},
 		{"review", domain.NodeTypeHuman, ""},
 		{"output", domain.NodeTypeOutput, ""},

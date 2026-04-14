@@ -59,6 +59,16 @@ func (b *Builder) AddNodeWithConfig(id string, nodeType domain.NodeType, config 
 	return b
 }
 
+// AddLoopNode registers a Loop node with a max_iterations config value.
+func (b *Builder) AddLoopNode(id string, maxIter int) *Builder {
+	return b.AddNodeWithConfig(id, domain.NodeTypeLoop, map[string]any{"max_iterations": maxIter})
+}
+
+// AddConditionNode registers a Condition node with an expression config value.
+func (b *Builder) AddConditionNode(id string, expression string) *Builder {
+	return b.AddNodeWithConfig(id, domain.NodeTypeCondition, map[string]any{"expression": expression})
+}
+
 // AddEdge adds a directed unconditional edge from → to.
 // If either node has not been registered, an error is recorded.
 func (b *Builder) AddEdge(from, to string) *Builder {

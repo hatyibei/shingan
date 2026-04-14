@@ -31,7 +31,7 @@ func TestBuilder_SimpleLinearGraph(t *testing.T) {
 
 func TestBuilder_ConditionalEdge(t *testing.T) {
 	g, err := testutil.NewBuilder().
-		AddNode("start", domain.NodeTypeControl).
+		AddNode("start", domain.NodeTypeCondition).
 		AddNode("yes", domain.NodeTypeLLM).
 		AddNode("no", domain.NodeTypeOutput).
 		AddConditionalEdge("start", "yes", "result == true").
@@ -73,9 +73,9 @@ func TestBuilder_NodeWithConfig(t *testing.T) {
 func TestBuilder_LoopGraph(t *testing.T) {
 	// Simulate a loop: start -> work -> check -> work (cycle via conditional back-edge)
 	g, err := testutil.NewBuilder().
-		AddNode("start", domain.NodeTypeControl).
+		AddLoopNode("start", 10).
 		AddNode("work", domain.NodeTypeTool).
-		AddNode("check", domain.NodeTypeControl).
+		AddConditionNode("check", "not_done").
 		AddNode("done", domain.NodeTypeOutput).
 		AddEdge("start", "work").
 		AddConditionalEdge("check", "work", "not_done").
@@ -98,6 +98,52 @@ func TestBuilder_LoopGraph(t *testing.T) {
 	}
 	if len(out) != 1 {
 		t.Errorf("expected 1 outgoing edge from 'work', got %d", len(out))
+	}
+}
+
+func TestBuilder_AddLoopNode(t *testing.T) {
+	g, err := testutil.NewBuilder().
+		AddLoopNode("retry", 5).
+		AddNode("work", domain.NodeTypeLLM).
+		AddEdge("retry", "work").
+		Entry("retry").
+		Build()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	n, ok := g.GetNode("retry")
+	if !ok {
+		t.Fatal("node 'retry' not found")
+	}
+	if n.Type != domain.NodeTypeLoop {
+		t.Errorf("expected NodeTypeLoop, got %v", n.Type)
+	}
+	if n.Config["max_iterations"] != 5 {
+		t.Errorf("expected max_iterations=5, got %v", n.Config["max_iterations"])
+	}
+}
+
+func TestBuilder_AddConditionNode(t *testing.T) {
+	g, err := testutil.NewBuilder().
+		AddConditionNode("branch", "err != nil").
+		AddNode("success", domain.NodeTypeOutput).
+		AddNode("failure", domain.NodeTypeOutput).
+		AddConditionalEdge("branch", "success", "err == nil").
+		AddConditionalEdge("branch", "failure", "err != nil").
+		Entry("branch").
+		Build()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	n, ok := g.GetNode("branch")
+	if !ok {
+		t.Fatal("node 'branch' not found")
+	}
+	if n.Type != domain.NodeTypeCondition {
+		t.Errorf("expected NodeTypeCondition, got %v", n.Type)
+	}
+	if n.Config["expression"] != "err != nil" {
+		t.Errorf("expected expression='err != nil', got %v", n.Config["expression"])
 	}
 }
 
