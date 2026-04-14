@@ -81,31 +81,41 @@ CI統合例（GitHub Actions）:
   run: shingan analyze --format adk-go --input ./agents/
 ```
 
-## 解析ルール一覧
+## ランタイムデモ — Vertex AI Gemini で実行
 
-| Rule ID | 検出対象 | 最高 Severity |
-|---|---|---|
-| cycle_detection | max_iterations未設定の無限ループ、非ループサイクル | Critical |
-| unreachable_node | エントリから到達不能なLLM/Toolノード | Warning |
-| error_handler_checker | 外部I/Oノード後のエラーハンドリング欠落 | Critical |
-| cost_estimation | ループ内の高額LLMモデル、単純タスクへの高額モデル適用 | Warning |
-| redundant_llm_call | 同一prompt_template×modelの重複呼出 | Warning |
+`shingan-runner` CLIは、静的解析のsafe-guard付きでADK-Go AgentをVertex AI上で実際に実行する。
+「静的解析で警告したバグが本当に問題を起こすか」を1分で実証できる。
 
-## サポートフォーマット
+### 事前準備
 
-| Format | 状態 | 備考 |
-|---|---|---|
-| json | GA | Shingan独自のWorkflowGraph JSON |
-| adk-go | GA | Google ADK-Go ソースコードのAST解析 |
-| n8n | Planned (v0.2) | n8n JSON export |
-| langgraph | Planned (v1.0) | Python AST経由 |
+```bash
+# GCPプロジェクト設定（Vertex AI API有効化済み）
+export GOOGLE_CLOUD_PROJECT=<your-project-id>
+export GOOGLE_CLOUD_LOCATION=us-central1
+export GOOGLE_GENAI_USE_VERTEXAI=true
 
-## ロードマップ
+# Application Default Credentials認証
+gcloud auth application-default login
 
-- **v0.1（現在）**: ADK-Go + JSON対応、5ルール、CLI
-- **v0.2**: n8nパーサー、SARIF出力、GitHub Actions統合アクション
-- **v0.3**: SamuraiAIアダプター、PIIリークルール
-- **v1.0**: LangGraph/Dify対応、マルチフレームワーク安定版
+# バイナリビルド
+go build -o shingan ./cmd/shingan
+go build -o shingan-runner ./cmd/runner
+```
+
+### デモフロー（4ステップ）
+
+```bash
+bash scripts/demo.sh
+```
+
+1. **静的解析でCritical警告**: `infinite_loop_unbounded.go` (MaxIterations未設定) を解析
+2. **Runner safe-guardで実行拒否**: Critical finding検出時は実行をブロック
+3. **安全版は実行成功**: `infinite_loop_bounded.go` (MaxIterations=3) はクリーン判定で実行
+4. **Vertex AI Gemini応答**: `simple_agent.go` で実際のLLM呼び出し
+
+コスト: 1デモ実行あたり<0.1円 (gemini-2.0-flash-001, max_tokens=100)
+
+詳細は [docs/runtime-demo.md](./docs/runtime-demo.md) 参照。
 
 ## 本物のADK-Goサンプルでのデモ
 
@@ -139,47 +149,43 @@ shingan analyze --format adk-go --input examples/real/unreachable.go --output ma
 go test -tags=demo -v -run TestDemo_ .
 ```
 
-## ランタイムデモ — Vertex AI Gemini 実行
+## 解析ルール一覧
 
-Shingan が静的解析で検出したバグを、実際にVertex AI で走らせて**本当に問題になる**ことを実証する live demo。
-
-### デモフロー
-
-```bash
-# バイナリビルド
-go build -o shingan ./cmd/shingan
-go build -o shingan-runner ./cmd/runner
-
-# 全フロー自動実行（認証済み環境なら live 実行、未認証なら --dry-run を追加）
-bash scripts/demo.sh
-# または dry-run（Vertex AI呼び出しなし）
-bash scripts/demo.sh --dry-run
-```
-
-| ステップ | コマンド | 期待結果 |
+| Rule ID | 検出対象 | 最高 Severity |
 |---|---|---|
-| 1. 静的解析でCritical警告 | `./shingan analyze --format adk-go --input examples/runtime/infinite_loop_unbounded.go --output markdown` | `cycle_detection` Critical, exit code 2 |
-| 2. safe-guardで実行拒否 | `./shingan-runner --sample infinite_loop_unbounded --dry-run` | Critical検出 → 実行拒否 |
-| 3. 安全版（MaxIter=3）実行 | `./shingan-runner --sample infinite_loop_bounded` | 3イテレーション後に正常終了 |
-| 4. シンプルなLLM Agent実行 | `./shingan-runner --sample simple` | Geminiが日本語で挨拶 |
+| cycle_detection | 非Controlノードのサイクル、LoopAgent管理下のサイクル | Critical |
+| loop_guard | LoopAgent (Control型) のMaxIterations未設定 | Critical |
+| unreachable_node | エントリから到達不能なLLM/Toolノード | Warning |
+| error_handler_checker | 外部I/Oノード後のエラーハンドリング欠落 | Critical |
+| cost_estimation | ループ内の高額LLMモデル、単純タスクへの高額モデル適用 | Warning |
+| redundant_llm_call | 同一prompt_template×modelの重複呼出 | Warning |
 
-### shingan-runner の動作
+## サポートフォーマット
 
-```
-1. examples/runtime/<sample>.go を Shingan で静的解析
-2. Critical Finding があれば → 実行拒否（safe-guard）
-3. クリーンなら → ADK-Go Runner + Vertex AI Gemini で実行
-```
+### 入力
 
-- `--max-iter N`: LoopAgent の MaxIterations を動的に注入（safe-guard override用）
-- `--dry-run`: 解析のみ、Vertex AI呼び出しなし
+| Format | 状態 | 備考 |
+|---|---|---|
+| json | GA | Shingan独自のWorkflowGraph JSON |
+| adk-go | GA | Google ADK-Go (`google.golang.org/adk`) のAST解析 |
+| samurai | Alpha | SamuraiAI想定スキーマ（社内実スキーマ差し替え前提） |
+| n8n | Planned (v0.2) | n8n JSON export |
+| langgraph | Planned (v1.0) | Python AST経由 |
 
-詳細: [docs/runtime-demo.md](./docs/runtime-demo.md)
+### 出力
 
-## アーキテクチャ詳細
+| Format | ContentType | 用途 |
+|---|---|---|
+| json | application/json | API応答、プログラム連携 |
+| markdown | text/markdown | CLI、レポート |
+| sarif | application/sarif+json | GitHub Code Scanning統合 |
 
-- ADR全体 → [shingan-adr.md](./shingan-adr.md)
-- 層構造・拡張ポイント → [docs/architecture.md](./docs/architecture.md)
+## ロードマップ
+
+- **v0.1（2026-04）**: ADK-Go + JSON + SamuraiAI想定スキーマ対応、6ルール、CLI + goa API、SARIF出力、Vertex AIランタイムデモ ✓
+- **v0.2**: n8nパーサー、SamuraiAI公式スキーマ対応、CI Plugin
+- **v0.3**: PIIリークルール、信頼度スコア、設計-実行時観測統合
+- **v1.0**: LangGraph/Dify対応、マルチフレームワーク安定版
 
 ## 開発
 
@@ -188,6 +194,15 @@ go test ./...
 go vet ./...
 go build -o shingan ./cmd/shingan
 ```
+
+## ドキュメント
+
+- [アーキテクチャ詳細](./docs/architecture.md)
+- [ランタイムデモ手順](./docs/runtime-demo.md)
+- [SARIF出力とGitHub Code Scanning統合](./docs/sarif-output.md)
+- [SamuraiAIアダプター設計](./docs/samurai-adapter.md)
+- [cycle_detectionの技術ノート](./docs/cycle-detection-note.md)
+- [全ADR](./shingan-adr.md)
 
 ## ライセンス
 
