@@ -1,0 +1,75 @@
+package reporter
+
+import (
+	"encoding/json"
+
+	"github.com/hatyibei/shingan/domain"
+)
+
+// JSONReporter implements application.ReportFormatter for machine-readable JSON output.
+type JSONReporter struct{}
+
+// NewJSONReporter returns a new JSONReporter.
+func NewJSONReporter() *JSONReporter {
+	return &JSONReporter{}
+}
+
+// ContentType returns the MIME type for JSON output.
+func (r *JSONReporter) ContentType() string {
+	return "application/json"
+}
+
+// jsonFinding is the JSON-serializable representation of a domain.Finding.
+type jsonFinding struct {
+	Rule       string `json:"rule"`
+	Severity   string `json:"severity"`
+	NodeID     string `json:"node_id"`
+	Message    string `json:"message"`
+	Suggestion string `json:"suggestion"`
+}
+
+// jsonSummary holds aggregate counts per severity.
+type jsonSummary struct {
+	Total    int `json:"total"`
+	Critical int `json:"critical"`
+	Warning  int `json:"warning"`
+	Info     int `json:"info"`
+}
+
+// jsonReport is the top-level JSON structure.
+type jsonReport struct {
+	Findings []jsonFinding `json:"findings"`
+	Summary  jsonSummary   `json:"summary"`
+}
+
+// Format serializes findings into JSON bytes.
+// Severity values are output as human-readable strings ("info"/"warning"/"critical").
+func (r *JSONReporter) Format(findings []domain.Finding) ([]byte, error) {
+	jf := make([]jsonFinding, 0, len(findings))
+	summary := jsonSummary{Total: len(findings)}
+
+	for _, f := range findings {
+		jf = append(jf, jsonFinding{
+			Rule:       f.RuleName,
+			Severity:   f.Severity.String(),
+			NodeID:     f.NodeID,
+			Message:    f.Message,
+			Suggestion: f.Suggestion,
+		})
+		switch f.Severity {
+		case domain.Critical:
+			summary.Critical++
+		case domain.Warning:
+			summary.Warning++
+		case domain.Info:
+			summary.Info++
+		}
+	}
+
+	report := jsonReport{
+		Findings: jf,
+		Summary:  summary,
+	}
+
+	return json.Marshal(report)
+}

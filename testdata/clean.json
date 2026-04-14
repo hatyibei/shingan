@@ -1,0 +1,61 @@
+{
+  "entry_node_id": "start",
+  "nodes": [
+    {
+      "id": "start",
+      "name": "Entry LLM",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini"
+      }
+    },
+    {
+      "id": "api_tool",
+      "name": "External API Call",
+      "type": "tool",
+      "config": {
+        "category": "api"
+      }
+    },
+    {
+      "id": "error_branch",
+      "name": "Error Handler Branch",
+      "type": "control"
+    },
+    {
+      "id": "success_output",
+      "name": "Success Output",
+      "type": "output"
+    },
+    {
+      "id": "error_output",
+      "name": "Error Output",
+      "type": "output"
+    },
+    {
+      "id": "safe_loop",
+      "name": "Safe Retry Loop",
+      "type": "control",
+      "config": {
+        "max_iterations": 5
+      }
+    },
+    {
+      "id": "loop_body",
+      "name": "Loop Body",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini"
+      }
+    }
+  ],
+  "edges": [
+    { "from": "start",        "to": "api_tool" },
+    { "from": "api_tool",     "to": "error_branch", "condition": "error == true" },
+    { "from": "api_tool",     "to": "safe_loop",    "condition": "error == false" },
+    { "from": "error_branch", "to": "error_output" },
+    { "from": "safe_loop",    "to": "loop_body" },
+    { "from": "loop_body",    "to": "safe_loop" },
+    { "from": "safe_loop",    "to": "success_output", "condition": "done == true" }
+  ]
+}

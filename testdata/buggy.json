@@ -1,0 +1,55 @@
+{
+  "entry_node_id": "start",
+  "nodes": [
+    {
+      "id": "start",
+      "name": "Entry LLM",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o"
+      }
+    },
+    {
+      "id": "browser_tool",
+      "name": "Browser Operation",
+      "type": "tool",
+      "config": {
+        "category": "browser"
+      }
+    },
+    {
+      "id": "loop_ctrl",
+      "name": "Retry Loop",
+      "type": "control",
+      "config": {}
+    },
+    {
+      "id": "loop_body",
+      "name": "Loop Body LLM",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini"
+      }
+    },
+    {
+      "id": "output",
+      "name": "Final Output",
+      "type": "output"
+    },
+    {
+      "id": "orphan_llm",
+      "name": "Orphaned LLM Node",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-5-sonnet"
+      }
+    }
+  ],
+  "edges": [
+    { "from": "start",       "to": "browser_tool" },
+    { "from": "browser_tool","to": "loop_ctrl" },
+    { "from": "loop_ctrl",   "to": "loop_body" },
+    { "from": "loop_body",   "to": "loop_ctrl" },
+    { "from": "loop_ctrl",   "to": "output",    "condition": "done == true" }
+  ]
+}
