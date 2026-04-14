@@ -32,6 +32,8 @@ func (f *AnalyzerFactory) Create(ruleType string) (domain.AnalysisRule, error) {
 		return rules.NewRedundantLLMDetector(), nil
 	case "loop_guard":
 		return rules.NewLoopGuardChecker(), nil
+	case "pii_leak_scanner":
+		return rules.NewPIILeakScanner(), nil
 	default:
 		return nil, fmt.Errorf("unknown rule type: %q", ruleType)
 	}
@@ -46,5 +48,6 @@ func (f *AnalyzerFactory) CreateAll() []domain.AnalysisRule {
 		rules.NewCostAnalyzer(),
 		rules.NewRedundantLLMDetector(),
 		rules.NewLoopGuardChecker(),
+		rules.NewPIILeakScanner(),
 	}
 }

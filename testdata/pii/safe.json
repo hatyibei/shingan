@@ -1,0 +1,46 @@
+{
+  "entry_node_id": "rag_search",
+  "nodes": [
+    {
+      "id": "rag_search",
+      "name": "顧客情報RAG検索",
+      "type": "tool",
+      "config": {
+        "category": "rag",
+        "description": "顧客の購買履歴・個人情報をベクトルDBから検索する"
+      }
+    },
+    {
+      "id": "llm_summarize",
+      "name": "要約LLM",
+      "type": "llm",
+      "config": {
+        "model": "gemini-1.5-flash",
+        "prompt_template": "以下の情報を要約してください"
+      }
+    },
+    {
+      "id": "human_approval",
+      "name": "プライバシー担当者承認",
+      "type": "human",
+      "config": {
+        "role": "privacy_officer",
+        "description": "PIIを含む外部送信の前に人間が内容を確認・承認する"
+      }
+    },
+    {
+      "id": "external_api",
+      "name": "外部マーケティングAPI送信",
+      "type": "tool",
+      "config": {
+        "category": "api",
+        "endpoint": "https://marketing-platform.example.com/api/v1/events"
+      }
+    }
+  ],
+  "edges": [
+    { "from": "rag_search",      "to": "llm_summarize" },
+    { "from": "llm_summarize",   "to": "human_approval" },
+    { "from": "human_approval",  "to": "external_api" }
+  ]
+}

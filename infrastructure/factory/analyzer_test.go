@@ -96,11 +96,11 @@ func TestCreate_RedundantLLMCall(t *testing.T) {
 	}
 }
 
-func TestCreateAll_ReturnsSixRules(t *testing.T) {
+func TestCreateAll_ReturnsSevenRules(t *testing.T) {
 	f := factory.NewAnalyzerFactory()
 	all := f.CreateAll()
-	if len(all) != 6 {
-		t.Fatalf("expected 6 rules, got %d", len(all))
+	if len(all) != 7 {
+		t.Fatalf("expected 7 rules, got %d", len(all))
 	}
 }
 
@@ -115,6 +115,7 @@ func TestCreateAll_ContainsExpectedNames(t *testing.T) {
 		"cost_estimation":       false,
 		"redundant_llm_call":    false,
 		"loop_guard":            false,
+		"pii_leak_scanner":      false,
 	}
 
 	for _, rule := range all {
@@ -141,6 +142,20 @@ func TestCreate_LoopGuard(t *testing.T) {
 		t.Errorf("expected *rules.LoopGuardChecker, got %T", rule)
 	}
 	if rule.Name() != "loop_guard" {
+		t.Errorf("unexpected Name(): %s", rule.Name())
+	}
+}
+
+func TestCreate_PIILeakScanner(t *testing.T) {
+	f := factory.NewAnalyzerFactory()
+	rule, err := f.Create("pii_leak_scanner")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := rule.(*rules.PIILeakScanner); !ok {
+		t.Errorf("expected *rules.PIILeakScanner, got %T", rule)
+	}
+	if rule.Name() != "pii_leak_scanner" {
 		t.Errorf("unexpected Name(): %s", rule.Name())
 	}
 }
