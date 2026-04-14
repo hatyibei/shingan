@@ -214,10 +214,3 @@ func nameFor(id string, nt domain.NodeType, idx int) string {
 	}
 }
 
-// max returns the larger of two ints (stdlib max is Go 1.21+, keep explicit for compat).
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
