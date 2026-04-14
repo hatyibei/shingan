@@ -1,0 +1,15 @@
+.git
+.github
+.gitignore
+.dockerignore
+*.md
+docs/
+scripts/
+/shingan
+/shingan-runner
+/shingan-api
+/shingan-web
+coverage.out
+*.test
+testdata/
+examples/

@@ -1,0 +1,79 @@
+name: "Shingan — AI Agent Workflow Static Analyzer"
+description: "AIエージェントワークフローを実行前に静的解析し、無限ループ・コスト爆発・PII漏洩経路を検出"
+author: "hatyibei"
+branding:
+  icon: "eye"
+  color: "purple"
+
+inputs:
+  format:
+    description: "Input format (json / adk-go / samurai)"
+    required: false
+    default: "adk-go"
+  input:
+    description: "Workflow file or directory to analyze"
+    required: true
+  output:
+    description: "Output format (json / markdown / sarif)"
+    required: false
+    default: "sarif"
+  output-file:
+    description: "Optional output file path. Default: stdout for json/markdown, shingan.sarif for sarif"
+    required: false
+    default: ""
+  fail-on:
+    description: "Exit non-zero on this Severity or higher (critical / warning / info / never)"
+    required: false
+    default: "critical"
+
+outputs:
+  exit-code:
+    description: "0=no findings or Info only, 1=Warning detected, 2=Critical detected"
+    value: ${{ steps.analyze.outputs.exit-code }}
+  findings-count:
+    description: "Total number of findings"
+    value: ${{ steps.analyze.outputs.findings-count }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: "1.25"
+        cache: true
+
+    - name: Install Shingan
+      shell: bash
+      run: |
+        go install github.com/hatyibei/shingan/cmd/shingan@latest
+
+    - name: Run Shingan analyze
+      id: analyze
+      shell: bash
+      run: |
+        OUT="${{ inputs.output-file }}"
+        if [ -z "$OUT" ] && [ "${{ inputs.output }}" = "sarif" ]; then
+          OUT="shingan.sarif"
+        fi
+
+        FLAGS=(--format "${{ inputs.format }}" --input "${{ inputs.input }}" --output "${{ inputs.output }}")
+        if [ -n "$OUT" ]; then
+          FLAGS+=(--output-file "$OUT")
+        fi
+
+        set +e
+        shingan analyze "${FLAGS[@]}"
+        EC=$?
+        set -e
+
+        echo "exit-code=$EC" >> "$GITHUB_OUTPUT"
+
+        # Fail behavior
+        case "${{ inputs.fail-on }}" in
+          critical) [ $EC -ge 2 ] && exit 2 || exit 0 ;;
+          warning)  [ $EC -ge 1 ] && exit $EC || exit 0 ;;
+          info)     exit $EC ;;
+          never)    exit 0 ;;
+          *) echo "Invalid fail-on: ${{ inputs.fail-on }}"; exit 3 ;;
+        esac
