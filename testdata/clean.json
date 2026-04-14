@@ -20,7 +20,10 @@
     {
       "id": "error_branch",
       "name": "Error Handler Branch",
-      "type": "control"
+      "type": "control",
+      "config": {
+        "max_iterations": 1
+      }
     },
     {
       "id": "success_output",

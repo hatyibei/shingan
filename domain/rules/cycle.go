@@ -49,9 +49,12 @@ func (c *CycleDetector) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
 	var findings []domain.Finding
 
 	// DFS closure — returns findings detected on the path rooted at nodeID.
-	var dfs func(nodeID string)
-	dfs = func(nodeID string) {
+	// path holds the current DFS stack (ancestors of nodeID, not including nodeID itself).
+	var dfs func(nodeID string, path []string)
+	dfs = func(nodeID string, path []string) {
 		state[nodeID] = inProgress
+		// Extend path with the current node for descendants to inspect.
+		currentPath := append(path, nodeID)
 
 		for _, edge := range graph.OutgoingEdges(nodeID) {
 			target := edge.To
@@ -60,7 +63,8 @@ func (c *CycleDetector) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
 			case inProgress:
 				// Back edge: we found a cycle. The target node is the entry
 				// point of the cycle and is the one responsible for bounding it.
-				f := c.evaluateCycle(graph, target)
+				// Pass currentPath so evaluateCycle can locate a parent Control node.
+				f := c.evaluateCycle(graph, target, currentPath)
 				// evaluateCycle returns a zero-value Finding when the cycle is safe
 				// (Control node with max_iterations < 100). Skip those.
 				if f.RuleName != "" {
@@ -70,7 +74,7 @@ func (c *CycleDetector) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
 			case unvisited:
 				// Target node not yet visited, recurse.
 				if _, exists := graph.Nodes[target]; exists {
-					dfs(target)
+					dfs(target, currentPath)
 				}
 				// If target is not in Nodes map, it is a dangling reference —
 				// out of scope for CycleDetector, skip silently.
@@ -85,21 +89,34 @@ func (c *CycleDetector) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
 
 	// Start DFS from the entry node.
 	if _, ok := graph.Nodes[graph.EntryNodeID]; ok {
-		dfs(graph.EntryNodeID)
+		dfs(graph.EntryNodeID, nil)
 	}
 
 	// Also visit nodes not reachable from the entry to catch isolated cycles.
 	for id := range graph.Nodes {
 		if state[id] == unvisited {
-			dfs(id)
+			dfs(id, nil)
 		}
 	}
 
 	return findings
 }
 
+// findParentControl scans path (the DFS ancestor stack) in reverse to find the
+// nearest Control node that governs the cycle. Returns nil if not found.
+func (c *CycleDetector) findParentControl(graph *domain.WorkflowGraph, path []string) *domain.Node {
+	for i := len(path) - 1; i >= 0; i-- {
+		n, ok := graph.Nodes[path[i]]
+		if ok && n.Type == domain.NodeTypeControl {
+			return n
+		}
+	}
+	return nil
+}
+
 // evaluateCycle inspects the cycle-entry node and produces an appropriate Finding.
-func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID string) domain.Finding {
+// path is the DFS ancestor stack at the point the back-edge was discovered.
+func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID string, path []string) domain.Finding {
 	node, ok := graph.Nodes[cycleNodeID]
 	if !ok {
 		// Defensive: node missing from map.
@@ -113,7 +130,43 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 	}
 
 	if node.Type != domain.NodeTypeControl {
-		// A cycle whose entry point is not a Control node is always a graph error.
+		// A cycle whose entry point is not a Control node.
+		// Check whether a parent Control node manages this cycle.
+		parentControl := c.findParentControl(graph, path)
+		if parentControl != nil {
+			// The cycle is inside a Control (LoopAgent) node.
+			// Severity depends on max_iterations of the parent Control.
+			raw, exists := parentControl.Config["max_iterations"]
+			if !exists || raw == nil {
+				return domain.Finding{
+					RuleName: c.Name(),
+					Severity: domain.Warning,
+					NodeID:   cycleNodeID,
+					Message: fmt.Sprintf(
+						"cycle detected inside Control node %q via sub-agent %q",
+						parentControl.ID, cycleNodeID,
+					),
+					Suggestion: "Set MaxIterations on the Control (LoopAgent) node to prevent infinite loops. " +
+						"Use loop_guard finding for the primary fix.",
+				}
+			}
+			maxIter, err := toInt(raw)
+			if err != nil || maxIter >= 100 {
+				return domain.Finding{
+					RuleName: c.Name(),
+					Severity: domain.Info,
+					NodeID:   cycleNodeID,
+					Message: fmt.Sprintf(
+						"cycle detected inside Control node %q via sub-agent %q (max_iterations >= 100)",
+						parentControl.ID, cycleNodeID,
+					),
+					Suggestion: "Consider reducing max_iterations below 100 to limit long-running workflows.",
+				}
+			}
+			// max_iterations is set and < 100 — safe loop, no finding.
+			return domain.Finding{}
+		}
+		// No parent Control found — genuine graph definition error.
 		return domain.Finding{
 			RuleName: c.Name(),
 			Severity: domain.Critical,

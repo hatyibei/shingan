@@ -194,3 +194,67 @@ func TestCycleDetector_MaxIterationsFloat64(t *testing.T) {
 		t.Errorf("Severity = %v, want Warning", findings[0].Severity)
 	}
 }
+
+// Case 10: LoopAgent管理下サブエージェントのサイクル（max_iter未設定）→ Warning
+// entry → loop (Control, no max_iter) → classifier (LLM) → classifier (back-edge)
+// DFSパスに Control ノード "loop" が存在 → Warning（Criticalではない）
+func TestCycleDetector_Warning_SubAgentCycleUnderLoopAgentNoMaxIter(t *testing.T) {
+	g := mustBuild(t, testutil.NewBuilder().
+		AddNode("loop", domain.NodeTypeControl).
+		AddNode("entry", domain.NodeTypeLLM).
+		AddNode("classifier", domain.NodeTypeLLM).
+		AddEdge("entry", "loop").
+		AddEdge("loop", "classifier").
+		AddEdge("classifier", "classifier"). // self-loop on LLM sub-agent
+		Entry("entry"))
+
+	findings := rules.NewCycleDetector().Analyze(g)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding (Warning for sub-agent under LoopAgent), got %d: %+v", len(findings), findings)
+	}
+	f := findings[0]
+	if f.Severity != domain.Warning {
+		t.Errorf("Severity = %v, want Warning (sub-agent cycle inside Control node)", f.Severity)
+	}
+	if f.NodeID != "classifier" {
+		t.Errorf("NodeID = %q, want %q", f.NodeID, "classifier")
+	}
+}
+
+// Case 11: LoopAgent管理下サブエージェントのサイクル（max_iter >= 100）→ Info
+func TestCycleDetector_Info_SubAgentCycleUnderLoopAgentHighMaxIter(t *testing.T) {
+	g := mustBuild(t, testutil.NewBuilder().
+		AddNodeWithConfig("loop", domain.NodeTypeControl, map[string]any{"max_iterations": 200}).
+		AddNode("entry", domain.NodeTypeLLM).
+		AddNode("classifier", domain.NodeTypeLLM).
+		AddEdge("entry", "loop").
+		AddEdge("loop", "classifier").
+		AddEdge("classifier", "classifier"). // self-loop on LLM sub-agent
+		Entry("entry"))
+
+	findings := rules.NewCycleDetector().Analyze(g)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding (Info for sub-agent under high-iter LoopAgent), got %d: %+v", len(findings), findings)
+	}
+	f := findings[0]
+	if f.Severity != domain.Info {
+		t.Errorf("Severity = %v, want Info (Control has max_iterations >= 100)", f.Severity)
+	}
+}
+
+// Case 12: LoopAgent管理下サブエージェントのサイクル（max_iter < 100）→ 検出ゼロ（安全）
+func TestCycleDetector_NoFinding_SubAgentCycleUnderSafeLoopAgent(t *testing.T) {
+	g := mustBuild(t, testutil.NewBuilder().
+		AddNodeWithConfig("loop", domain.NodeTypeControl, map[string]any{"max_iterations": 5}).
+		AddNode("entry", domain.NodeTypeLLM).
+		AddNode("classifier", domain.NodeTypeLLM).
+		AddEdge("entry", "loop").
+		AddEdge("loop", "classifier").
+		AddEdge("classifier", "classifier"). // self-loop on LLM sub-agent
+		Entry("entry"))
+
+	findings := rules.NewCycleDetector().Analyze(g)
+	if len(findings) != 0 {
+		t.Errorf("expected 0 findings for safe loop (max_iter < 100), got %d: %+v", len(findings), findings)
+	}
+}

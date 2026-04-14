@@ -96,11 +96,11 @@ func TestCreate_RedundantLLMCall(t *testing.T) {
 	}
 }
 
-func TestCreateAll_ReturnsFiveRules(t *testing.T) {
+func TestCreateAll_ReturnsSixRules(t *testing.T) {
 	f := factory.NewAnalyzerFactory()
 	all := f.CreateAll()
-	if len(all) != 5 {
-		t.Fatalf("expected 5 rules, got %d", len(all))
+	if len(all) != 6 {
+		t.Fatalf("expected 6 rules, got %d", len(all))
 	}
 }
 
@@ -114,6 +114,7 @@ func TestCreateAll_ContainsExpectedNames(t *testing.T) {
 		"error_handler_checker": false,
 		"cost_estimation":       false,
 		"redundant_llm_call":    false,
+		"loop_guard":            false,
 	}
 
 	for _, rule := range all {
@@ -127,5 +128,19 @@ func TestCreateAll_ContainsExpectedNames(t *testing.T) {
 		if !found {
 			t.Errorf("missing expected rule: %s", name)
 		}
+	}
+}
+
+func TestCreate_LoopGuard(t *testing.T) {
+	f := factory.NewAnalyzerFactory()
+	rule, err := f.Create("loop_guard")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := rule.(*rules.LoopGuardChecker); !ok {
+		t.Errorf("expected *rules.LoopGuardChecker, got %T", rule)
+	}
+	if rule.Name() != "loop_guard" {
+		t.Errorf("unexpected Name(): %s", rule.Name())
 	}
 }

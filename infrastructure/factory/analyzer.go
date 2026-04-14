@@ -30,6 +30,8 @@ func (f *AnalyzerFactory) Create(ruleType string) (domain.AnalysisRule, error) {
 		return rules.NewCostAnalyzer(), nil
 	case "redundant_llm_call":
 		return rules.NewRedundantLLMDetector(), nil
+	case "loop_guard":
+		return rules.NewLoopGuardChecker(), nil
 	default:
 		return nil, fmt.Errorf("unknown rule type: %q", ruleType)
 	}
@@ -43,5 +45,6 @@ func (f *AnalyzerFactory) CreateAll() []domain.AnalysisRule {
 		rules.NewErrorHandlerChecker(),
 		rules.NewCostAnalyzer(),
 		rules.NewRedundantLLMDetector(),
+		rules.NewLoopGuardChecker(),
 	}
 }

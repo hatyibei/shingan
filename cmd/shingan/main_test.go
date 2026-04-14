@@ -254,7 +254,9 @@ func pipelineADKGo(t *testing.T, path string) []domain.Finding {
 }
 
 // TestADKGo_InfiniteLoop_CriticalFinding verifies that infinite_loop.go
-// yields at least one Critical finding from cycle_detection.
+// yields at least one Critical finding (loop_guard or cycle_detection).
+// v0.2: cycle_detection Severity for sub-agent cycles under a LoopAgent without
+// MaxIterations is now Warning; loop_guard emits the Critical finding instead.
 func TestADKGo_InfiniteLoop_CriticalFinding(t *testing.T) {
 	findings := pipelineADKGo(t, testdataPath("agents/infinite_loop.go"))
 
@@ -263,16 +265,17 @@ func TestADKGo_InfiniteLoop_CriticalFinding(t *testing.T) {
 		t.Errorf("expected ≥1 Critical finding from infinite_loop.go; findings=%+v", findings)
 	}
 
-	// Confirm cycle_detection fired.
+	// Confirm loop_guard or cycle_detection fired at Critical.
 	fired := false
 	for _, f := range findings {
-		if f.RuleName == "cycle_detection" && f.Severity == domain.Critical {
+		if f.Severity == domain.Critical &&
+			(f.RuleName == "cycle_detection" || f.RuleName == "loop_guard") {
 			fired = true
 			break
 		}
 	}
 	if !fired {
-		t.Errorf("cycle_detection Critical not found; findings=%+v", findings)
+		t.Errorf("neither cycle_detection nor loop_guard Critical found; findings=%+v", findings)
 	}
 }
 
