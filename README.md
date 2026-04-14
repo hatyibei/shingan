@@ -139,6 +139,43 @@ shingan analyze --format adk-go --input examples/real/unreachable.go --output ma
 go test -tags=demo -v -run TestDemo_ .
 ```
 
+## ランタイムデモ — Vertex AI Gemini 実行
+
+Shingan が静的解析で検出したバグを、実際にVertex AI で走らせて**本当に問題になる**ことを実証する live demo。
+
+### デモフロー
+
+```bash
+# バイナリビルド
+go build -o shingan ./cmd/shingan
+go build -o shingan-runner ./cmd/runner
+
+# 全フロー自動実行（認証済み環境なら live 実行、未認証なら --dry-run を追加）
+bash scripts/demo.sh
+# または dry-run（Vertex AI呼び出しなし）
+bash scripts/demo.sh --dry-run
+```
+
+| ステップ | コマンド | 期待結果 |
+|---|---|---|
+| 1. 静的解析でCritical警告 | `./shingan analyze --format adk-go --input examples/runtime/infinite_loop_unbounded.go --output markdown` | `cycle_detection` Critical, exit code 2 |
+| 2. safe-guardで実行拒否 | `./shingan-runner --sample infinite_loop_unbounded --dry-run` | Critical検出 → 実行拒否 |
+| 3. 安全版（MaxIter=3）実行 | `./shingan-runner --sample infinite_loop_bounded` | 3イテレーション後に正常終了 |
+| 4. シンプルなLLM Agent実行 | `./shingan-runner --sample simple` | Geminiが日本語で挨拶 |
+
+### shingan-runner の動作
+
+```
+1. examples/runtime/<sample>.go を Shingan で静的解析
+2. Critical Finding があれば → 実行拒否（safe-guard）
+3. クリーンなら → ADK-Go Runner + Vertex AI Gemini で実行
+```
+
+- `--max-iter N`: LoopAgent の MaxIterations を動的に注入（safe-guard override用）
+- `--dry-run`: 解析のみ、Vertex AI呼び出しなし
+
+詳細: [docs/runtime-demo.md](./docs/runtime-demo.md)
+
 ## アーキテクチャ詳細
 
 - ADR全体 → [shingan-adr.md](./shingan-adr.md)
