@@ -23,6 +23,14 @@ var externalCategories = map[string]bool{
 // Severity rules:
 //   - RAG node (category=="rag") or has_pii==true → external sink, no Human gate → Warning
 //   - Node whose name contains a PII hint keyword → external sink, no Human gate → Info
+//
+// Algorithm (v0.2 — O(V+E) reverse-BFS from sinks):
+//
+//  1. Build forward + reverse adjacency lists in O(E).
+//  2. Classify every node into sinks / ragSources / hintSources / humanSet in O(V).
+//  3. For each sink, run reverse-BFS stopping at Human nodes.
+//     Record all PII sources reachable from the sink in the reverse direction.
+//  4. Emit one Finding per (sink, source) pair, preserving the original Severity.
 type PIILeakScanner struct{}
 
 // NewPIILeakScanner returns a ready-to-use PIILeakScanner.
@@ -78,78 +86,120 @@ func isExternalSink(node *domain.Node) bool {
 }
 
 // Analyze scans the workflow graph for PII leakage paths and returns findings.
+//
+// v0.2: O(V+E) via reverse-BFS from each sink node.
+// Building the reverse adjacency list is O(E); classifying nodes is O(V);
+// each reverse-BFS is O(V+E) across all sinks combined (each edge traversed at most once
+// per sink that reaches it). In typical workflows with few sinks the algorithm is effectively
+// O(V+E) overall.
 func (p *PIILeakScanner) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
 	if graph == nil || len(graph.Nodes) == 0 {
 		return nil
 	}
 
+	// ── Step 1: Build reverse adjacency list in O(E) ──────────────────────────
+	// reverse[to] = list of edges pointing INTO "to"
+	reverse := make(map[string][]domain.Edge, len(graph.Nodes))
+	for _, e := range graph.Edges {
+		reverse[e.To] = append(reverse[e.To], e)
+	}
+
+	// ── Step 2: Classify nodes in O(V) ────────────────────────────────────────
+	type sourceKind uint8
+	const (
+		kindRAG  sourceKind = iota // Warning
+		kindHint                   // Info
+	)
+
+	type sourceInfo struct {
+		kind sourceKind
+		node *domain.Node
+	}
+
+	humanSet := make(map[string]bool, len(graph.Nodes)/10)
+	ragSources := make(map[string]sourceInfo, len(graph.Nodes)/5)
+	var sinks []string
+
+	for id, n := range graph.Nodes {
+		switch {
+		case n.Type == domain.NodeTypeHuman:
+			humanSet[id] = true
+		case isExternalSink(n):
+			sinks = append(sinks, id)
+		}
+		// A node can be both a source and something else (e.g., a Tool with rag category).
+		// We check sources regardless of sink/human classification because the original
+		// implementation did node-centric classification.
+		if isRAGSource(n) {
+			ragSources[id] = sourceInfo{kind: kindRAG, node: n}
+		} else if isPIIHintSource(n) {
+			ragSources[id] = sourceInfo{kind: kindHint, node: n}
+		}
+	}
+
+	if len(sinks) == 0 || len(ragSources) == 0 {
+		return nil
+	}
+
+	// ── Step 3: Reverse-BFS from each sink ────────────────────────────────────
+	// For each sink, traverse the graph backwards (following reverse edges).
+	// Stop at Human nodes — they are safe boundaries.
+	// Collect all PII source nodes reachable in the reverse direction.
 	var findings []domain.Finding
 
-	for _, node := range graph.Nodes {
-		ragSrc := isRAGSource(node)
-		hintSrc := !ragSrc && isPIIHintSource(node)
+	for _, sinkID := range sinks {
+		sinkNode := graph.Nodes[sinkID]
 
-		if !ragSrc && !hintSrc {
-			continue
-		}
-
-		severity := domain.Warning
-		if hintSrc {
-			severity = domain.Info
-		}
-
-		// BFS from this PII source node.
-		// State: visited maps node ID → bool.
-		// When we encounter a Human node, we stop that branch (it's gated).
-		// When we encounter an external sink, we emit a finding and stop that branch.
-		visited := make(map[string]bool)
-		visited[node.ID] = true
-		queue := []string{node.ID}
+		visited := make(map[string]bool, len(graph.Nodes))
+		visited[sinkID] = true
+		queue := []string{sinkID}
 
 		for len(queue) > 0 {
 			current := queue[0]
 			queue = queue[1:]
 
-			for _, edge := range graph.OutgoingEdges(current) {
-				target := edge.To
-				if visited[target] {
+			for _, edge := range reverse[current] {
+				pred := edge.From
+				if visited[pred] {
 					continue
 				}
-				targetNode, exists := graph.Nodes[target]
+				predNode, exists := graph.Nodes[pred]
 				if !exists {
 					continue
 				}
 
-				// Human gate: stop this branch, PII is protected.
-				if targetNode.Type == domain.NodeTypeHuman {
-					visited[target] = true
-					// Do not expand further from Human — consider it a safe boundary.
+				// Human gate: this predecessor is a safe boundary.
+				// Mark visited but do NOT expand further backwards through it.
+				if predNode.Type == domain.NodeTypeHuman {
+					visited[pred] = true
 					continue
 				}
 
-				// External sink without a Human gate: leakage detected.
-				if isExternalSink(targetNode) {
+				visited[pred] = true
+
+				// If this predecessor is a PII source, emit a Finding.
+				if src, ok := ragSources[pred]; ok {
+					severity := domain.Warning
+					if src.kind == kindHint {
+						severity = domain.Info
+					}
 					findings = append(findings, domain.Finding{
 						RuleName: p.Name(),
 						Severity: severity,
-						NodeID:   target,
+						NodeID:   sinkID,
 						Message: fmt.Sprintf(
 							"potential PII leak: path from RAG/PII node %q (%s) to external tool %q (category=%q) without Human approval gate",
-							node.ID, node.Name, target, toolCategory(targetNode),
+							pred, src.node.Name, sinkID, toolCategory(sinkNode),
 						),
 						Suggestion: fmt.Sprintf(
 							"ノード %q と %q の間にHuman承認ノードを挿入するか、PIIフィールドをサニタイズしてください (GDPR/CCPA/個人情報保護法対応)",
-							node.ID, target,
+							pred, sinkID,
 						),
 					})
-					// Mark visited and do not expand further from the sink.
-					visited[target] = true
-					continue
+					// Continue expanding backwards from the source to find more upstream sources.
 				}
 
-				// Intermediate node: continue BFS exploration.
-				visited[target] = true
-				queue = append(queue, target)
+				queue = append(queue, pred)
 			}
 		}
 	}

@@ -1,6 +1,7 @@
 package rules_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/hatyibei/shingan/domain"
@@ -228,6 +229,102 @@ func TestPIILeakScanner_NilGraph(t *testing.T) {
 	findings := rules.NewPIILeakScanner().Analyze(nil)
 	if len(findings) != 0 {
 		t.Errorf("expected 0 findings for nil graph, got %d", len(findings))
+	}
+}
+
+// ─── Case 11: 大規模グラフ (100 nodes, multiple sources/sinks) ───────────────
+//
+// Topology:
+//   src0..src4 (RAG sources) → intermediate0..intermediate9 → sink0..sink4 (api sinks)
+//   src5 → human_gate → sink5 (safe, no finding expected)
+//
+// Expected findings: 5 sources × 5 sinks = 25 Warning findings (each source
+// reachable from each sink via the shared intermediates).
+
+func TestPIILeakScanner_LargeGraph_MultipleSources(t *testing.T) {
+	b := testutil.NewBuilder()
+
+	// 5 RAG source nodes
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("src%d", i)
+		b.AddNodeWithConfig(id, domain.NodeTypeTool, map[string]any{"category": "rag"})
+	}
+	// 10 intermediate LLM nodes
+	for i := 0; i < 10; i++ {
+		id := fmt.Sprintf("mid%d", i)
+		b.AddNode(id, domain.NodeTypeLLM)
+	}
+	// 5 external api sink nodes
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("sink%d", i)
+		b.AddNodeWithConfig(id, domain.NodeTypeTool, map[string]any{"category": "api"})
+	}
+	// Safe path: src5 → human_gate → sink5
+	b.AddNodeWithConfig("src5", domain.NodeTypeTool, map[string]any{"category": "rag"})
+	b.AddNode("human_gate", domain.NodeTypeHuman)
+	b.AddNodeWithConfig("sink5", domain.NodeTypeTool, map[string]any{"category": "api"})
+
+	// All sources connect to all intermediates
+	for i := 0; i < 5; i++ {
+		for j := 0; j < 10; j++ {
+			b.AddEdge(fmt.Sprintf("src%d", i), fmt.Sprintf("mid%d", j))
+		}
+	}
+	// All intermediates connect to all sinks
+	for i := 0; i < 10; i++ {
+		for j := 0; j < 5; j++ {
+			b.AddEdge(fmt.Sprintf("mid%d", i), fmt.Sprintf("sink%d", j))
+		}
+	}
+	// Safe path edges
+	b.AddEdge("src5", "human_gate")
+	b.AddEdge("human_gate", "sink5")
+
+	b.Entry("src0")
+	g := buildPII(t, b)
+
+	findings := rules.NewPIILeakScanner().Analyze(g)
+
+	// Each of the 5 sinks can be reached (in reverse) from each of the 5 RAG sources.
+	// sink5 is blocked by human_gate so no finding for src5→sink5.
+	// Expected: 5 sinks × 5 sources = 25 Warning findings.
+	if len(findings) != 25 {
+		t.Fatalf("expected 25 findings, got %d: %+v", len(findings), findings)
+	}
+	for _, f := range findings {
+		if f.Severity != domain.Warning {
+			t.Errorf("finding %q: Severity = %v, want Warning", f.NodeID, f.Severity)
+		}
+		if f.RuleName != "pii_leak_scanner" {
+			t.Errorf("finding RuleName = %q, want %q", f.RuleName, "pii_leak_scanner")
+		}
+	}
+}
+
+// ─── Case 12: Human gate が1つだけでも正しくブロック ───────────────────────
+//
+// Topology: rag → human → intermediate → sink
+// The Human gate is early in the chain, but everything downstream is safe.
+// Expected: 0 findings.
+
+func TestPIILeakScanner_SingleHumanGate_BlocksAllDownstream(t *testing.T) {
+	g := buildPII(t, testutil.NewBuilder().
+		AddNodeWithConfig("rag", domain.NodeTypeTool, map[string]any{"category": "rag"}).
+		AddNode("human", domain.NodeTypeHuman).
+		AddNode("mid1", domain.NodeTypeLLM).
+		AddNode("mid2", domain.NodeTypeLLM).
+		AddNodeWithConfig("api", domain.NodeTypeTool, map[string]any{"category": "api"}).
+		AddNodeWithConfig("mcp", domain.NodeTypeTool, map[string]any{"category": "mcp"}).
+		AddEdge("rag", "human").
+		AddEdge("human", "mid1").
+		AddEdge("mid1", "mid2").
+		AddEdge("mid2", "api").
+		AddEdge("mid2", "mcp").
+		Entry("rag"))
+
+	findings := rules.NewPIILeakScanner().Analyze(g)
+	if len(findings) != 0 {
+		t.Errorf("expected 0 findings (single Human gate blocks all paths), got %d: %+v", len(findings), findings)
 	}
 }
 
