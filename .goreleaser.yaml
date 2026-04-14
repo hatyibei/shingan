@@ -1,0 +1,126 @@
+version: 2
+
+project_name: shingan
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: shingan
+    main: ./cmd/shingan
+    binary: shingan
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+  - id: shingan-gen
+    main: ./cmd/shingan-gen
+    binary: shingan-gen
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+
+  - id: shingan-api
+    main: ./cmd/api
+    binary: shingan-api
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+
+  - id: shingan-runner
+    main: ./cmd/runner
+    binary: shingan-runner
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+
+  - id: shingan-web
+    main: ./cmd/shingan-web
+    binary: shingan-web
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+
+archives:
+  - id: default
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+      - CHANGELOG.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??:.+$'
+      order: 0
+    - title: Performance
+      regexp: '^.*?perf(\(.+\))??:.+$'
+      order: 1
+    - title: Bug Fixes
+      regexp: '^.*?fix(\(.+\))??:.+$'
+      order: 2
+    - title: Documentation
+      regexp: '^.*?docs(\(.+\))??:.+$'
+      order: 3
+    - title: Others
+      order: 999
+
+release:
+  github:
+    owner: hatyibei
+    name: shingan
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## Shingan {{ .Tag }}
+
+    AIエージェントワークフロー静的解析ツール。バイナリは下記のplatform毎にダウンロードして即利用可能。
+  footer: |
+    ---
+
+    **Install (Linux/macOS)**:
+    ```bash
+    curl -L https://github.com/hatyibei/shingan/releases/download/{{ .Tag }}/shingan_{{ .Version }}_$(uname -s | tr A-Z a-z)_$(uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/').tar.gz | tar xz
+    ./shingan --help
+    ```
+
+    **Install (Go)**:
+    ```bash
+    go install github.com/hatyibei/shingan/cmd/shingan@{{ .Tag }}
+    ```
