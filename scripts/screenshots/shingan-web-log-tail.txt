@@ -1,0 +1,30 @@
+2026/04/15 07:26:05 GET /api/builder/app/simple_hello?ts=1776205565575 10.204µs
+2026/04/15 07:26:05 GET /api/apps/simple_hello/users/user/sessions/36deecf3-4af5-4355-825f-665b51e0f5e6 35.24µs
+2026/04/15 07:26:05 GET /api/debug/trace/session/36deecf3-4af5-4355-825f-665b51e0f5e6 13.001µs
+2026/04/15 07:26:05 GET /api/debug/trace/session/36deecf3-4af5-4355-825f-665b51e0f5e6 10.474µs
+2026/04/15 07:26:05 GET /api/apps/simple_hello/users/user/sessions 54.915µs
+2026/04/15 07:26:06 GET /api/apps/simple_hello/users/user/sessions 52.399µs
+2026/04/15 07:26:07 [shingan] guard check: agent="simple_hello" path=/api/run_sse
+2026/04/15 07:26:07 [shingan] PASSED: agent="simple_hello" (no critical findings)
+2026/04/15 07:26:08 POST /api/run_sse 781.694629ms
+2026/04/15 07:26:08 GET /api/debug/trace/session/36deecf3-4af5-4355-825f-665b51e0f5e6 15.423µs
+2026/04/15 07:26:55 GET /ui/ 118.355µs
+2026/04/15 07:26:55 GET /ui/chunk-W7GRJBO5.js 75.622µs
+2026/04/15 07:26:55 GET /ui/polyfills-5CFQRCPP.js 107.88µs
+2026/04/15 07:26:55 GET /ui/chunk-7TJPJFPQ.js 371.135µs
+2026/04/15 07:26:55 GET /ui/styles-YY6V3TJU.css 106.206µs
+2026/04/15 07:26:55 GET /ui/main-ORIYWHAC.js 2.769978ms
+2026/04/15 07:26:55 GET /ui/assets/config/runtime-config.json 16.101µs
+2026/04/15 07:26:55 GET /api/list-apps?relative_path=./ 14.214µs
+2026/04/15 07:26:55 GET /ui/assets/ADK-512-color.svg 49.68µs
+2026/04/15 07:26:58 POST /api/apps/infinite_loop_bounded/users/user/sessions 46.411µs
+2026/04/15 07:26:58 GET /api/builder/app/infinite_loop_bounded?ts=1776205618839 11.683µs
+2026/04/15 07:26:58 GET /api/apps/infinite_loop_bounded/users/user/sessions/e1df55a4-cb67-4e6e-bf75-ee4adfd56638 40.555µs
+2026/04/15 07:26:58 GET /api/debug/trace/session/e1df55a4-cb67-4e6e-bf75-ee4adfd56638 16.667µs
+2026/04/15 07:26:58 GET /api/debug/trace/session/e1df55a4-cb67-4e6e-bf75-ee4adfd56638 15.06µs
+2026/04/15 07:26:59 GET /api/apps/infinite_loop_bounded/users/user/sessions 52.915µs
+2026/04/15 07:26:59 GET /api/apps/infinite_loop_bounded/users/user/sessions 35.582µs
+2026/04/15 07:27:01 [shingan] guard check: agent="infinite_loop_bounded" path=/api/run_sse
+2026/04/15 07:27:01 [shingan] PASSED: agent="infinite_loop_bounded" (no critical findings)
+2026/04/15 07:27:04 POST /api/run_sse 2.85644554s
+2026/04/15 07:27:04 GET /api/debug/trace/session/e1df55a4-cb67-4e6e-bf75-ee4adfd56638 28.335µs
