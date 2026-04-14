@@ -160,6 +160,7 @@ shingan analyze --format adk-go --input examples/real/missing_handler.go --outpu
 - `loopagent.New(loopagent.Config{AgentConfig: agent.Config{SubAgents: ...}})` パターンに対応済み（v1.1.0）
 - LlmAgent / SequentialAgent / LoopAgent の `New()` コンストラクタパターンを AST で検出
 - `functiontool.New(Config{Name: "..."}, handler)` で登録したツールのノード検出に対応済み（`Config.Name` フィールド経由でツール名を取得、ident参照を解決）
+- `functiontool.New[TArgs, TResults](...)` のジェネリクス型引数を `go/types` セカンドパスで解析し、TArgs の struct フィールド名から Tool カテゴリを推定（v0.2.0 で対応済み、`ParseFile` API 経由）。`missing_handler.go` の `browser_search` ツールが `functiontool.New` 経由で正しく検出される
 - LLMノードがToolノードへのエッジを持つがエラーハンドリング分岐がない場合も `error_handler_checker` が Warning を発火（ADK-Go の LLM→Tool エッジパターンに対応）
 - ADK-Go SDK は v1.1.0 で `go 1.25.0` 以上が必要（go.mod のminimum versionに反映済み）
 

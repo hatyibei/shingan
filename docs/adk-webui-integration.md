@@ -188,3 +188,15 @@ scripts/
 docs/
 └── adk-webui-integration.md  # 本ドキュメント
 ```
+
+---
+
+## v0.2.0 解析精度向上: go/types セカンドパス
+
+v0.2.0 で `infrastructure/parser/adkgo.go` に `go/types` ベースのセカンドパスを追加した。
+`ADKGoParser.ParseFile(path)` 経由で呼ぶと、`packages.Load` で型情報付きロードを行い、
+`functiontool.New[TArgs, TResults](...)` の TArgs 型引数を `types.Info.Instances` から取得する。
+
+TArgs の struct 名・フィールド名（例: `browserArgs{Query string}` → "browser"）を使って
+既存の名前ベースのカテゴリ推定を補強するため、middleware での Tool 種別判定がより正確になる。
+`packages.Load` が失敗した場合（ネットワーク非接続、go.sum 不足など）は自動的に AST-only にフォールバックする。

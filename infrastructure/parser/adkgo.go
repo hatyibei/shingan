@@ -5,18 +5,39 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
+	"os"
 	"strings"
+
+	"golang.org/x/tools/go/packages"
 
 	"github.com/hatyibei/shingan/domain"
 )
 
+// ADKGoOption configures an ADKGoParser.
+type ADKGoOption func(*ADKGoParser)
+
+// WithoutTypes disables the go/types second-pass analysis.
+// Useful for fast testing where type information is not needed.
+func WithoutTypes() ADKGoOption {
+	return func(p *ADKGoParser) { p.enableTypes = false }
+}
+
 // ADKGoParser parses WorkflowGraph from ADK-Go source code using Go AST analysis.
-// Only standard library packages (go/parser, go/ast, go/token) are used.
-type ADKGoParser struct{}
+// When enableTypes is true (default), a go/types second-pass is attempted via
+// ParseFile to resolve generic type arguments of functiontool.New[TArgs, TResults].
+type ADKGoParser struct {
+	enableTypes bool
+}
 
 // NewADKGoParser returns a ready-to-use ADKGoParser.
-func NewADKGoParser() *ADKGoParser {
-	return &ADKGoParser{}
+// By default the go/types second-pass is enabled; pass WithoutTypes() to disable it.
+func NewADKGoParser(opts ...ADKGoOption) *ADKGoParser {
+	p := &ADKGoParser{enableTypes: true}
+	for _, o := range opts {
+		o(p)
+	}
+	return p
 }
 
 // SupportedFormat implements application.WorkflowParser.
@@ -1055,5 +1076,225 @@ func inferToolCategory(name string) string {
 		return "api"
 	default:
 		return "api"
+	}
+}
+
+// ─── go/types second-pass ───────────────────────────────────────────────────
+
+// ParseFile parses a single .go file by path.
+// If enableTypes is true, a go/types second-pass is attempted first to enrich
+// tool category inference using the TArgs type of functiontool.New[TArgs, TResults].
+// On any error from the types pass, it falls back to reading the file bytes and
+// calling Parse (the AST-only path).
+func (p *ADKGoParser) ParseFile(path string) (*domain.WorkflowGraph, error) {
+	if p.enableTypes {
+		graph, err := p.parseWithTypes(path)
+		if err == nil {
+			return graph, nil
+		}
+		// Fallback: types pass failed (missing go.sum, network, etc.) — use AST-only.
+	}
+
+	data, err := readFileBytes(path)
+	if err != nil {
+		return nil, fmt.Errorf("adk-go parser: read %q: %w", path, err)
+	}
+	return p.Parse(data)
+}
+
+// readFileBytes reads a file's contents; separated so it can be swapped in tests.
+func readFileBytes(path string) ([]byte, error) {
+	return os.ReadFile(path)
+}
+
+// parseWithTypes loads a Go file using go/packages (with type information) and
+// performs the AST-only parse, then enriches tool nodes using types.Info.Instances
+// to resolve the TArgs type argument of functiontool.New[TArgs, TResults] calls.
+// Returns an error if packages.Load fails or produces errors that prevent analysis.
+func (p *ADKGoParser) parseWithTypes(path string) (*domain.WorkflowGraph, error) {
+	cfg := &packages.Config{
+		Mode: packages.NeedName |
+			packages.NeedFiles |
+			packages.NeedSyntax |
+			packages.NeedTypes |
+			packages.NeedTypesInfo,
+		Fset: token.NewFileSet(),
+	}
+
+	pkgs, err := packages.Load(cfg, "file="+path)
+	if err != nil {
+		return nil, fmt.Errorf("go/packages load: %w", err)
+	}
+	if len(pkgs) == 0 {
+		return nil, fmt.Errorf("go/packages: no packages loaded for %q", path)
+	}
+
+	// Collect any load errors; treat them as fallback triggers.
+	pkg := pkgs[0]
+	if len(pkg.Errors) > 0 {
+		return nil, fmt.Errorf("go/packages errors: %v", pkg.Errors[0])
+	}
+
+	// Read the source bytes from disk for the AST-only pass.
+	fileBytes, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read file for AST pass: %w", err)
+	}
+
+	graph, err := p.Parse(fileBytes)
+	if err != nil {
+		return nil, fmt.Errorf("AST pass: %w", err)
+	}
+
+	// Second pass: enrich tool nodes using go/types instance information.
+	if pkg.TypesInfo != nil {
+		enrichToolsFromTypeInfo(graph, pkg)
+	}
+
+	return graph, nil
+}
+
+// enrichToolsFromTypeInfo walks pkg.TypesInfo.Instances looking for
+// functiontool.New[TArgs, TResults] instantiations.
+// For each instantiation, TArgs struct field names are used to re-infer the
+// tool category with higher confidence (field names like "Query", "URL", etc.
+// are stronger signals than the tool name alone).
+func enrichToolsFromTypeInfo(graph *domain.WorkflowGraph, pkg *packages.Package) {
+	if pkg.TypesInfo == nil {
+		return
+	}
+
+	for ident, inst := range pkg.TypesInfo.Instances {
+		// We only care about "New" (functiontool.New).
+		if ident.Name != "New" {
+			continue
+		}
+		// Verify it is the functiontool package.
+		obj := pkg.TypesInfo.Uses[ident]
+		if obj == nil {
+			continue
+		}
+		pkgPath := ""
+		if fn, ok := obj.(*types.Func); ok {
+			if fn.Pkg() != nil {
+				pkgPath = fn.Pkg().Path()
+			}
+		}
+		if !strings.HasSuffix(pkgPath, "functiontool") {
+			continue
+		}
+
+		// inst.TypeArgs contains [TArgs, TResults].
+		if inst.TypeArgs == nil || inst.TypeArgs.Len() < 1 {
+			continue
+		}
+
+		// TArgs is the first type argument.
+		tArgs := inst.TypeArgs.At(0)
+		category := categoryFromType(tArgs)
+		if category == "" {
+			continue
+		}
+
+		// Apply the enriched category to matching tool nodes.
+		// We identify tools created near this instantiation by checking all
+		// tool nodes whose existing category is the default ("api") and whose
+		// name/fields match the TArgs signals.
+		applyEnrichedCategory(graph, tArgs, category)
+	}
+}
+
+// categoryFromType infers a tool category from a Go type.
+// For struct types, it inspects field names; for named types, it uses the type name.
+func categoryFromType(t types.Type) string {
+	// Dereference pointers.
+	for {
+		if ptr, ok := t.(*types.Pointer); ok {
+			t = ptr.Elem()
+		} else {
+			break
+		}
+	}
+
+	// Collect names to inspect: type name + struct field names.
+	var names []string
+
+	switch tt := t.(type) {
+	case *types.Named:
+		names = append(names, tt.Obj().Name())
+		if st, ok := tt.Underlying().(*types.Struct); ok {
+			for i := 0; i < st.NumFields(); i++ {
+				names = append(names, st.Field(i).Name())
+			}
+		}
+	case *types.Struct:
+		for i := 0; i < tt.NumFields(); i++ {
+			names = append(names, tt.Field(i).Name())
+		}
+	}
+
+	return inferToolCategoryFromNames(names)
+}
+
+// inferToolCategoryFromNames applies category heuristics over a list of names
+// (type name + field names) combined into a single lower-case string.
+func inferToolCategoryFromNames(names []string) string {
+	combined := strings.ToLower(strings.Join(names, " "))
+	switch {
+	case strings.Contains(combined, "browser") ||
+		strings.Contains(combined, "click") ||
+		strings.Contains(combined, "scrape") ||
+		strings.Contains(combined, "url") ||
+		strings.Contains(combined, "selenium") ||
+		strings.Contains(combined, "puppeteer"):
+		return "browser"
+	case strings.Contains(combined, "mcp"):
+		return "mcp"
+	case strings.Contains(combined, "code") ||
+		strings.Contains(combined, "exec") ||
+		strings.Contains(combined, "shell") ||
+		strings.Contains(combined, "eval"):
+		return "code"
+	case strings.Contains(combined, "fetch") ||
+		strings.Contains(combined, "api") ||
+		strings.Contains(combined, "http") ||
+		strings.Contains(combined, "rest"):
+		return "api"
+	default:
+		return ""
+	}
+}
+
+// applyEnrichedCategory updates the "category" Config field of tool nodes
+// that match the given TArgs type. Matching is done by comparing the
+// category inferred from TArgs against the struct's name-based hints.
+// Only nodes whose current category is the fallback "api" are updated
+// (to avoid overriding more specific categories already set from tool name).
+func applyEnrichedCategory(graph *domain.WorkflowGraph, tArgs types.Type, category string) {
+	// Derive a hint name from the TArgs type (e.g. "browserArgs" → "browser").
+	typeName := ""
+	if named, ok := tArgs.(*types.Named); ok {
+		typeName = strings.ToLower(named.Obj().Name())
+	}
+	if typeName == "" {
+		return
+	}
+
+	for _, node := range graph.Nodes {
+		if node.Type != domain.NodeTypeTool {
+			continue
+		}
+		existing, _ := node.Config["category"].(string)
+		// Only enrich nodes where the type name is a substring of the tool node ID
+		// or vice-versa, ensuring we target the right tool.
+		nodeIDLower := strings.ToLower(node.ID)
+		if strings.Contains(typeName, nodeIDLower) ||
+			strings.Contains(nodeIDLower, strings.TrimSuffix(typeName, "args")) {
+			// Update if the types pass gives a more specific (non-api) category,
+			// or if the current category is the default.
+			if existing == "api" || existing == "" {
+				node.Config["category"] = category
+			}
+		}
 	}
 }

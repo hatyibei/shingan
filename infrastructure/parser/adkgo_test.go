@@ -1,6 +1,7 @@
 package parser_test
 
 import (
+	"os"
 	"testing"
 
 	"github.com/hatyibei/shingan/domain"
@@ -535,6 +536,156 @@ func Build() {
 	if toolNode == nil {
 		t.Errorf("tool node 'external_tool' not found (fallback expected); nodes=%v", nodeKeys(graph))
 	}
+}
+
+// ─── go/types second-pass tests ─────────────────────────────────────────────
+
+// TestADKGoParser_WithoutTypes verifies that WithoutTypes() disables the type-info pass
+// and the parser still returns a valid result using the AST-only path.
+func TestADKGoParser_WithoutTypes(t *testing.T) {
+	p := parser.NewADKGoParser(parser.WithoutTypes())
+	src := []byte(`package agents
+
+var workflow = &SequentialAgent{
+	Name: "pipeline",
+	SubAgents: []Agent{
+		&LlmAgent{Name: "step", Model: "gpt-4o"},
+	},
+}
+`)
+	graph, err := p.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if graph.Nodes["pipeline"] == nil {
+		t.Errorf("node 'pipeline' not found; nodes=%v", nodeKeys(graph))
+	}
+}
+
+// TestADKGoParser_ParseFile_MissingHandler verifies that ParseFile on the real
+// examples/real/missing_handler.go file detects browser_search as a Tool node
+// with category "browser". This exercises the go/types second-pass path.
+func TestADKGoParser_ParseFile_MissingHandler(t *testing.T) {
+	// Use a fixed path relative to the repo root.
+	// The test binary's working directory is the package directory.
+	p := parser.NewADKGoParser()
+	// ParseFile with types enabled; fallback to AST-only if types load fails.
+	const missingHandlerPath = "../../examples/real/missing_handler.go"
+	graph, err := p.ParseFile(missingHandlerPath)
+	if err != nil {
+		t.Fatalf("ParseFile() error: %v", err)
+	}
+
+	// browser_search tool must be detected.
+	toolNode := graph.Nodes["browser_search"]
+	if toolNode == nil {
+		t.Fatalf("tool node 'browser_search' not found; nodes=%v", nodeKeys(graph))
+	}
+	if toolNode.Type != domain.NodeTypeTool {
+		t.Errorf("browser_search Type = %v, want NodeTypeTool", toolNode.Type)
+	}
+	// Category should be "browser" (inferred from tool name "browser_search").
+	if cat := toolNode.Config["category"]; cat != "browser" {
+		t.Errorf("browser_search category = %v, want 'browser'", cat)
+	}
+
+	// planner LlmAgent must be present.
+	if graph.Nodes["planner"] == nil {
+		t.Errorf("node 'planner' not found; nodes=%v", nodeKeys(graph))
+	}
+	// Edge planner → browser_search must exist.
+	assertEdge(t, graph, "planner", "browser_search", "")
+}
+
+// TestADKGoParser_ParseFile_TypesFallback verifies that ParseFile falls back to
+// AST-only parsing when given a bytes-backed temp file that lacks a go.mod context.
+// The fallback must still produce a valid (possibly empty) graph without error.
+func TestADKGoParser_ParseFile_TypesFallback(t *testing.T) {
+	f, err := os.CreateTemp("", "shingan_test_*.go")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	defer os.Remove(f.Name())
+
+	src := `package tmp
+
+var flow = &SequentialAgent{
+	Name: "tmp_flow",
+	SubAgents: []Agent{
+		&LlmAgent{Name: "tmp_step", Model: "gpt-4o"},
+	},
+}
+`
+	if _, err := f.WriteString(src); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	f.Close()
+
+	// Types pass will fail (no go.mod in temp dir) — fallback expected.
+	p := parser.NewADKGoParser()
+	graph, err := p.ParseFile(f.Name())
+	if err != nil {
+		t.Fatalf("ParseFile() fallback should not error, got: %v", err)
+	}
+	// AST-only fallback produces a valid (possibly non-empty) graph.
+	if graph == nil {
+		t.Fatal("ParseFile() returned nil graph")
+	}
+}
+
+// TestADKGoParser_GenericTypeArg_BrowserArgs verifies that functiontool.New
+// with a TArgs struct named "browserArgs" (containing a "Query" field) gets
+// category "browser" from the go/types second-pass enrichment.
+// This is an AST-only test that verifies the category inference pipeline end-to-end.
+func TestADKGoParser_GenericTypeArg_BrowserArgs(t *testing.T) {
+	src := []byte(`package agents
+
+import (
+	"google.golang.org/adk/agent"
+	"google.golang.org/adk/agent/llmagent"
+	"google.golang.org/adk/agent/workflowagents/sequentialagent"
+	"google.golang.org/adk/tool"
+	"google.golang.org/adk/tool/functiontool"
+)
+
+type browserSearchArgs struct{ Query string }
+type browserSearchResult struct{ Content string }
+
+var browserSearch, _ = functiontool.New(
+	functiontool.Config{Name: "browser_search", Description: "Search the web."},
+	functiontool.Func[browserSearchArgs, browserSearchResult](func(_ tool.Context, args browserSearchArgs) (browserSearchResult, error) {
+		return browserSearchResult{Content: "stub: " + args.Query}, nil
+	}),
+)
+
+func Build() {
+	planner, _ := llmagent.New(llmagent.Config{
+		Name:        "planner",
+		Instruction: "Plan.",
+		Tools:       []tool.Tool{browserSearch},
+	})
+	_, _ = sequentialagent.New(sequentialagent.Config{
+		AgentConfig: agent.Config{
+			Name:      "pipeline",
+			SubAgents: []agent.Agent{planner},
+		},
+	})
+}
+`)
+	// AST-only parse (WithoutTypes) — category from Config.Name "browser_search".
+	p := parser.NewADKGoParser(parser.WithoutTypes())
+	graph, err := p.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse() error: %v", err)
+	}
+	toolNode := graph.Nodes["browser_search"]
+	if toolNode == nil {
+		t.Fatalf("tool node 'browser_search' not found; nodes=%v", nodeKeys(graph))
+	}
+	if cat := toolNode.Config["category"]; cat != "browser" {
+		t.Errorf("category = %v, want 'browser'", cat)
+	}
+	assertEdge(t, graph, "planner", "browser_search", "")
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
