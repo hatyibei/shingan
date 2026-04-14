@@ -16,7 +16,7 @@ func NewReporterFactory() *ReporterFactory {
 }
 
 // Create returns a ReportFormatter for the given format name.
-// Supported formats: "json", "markdown".
+// Supported formats: "json", "markdown", "sarif".
 // Returns an error for unknown format names.
 func (f *ReporterFactory) Create(format string) (application.ReportFormatter, error) {
 	switch format {
@@ -24,7 +24,9 @@ func (f *ReporterFactory) Create(format string) (application.ReportFormatter, er
 		return reporter.NewJSONReporter(), nil
 	case "markdown":
 		return reporter.NewMarkdownReporter(), nil
+	case "sarif":
+		return reporter.NewSARIFReporter(), nil
 	default:
-		return nil, fmt.Errorf("unknown reporter format %q: supported formats are \"json\", \"markdown\"", format)
+		return nil, fmt.Errorf("unknown reporter format %q: supported formats are \"json\", \"markdown\", \"sarif\"", format)
 	}
 }

@@ -293,6 +293,50 @@ func TestADKGo_InfiniteLoop_ExitCode2(t *testing.T) {
 	}
 }
 
+// TestExecuteAnalyze_SARIFOutput verifies that --output sarif produces valid SARIF v2.1.0 JSON.
+func TestExecuteAnalyze_SARIFOutput(t *testing.T) {
+	outPath := filepath.Join(t.TempDir(), "result.sarif")
+	flags := &analyzeFlags{
+		input:      testdataPath("buggy.json"),
+		output:     "sarif",
+		outputFile: outPath,
+	}
+
+	code, err := executeAnalyze(flags)
+	if err != nil {
+		t.Fatalf("executeAnalyze: %v", err)
+	}
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
+	}
+
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read output file: %v", err)
+	}
+
+	var doc map[string]interface{}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("SARIF output is not valid JSON: %v", err)
+	}
+	if doc["version"] != "2.1.0" {
+		t.Errorf("SARIF version = %q, want \"2.1.0\"", doc["version"])
+	}
+	if doc["$schema"] != "https://json.schemastore.org/sarif-2.1.0.json" {
+		t.Errorf("SARIF $schema = %q", doc["$schema"])
+	}
+	runs := doc["runs"].([]interface{})
+	run := runs[0].(map[string]interface{})
+	driver := run["tool"].(map[string]interface{})["driver"].(map[string]interface{})
+	if driver["name"] != "Shingan" {
+		t.Errorf("driver.name = %q, want \"Shingan\"", driver["name"])
+	}
+	results := run["results"].([]interface{})
+	if len(results) == 0 {
+		t.Error("expected ≥1 SARIF result for buggy.json, got 0")
+	}
+}
+
 // TestADKGo_Directory_MergesAllFiles verifies directory-mode merges nodes from all fixture files.
 func TestADKGo_Directory_MergesAllFiles(t *testing.T) {
 	flags := &analyzeFlags{

@@ -72,3 +72,25 @@ func TestReporterFactory_EmptyFormat(t *testing.T) {
 		t.Errorf("expected nil reporter on error, got %T", r)
 	}
 }
+
+func TestReporterFactory_SARIF(t *testing.T) {
+	f := factory.NewReporterFactory()
+	r, err := f.Create("sarif")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := r.(*reporter.SARIFReporter); !ok {
+		t.Errorf("expected *reporter.SARIFReporter, got %T", r)
+	}
+}
+
+func TestReporterFactory_ContentType_SARIF(t *testing.T) {
+	f := factory.NewReporterFactory()
+	r, err := f.Create("sarif")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := r.ContentType(); got != "application/sarif+json" {
+		t.Errorf("ContentType() = %q, want %q", got, "application/sarif+json")
+	}
+}

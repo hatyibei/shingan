@@ -45,7 +45,7 @@ Exit codes:
 
 	cmd.Flags().StringVar(&flags.input, "input", "", "Path to the workflow file or directory (required)")
 	cmd.Flags().StringVar(&flags.format, "format", "json", "Input format: json or adk-go")
-	cmd.Flags().StringVar(&flags.output, "output", "json", "Output format: json or markdown")
+	cmd.Flags().StringVar(&flags.output, "output", "json", "Output format: json, markdown, or sarif")
 	cmd.Flags().StringVar(&flags.outputFile, "output-file", "", "Output file path (default: stdout)")
 
 	_ = cmd.MarkFlagRequired("input")
