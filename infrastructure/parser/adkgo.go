@@ -34,13 +34,14 @@ func (p *ADKGoParser) Parse(input []byte) (*domain.WorkflowGraph, error) {
 	}
 
 	b := &adkgoBuilder{
-		fset:        fset,
-		file:        file,
-		nodes:       make(map[string]*domain.Node),
-		counter:     0,
-		varDecls:    make(map[string]*ast.CompositeLit),
-		varCallArgs: make(map[string]*ast.CompositeLit),
-		varAgentIDs: make(map[string]string),
+		fset:             fset,
+		file:             file,
+		nodes:            make(map[string]*domain.Node),
+		counter:          0,
+		varDecls:         make(map[string]*ast.CompositeLit),
+		varCallArgs:      make(map[string]*ast.CompositeLit),
+		varAgentIDs:      make(map[string]string),
+		varFuncToolNames: make(map[string]string),
 	}
 
 	// Pre-scan package-level var declarations so identifier references can be resolved.
@@ -73,14 +74,15 @@ func (p *ADKGoParser) Parse(input []byte) (*domain.WorkflowGraph, error) {
 
 // adkgoBuilder holds parsing state while walking the AST.
 type adkgoBuilder struct {
-	fset        *token.FileSet
-	file        *ast.File
-	nodes       map[string]*domain.Node
-	edges       []domain.Edge
-	counter     int
-	varDecls    map[string]*ast.CompositeLit // package-level var name -> composite literal (bare struct)
-	varCallArgs map[string]*ast.CompositeLit // var name -> Config literal passed to pkgname.New(cfg)
-	varAgentIDs map[string]string            // var name -> already-assigned nodeID (real-API style)
+	fset             *token.FileSet
+	file             *ast.File
+	nodes            map[string]*domain.Node
+	edges            []domain.Edge
+	counter          int
+	varDecls         map[string]*ast.CompositeLit // package-level var name -> composite literal (bare struct)
+	varCallArgs      map[string]*ast.CompositeLit // var name -> Config literal passed to pkgname.New(cfg)
+	varAgentIDs      map[string]string            // var name -> already-assigned nodeID (real-API style)
+	varFuncToolNames map[string]string            // var name -> tool name from functiontool.New(Config{Name:...}, ...)
 }
 
 // collectVarDecls pre-scans the file for package-level var declarations of agent composite literals.
@@ -104,6 +106,11 @@ func (b *adkgoBuilder) collectVarDecls() {
 				val := vs.Values[i]
 				if cl := extractCompositeLit(val); cl != nil {
 					b.varDecls[name.Name] = cl
+					continue
+				}
+				// Detect functiontool.New(Config{Name: "..."}, handler) at package level.
+				if toolName := extractFuncToolName(val); toolName != "" {
+					b.varFuncToolNames[name.Name] = toolName
 					continue
 				}
 				// Also handle pkgname.New(Config{...}) at package level.
@@ -135,6 +142,11 @@ func (b *adkgoBuilder) collectFuncVarDecls(body *ast.BlockStmt) {
 				continue
 			}
 			if i >= len(stmt.Rhs) {
+				continue
+			}
+			// Detect functiontool.New(...) in function body.
+			if toolName := extractFuncToolName(stmt.Rhs[i]); toolName != "" {
+				b.varFuncToolNames[ident.Name] = toolName
 				continue
 			}
 			if cfg := extractNewCallConfig(stmt.Rhs[i]); cfg != nil {
@@ -170,6 +182,41 @@ func extractNewCallConfig(expr ast.Expr) *ast.CompositeLit {
 		return nil
 	}
 	return extractCompositeLit(call.Args[0])
+}
+
+// extractFuncToolName detects a functiontool.New(Config{Name: "..."}, handler) call
+// and extracts the tool name from the Config's Name field.
+// Returns "" if the expression is not this pattern.
+func extractFuncToolName(expr ast.Expr) string {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return ""
+	}
+	// Unwrap generic index expressions (functiontool.New[T, R](...)).
+	fun := call.Fun
+	if idx, ok2 := fun.(*ast.IndexListExpr); ok2 {
+		fun = idx.X
+	} else if idx, ok2 := fun.(*ast.IndexExpr); ok2 {
+		fun = idx.X
+	}
+	sel, ok := fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "New" {
+		return ""
+	}
+	pkgIdent, ok := sel.X.(*ast.Ident)
+	if !ok || strings.ToLower(pkgIdent.Name) != "functiontool" {
+		return ""
+	}
+	// First argument must be a CompositeLit (functiontool.Config{Name: "..."}).
+	if len(call.Args) == 0 {
+		return ""
+	}
+	cfgLit := extractCompositeLit(call.Args[0])
+	if cfgLit == nil {
+		return ""
+	}
+	fields := extractKeyedFields(cfgLit)
+	return stringFieldValue(fields, "Name")
 }
 
 // findEntryCandidates walks the AST to find all top-level orchestrator agents
@@ -747,7 +794,27 @@ func (b *adkgoBuilder) processTools(fields map[string]ast.Expr, ownerID string) 
 }
 
 // processToolElement extracts a single tool reference and creates a tool node.
+// It resolves identifier names against varFuncToolNames (functiontool.New results)
+// to obtain the tool's declared Name from its Config, falling back to the variable name.
 func (b *adkgoBuilder) processToolElement(expr ast.Expr) string {
+	// Try to get the identifier name first (for varFuncToolNames lookup).
+	if ident, ok := expr.(*ast.Ident); ok {
+		// If this var was created via functiontool.New(Config{Name: "..."}, handler),
+		// use the declared tool name from the Config for better accuracy.
+		if toolName, found := b.varFuncToolNames[ident.Name]; found {
+			nodeID := toSnakeCase(toolName)
+			if _, exists := b.nodes[nodeID]; !exists {
+				b.nodes[nodeID] = &domain.Node{
+					ID:     nodeID,
+					Name:   toolName,
+					Type:   domain.NodeTypeTool,
+					Config: map[string]any{"category": inferToolCategory(toolName)},
+				}
+			}
+			return nodeID
+		}
+	}
+
 	name := extractIdentOrSelectorName(expr)
 	if name == "" {
 		return ""
@@ -964,14 +1031,28 @@ func toSnakeCase(s string) string {
 }
 
 // inferToolCategory guesses the category of a tool from its identifier name.
-// Known keywords: browser, code, api (default).
+// Keyword priority: browser > mcp > code > api (default).
 func inferToolCategory(name string) string {
 	lower := strings.ToLower(name)
 	switch {
-	case strings.Contains(lower, "browser"):
+	case strings.Contains(lower, "browser") ||
+		strings.Contains(lower, "click") ||
+		strings.Contains(lower, "scrape") ||
+		strings.Contains(lower, "selenium") ||
+		strings.Contains(lower, "puppeteer"):
 		return "browser"
-	case strings.Contains(lower, "code") || strings.Contains(lower, "exec"):
+	case strings.Contains(lower, "mcp"):
+		return "mcp"
+	case strings.Contains(lower, "code") ||
+		strings.Contains(lower, "exec") ||
+		strings.Contains(lower, "shell") ||
+		strings.Contains(lower, "eval"):
 		return "code"
+	case strings.Contains(lower, "fetch") ||
+		strings.Contains(lower, "api") ||
+		strings.Contains(lower, "http") ||
+		strings.Contains(lower, "rest"):
+		return "api"
 	default:
 		return "api"
 	}

@@ -223,3 +223,96 @@ func TestErrorHandlerChecker_Name(t *testing.T) {
 		t.Errorf("unexpected Name(): %q", checker.Name())
 	}
 }
+
+// ─── LLM-node Check 2 tests (ADK-Go pattern: LLM→Tool edges) ────────────────
+
+// TestErrorHandlerChecker_LLMWithTerminalTool_Warning checks that an LLM node
+// whose only outgoing edge leads to a terminal Tool node (no outgoing edges from tool)
+// produces a Warning — the common ADK-Go LLM→Tool pattern.
+func TestErrorHandlerChecker_LLMWithTerminalTool_Warning(t *testing.T) {
+	g := mustBuild(t, testutil.NewBuilder().
+		AddNode("planner", domain.NodeTypeLLM).
+		AddNodeWithConfig("browser_search", domain.NodeTypeTool, map[string]any{"category": "browser"}).
+		AddEdge("planner", "browser_search"). // terminal tool, no outgoing edges
+		Entry("planner"),
+	)
+
+	checker := NewErrorHandlerChecker()
+	findings := checker.Analyze(g)
+
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d: %+v", len(findings), findings)
+	}
+	f := findings[0]
+	if f.NodeID != "planner" {
+		t.Errorf("expected NodeID=planner, got %q", f.NodeID)
+	}
+	if f.Severity != domain.Warning {
+		t.Errorf("expected Warning severity, got %v", f.Severity)
+	}
+	if f.RuleName != checker.Name() {
+		t.Errorf("expected RuleName=%q, got %q", checker.Name(), f.RuleName)
+	}
+}
+
+// TestErrorHandlerChecker_LLMWithToolHavingConditionalEdge_NoFinding checks that
+// when the Tool node downstream from an LLM node has conditional outgoing edges,
+// no finding is reported (error handling is present).
+func TestErrorHandlerChecker_LLMWithToolHavingConditionalEdge_NoFinding(t *testing.T) {
+	g := mustBuild(t, testutil.NewBuilder().
+		AddNode("planner", domain.NodeTypeLLM).
+		AddNodeWithConfig("api_tool", domain.NodeTypeTool, map[string]any{"category": "api"}).
+		AddNode("success", domain.NodeTypeOutput).
+		AddNode("failure", domain.NodeTypeOutput).
+		AddEdge("planner", "api_tool").
+		AddConditionalEdge("api_tool", "success", "ok").
+		AddConditionalEdge("api_tool", "failure", "error").
+		Entry("planner"),
+	)
+
+	checker := NewErrorHandlerChecker()
+	findings := checker.Analyze(g)
+
+	if len(findings) != 0 {
+		t.Errorf("expected 0 findings (tool has error handling), got %d: %+v", len(findings), findings)
+	}
+}
+
+// TestErrorHandlerChecker_LLMWithConditionalEdgeToTool_NoFinding checks that an LLM
+// node whose outgoing edges include conditional branches (regardless of tool presence)
+// does not produce a finding.
+func TestErrorHandlerChecker_LLMWithConditionalEdgeToTool_NoFinding(t *testing.T) {
+	g := mustBuild(t, testutil.NewBuilder().
+		AddNode("planner", domain.NodeTypeLLM).
+		AddNodeWithConfig("browser_search", domain.NodeTypeTool, map[string]any{"category": "browser"}).
+		AddNode("fallback", domain.NodeTypeOutput).
+		AddConditionalEdge("planner", "browser_search", "proceed").
+		AddConditionalEdge("planner", "fallback", "error").
+		Entry("planner"),
+	)
+
+	checker := NewErrorHandlerChecker()
+	findings := checker.Analyze(g)
+
+	if len(findings) != 0 {
+		t.Errorf("expected 0 findings (LLM has conditional edges), got %d: %+v", len(findings), findings)
+	}
+}
+
+// TestErrorHandlerChecker_LLMWithoutTools_NoFinding verifies that an LLM node
+// whose edges all lead to other LLM nodes (no Tool targets) is not flagged.
+func TestErrorHandlerChecker_LLMWithoutTools_NoFinding(t *testing.T) {
+	g := mustBuild(t, testutil.NewBuilder().
+		AddNode("planner", domain.NodeTypeLLM).
+		AddNode("summarizer", domain.NodeTypeLLM).
+		AddEdge("planner", "summarizer").
+		Entry("planner"),
+	)
+
+	checker := NewErrorHandlerChecker()
+	findings := checker.Analyze(g)
+
+	if len(findings) != 0 {
+		t.Errorf("expected 0 findings (no tool targets), got %d: %+v", len(findings), findings)
+	}
+}

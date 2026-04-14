@@ -140,7 +140,7 @@ bash scripts/web-demo.sh
 |---|---|---|---|
 | examples/real/infinite_loop.go | cycle_detection | Critical | loopagent.New + MaxIterations未設定で無限ループを検出 |
 | examples/real/unreachable.go | unreachable_node | Warning | orphan_analyzerが orchestratorのSubAgentsに未接続で到達不能を検出 |
-| examples/real/missing_handler.go | error_handler_checker | Warning | ※下記注記参照 |
+| examples/real/missing_handler.go | error_handler_checker | Warning | plannerがbrowser_searchツールを使うが条件分岐なし → 対応済み |
 
 実行:
 
@@ -150,13 +150,17 @@ shingan analyze --format adk-go --input examples/real/infinite_loop.go --output 
 
 shingan analyze --format adk-go --input examples/real/unreachable.go --output markdown
 # exit code 1 (Warning)
+
+shingan analyze --format adk-go --input examples/real/missing_handler.go --output markdown
+# exit code 2 (Critical: loop_guard + Warning: error_handler_checker)
 ```
 
 **公式ADK-Go SDKとの差分・注記:**
 
 - `loopagent.New(loopagent.Config{AgentConfig: agent.Config{SubAgents: ...}})` パターンに対応済み（v1.1.0）
 - LlmAgent / SequentialAgent / LoopAgent の `New()` コンストラクタパターンを AST で検出
-- `functiontool.New(Config, handler)` で登録したツールのノード検出は未対応（ツールが `tool.Tool` interface 変数として渡される場合、call-site AST解析が必要）→ `missing_handler.go` の error_handler_checker は今後対応予定
+- `functiontool.New(Config{Name: "..."}, handler)` で登録したツールのノード検出に対応済み（`Config.Name` フィールド経由でツール名を取得、ident参照を解決）
+- LLMノードがToolノードへのエッジを持つがエラーハンドリング分岐がない場合も `error_handler_checker` が Warning を発火（ADK-Go の LLM→Tool エッジパターンに対応）
 - ADK-Go SDK は v1.1.0 で `go 1.25.0` 以上が必要（go.mod のminimum versionに反映済み）
 
 ```bash

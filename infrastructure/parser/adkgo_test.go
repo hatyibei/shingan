@@ -387,6 +387,156 @@ func BuildUnreachable() {
 	}
 }
 
+// ─── functiontool.New detection tests ───────────────────────────────────────
+
+// TestADKGoParser_FunctiontoolNew_APINameFromConfig verifies that a package-level var
+// created with functiontool.New(Config{Name: "fetch_data", ...}, handler) produces
+// a tool node whose ID and name derive from the Config.Name field, not the var name.
+func TestADKGoParser_FunctiontoolNew_APINameFromConfig(t *testing.T) {
+	src := []byte(`package agents
+
+import (
+	"google.golang.org/adk/agent"
+	"google.golang.org/adk/agent/llmagent"
+	"google.golang.org/adk/agent/workflowagents/sequentialagent"
+	"google.golang.org/adk/tool"
+	"google.golang.org/adk/tool/functiontool"
+)
+
+var fetchData, _ = functiontool.New(
+	functiontool.Config{Name: "fetch_data", Description: "Fetch from REST API."},
+	functiontool.Func[struct{}, struct{}](func(_ tool.Context, _ struct{}) (struct{}, error) {
+		return struct{}{}, nil
+	}),
+)
+
+func Build() {
+	worker, _ := llmagent.New(llmagent.Config{
+		Name:        "worker",
+		Instruction: "Do work.",
+		Tools:       []tool.Tool{fetchData},
+	})
+	_, _ = sequentialagent.New(sequentialagent.Config{
+		AgentConfig: agent.Config{
+			Name:      "pipeline",
+			SubAgents: []agent.Agent{worker},
+		},
+	})
+}
+`)
+	p := parser.NewADKGoParser()
+	graph, err := p.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse() error: %v", err)
+	}
+	// Tool node ID should be derived from Config.Name ("fetch_data"), not the var name.
+	toolNode := graph.Nodes["fetch_data"]
+	if toolNode == nil {
+		t.Fatalf("tool node 'fetch_data' not found; nodes=%v", nodeKeys(graph))
+	}
+	if toolNode.Type != domain.NodeTypeTool {
+		t.Errorf("Type = %v, want NodeTypeTool", toolNode.Type)
+	}
+	// Category inferred from name "fetch_data": contains "fetch" → "api".
+	if cat := toolNode.Config["category"]; cat != "api" {
+		t.Errorf("category = %v, want 'api'", cat)
+	}
+	// Edge: worker → fetch_data.
+	assertEdge(t, graph, "worker", "fetch_data", "")
+}
+
+// TestADKGoParser_FunctiontoolNew_BrowserCategoryFromToolName verifies that a tool
+// created with functiontool.New whose Config.Name contains "browser" gets category "browser".
+func TestADKGoParser_FunctiontoolNew_BrowserCategoryFromToolName(t *testing.T) {
+	src := []byte(`package agents
+
+import (
+	"google.golang.org/adk/agent"
+	"google.golang.org/adk/agent/llmagent"
+	"google.golang.org/adk/agent/workflowagents/sequentialagent"
+	"google.golang.org/adk/tool"
+	"google.golang.org/adk/tool/functiontool"
+)
+
+var browserClick, _ = functiontool.New(
+	functiontool.Config{Name: "browser_click", Description: "Click an element."},
+	functiontool.Func[struct{}, struct{}](func(_ tool.Context, _ struct{}) (struct{}, error) {
+		return struct{}{}, nil
+	}),
+)
+
+func Build() {
+	bot, _ := llmagent.New(llmagent.Config{
+		Name:        "bot",
+		Instruction: "Click things.",
+		Tools:       []tool.Tool{browserClick},
+	})
+	_, _ = sequentialagent.New(sequentialagent.Config{
+		AgentConfig: agent.Config{
+			Name:      "clicker",
+			SubAgents: []agent.Agent{bot},
+		},
+	})
+}
+`)
+	p := parser.NewADKGoParser()
+	graph, err := p.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse() error: %v", err)
+	}
+	toolNode := graph.Nodes["browser_click"]
+	if toolNode == nil {
+		t.Fatalf("tool node 'browser_click' not found; nodes=%v", nodeKeys(graph))
+	}
+	if cat := toolNode.Config["category"]; cat != "browser" {
+		t.Errorf("category = %v, want 'browser'", cat)
+	}
+}
+
+// TestADKGoParser_FunctiontoolNew_UnresolvableVarSkipped verifies that a Tools element
+// referring to an unknown identifier (not a functiontool.New var) falls back gracefully
+// to the identifier name without crashing.
+func TestADKGoParser_FunctiontoolNew_UnresolvableVarSkipped(t *testing.T) {
+	src := []byte(`package agents
+
+import (
+	"google.golang.org/adk/agent"
+	"google.golang.org/adk/agent/llmagent"
+	"google.golang.org/adk/agent/workflowagents/sequentialagent"
+	"google.golang.org/adk/tool"
+)
+
+func Build() {
+	// externalTool is declared in another package — not resolvable from this file.
+	worker, _ := llmagent.New(llmagent.Config{
+		Name:        "worker",
+		Instruction: "Do work.",
+		Tools:       []tool.Tool{externalTool},
+	})
+	_, _ = sequentialagent.New(sequentialagent.Config{
+		AgentConfig: agent.Config{
+			Name:      "pipeline",
+			SubAgents: []agent.Agent{worker},
+		},
+	})
+}
+`)
+	p := parser.NewADKGoParser()
+	graph, err := p.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse() error: %v", err)
+	}
+	// Graph should be valid; worker should exist.
+	if graph.Nodes["worker"] == nil {
+		t.Errorf("node 'worker' not found; nodes=%v", nodeKeys(graph))
+	}
+	// Tool node created from identifier name fallback.
+	toolNode := graph.Nodes["external_tool"]
+	if toolNode == nil {
+		t.Errorf("tool node 'external_tool' not found (fallback expected); nodes=%v", nodeKeys(graph))
+	}
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 func assertEdge(t *testing.T, graph *domain.WorkflowGraph, from, to, condition string) {
