@@ -66,8 +66,9 @@ builds:
       - -s -w
 
 archives:
-  - id: default
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - id: cli_tools
+    ids: [shingan, shingan-gen]
+    name_template: "shingan_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats: [tar.gz]
     format_overrides:
       - goos: windows
@@ -76,6 +77,17 @@ archives:
       - README.md
       - LICENSE
       - CHANGELOG.md
+
+  - id: server_tools
+    ids: [shingan-api, shingan-runner, shingan-web]
+    name_template: "shingan-server_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    files:
+      - README.md
+      - LICENSE
+      - CHANGELOG.md
+      - docs/runtime-demo.md
+      - docs/adk-webui-integration.md
 
 checksum:
   name_template: "checksums.txt"
