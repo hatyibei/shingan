@@ -35,3 +35,17 @@ Thumbs.db
 # Go workspace
 go.work
 go.work.sum
+
+# Node.js (scripts/screenshots)
+node_modules/
+npm-debug.log*
+
+# Playwright probe files (temporary)
+scripts/screenshots/probe*.mjs
+scripts/screenshots/probe-*.png
+scripts/screenshots/probe-*.txt
+scripts/screenshots/probe-*.json
+scripts/screenshots/shingan-web-log-tail.txt
+
+# shingan-web binary (auto-built)
+/shingan-web

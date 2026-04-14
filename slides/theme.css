@@ -1,0 +1,250 @@
+/* @theme shingan */
+
+/* ============================================================
+   Shingan — Kiva Interview Theme
+   背景: 深ネイビー #0A1628
+   アクセント: 金 #d4af37
+   文字: 白 #f0f0f0 / 灰 #b0b8c8
+   フォント: Noto Sans JP
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&display=swap');
+
+:root {
+  --color-bg: #0A1628;
+  --color-bg-alt: #0f1f3d;
+  --color-gold: #d4af37;
+  --color-gold-light: #e8c84a;
+  --color-text: #f0f0f0;
+  --color-text-muted: #b0b8c8;
+  --color-border: rgba(212, 175, 55, 0.3);
+  --color-code-bg: #050d1a;
+  --color-code-text: #4ade80;
+  --font-main: 'Noto Sans JP', 'Hiragino Sans', 'Yu Gothic', sans-serif;
+}
+
+section {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-main);
+  font-size: 22px;
+  line-height: 1.6;
+  padding: 48px 64px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  width: 1280px;
+  height: 720px;
+  box-sizing: border-box;
+  position: relative;
+}
+
+/* ---- タイトルスライド ---- */
+section.title {
+  justify-content: center;
+  align-items: flex-start;
+  background: linear-gradient(135deg, #0A1628 60%, #0f2244 100%);
+}
+
+section.title::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--color-gold), transparent);
+}
+
+/* ---- 見出し ---- */
+h1 {
+  font-size: 52px;
+  font-weight: 700;
+  color: var(--color-text);
+  margin: 0 0 8px;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+}
+
+h2 {
+  font-size: 34px;
+  font-weight: 700;
+  color: var(--color-gold);
+  margin: 0 0 28px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--color-border);
+  letter-spacing: 0.02em;
+}
+
+h3 {
+  font-size: 26px;
+  font-weight: 500;
+  color: var(--color-gold-light);
+  margin: 16px 0 8px;
+}
+
+/* ---- 段落・リスト ---- */
+p {
+  color: var(--color-text);
+  margin: 6px 0;
+  font-size: 22px;
+}
+
+ul, ol {
+  padding-left: 1.4em;
+  margin: 4px 0;
+}
+
+li {
+  color: var(--color-text);
+  margin: 8px 0;
+  font-size: 22px;
+  line-height: 1.5;
+}
+
+li::marker {
+  color: var(--color-gold);
+}
+
+/* ---- 強調 ---- */
+strong {
+  color: var(--color-gold-light);
+  font-weight: 700;
+}
+
+em {
+  color: var(--color-text-muted);
+  font-style: normal;
+}
+
+/* ---- コードブロック ---- */
+code {
+  background: var(--color-code-bg);
+  color: var(--color-code-text);
+  font-family: 'JetBrains Mono', 'Source Code Pro', 'Fira Code', monospace;
+  font-size: 0.85em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid rgba(74, 222, 128, 0.2);
+}
+
+pre {
+  background: var(--color-code-bg);
+  border: 1px solid rgba(74, 222, 128, 0.2);
+  border-left: 3px solid var(--color-code-text);
+  border-radius: 6px;
+  padding: 16px 20px;
+  overflow: auto;
+  margin: 12px 0;
+}
+
+pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 18px;
+  color: var(--color-code-text);
+  line-height: 1.5;
+}
+
+/* ---- テーブル ---- */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 20px;
+}
+
+thead tr {
+  background: rgba(212, 175, 55, 0.12);
+  border-bottom: 1px solid var(--color-gold);
+}
+
+th {
+  color: var(--color-gold);
+  font-weight: 600;
+  padding: 8px 14px;
+  text-align: left;
+  letter-spacing: 0.02em;
+}
+
+td {
+  color: var(--color-text);
+  padding: 7px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+tr:last-child td {
+  border-bottom: none;
+}
+
+tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* ---- ヘッダー・フッター ---- */
+header {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.05em;
+  opacity: 0.6;
+}
+
+footer {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  opacity: 0.6;
+}
+
+/* ---- ページ番号 ---- */
+section::after {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  opacity: 0.5;
+}
+
+/* ---- 区切り線 ---- */
+hr {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 16px 0;
+}
+
+/* ---- blockquote ---- */
+blockquote {
+  border-left: 3px solid var(--color-gold);
+  color: var(--color-text-muted);
+  padding: 8px 16px;
+  margin: 12px 0;
+  font-style: italic;
+  background: rgba(212, 175, 55, 0.05);
+}
+
+/* ---- アクセントカラーユーティリティ ---- */
+.gold {
+  color: var(--color-gold);
+}
+
+.muted {
+  color: var(--color-text-muted);
+}
+
+/* ---- タイトルスライド専用: 副題 ---- */
+section.title h2 {
+  font-size: 28px;
+  color: var(--color-text-muted);
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-top: 0;
+  margin-bottom: 40px;
+}
+
+section.title p {
+  font-size: 20px;
+  color: var(--color-text-muted);
+  margin: 6px 0;
+}
+
+section.title strong {
+  color: var(--color-gold);
+}
