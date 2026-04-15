@@ -564,3 +564,66 @@ func GenerateBuggyGraph(seed int64) *domain.WorkflowGraph {
 		EntryNodeID: "buggy_loop",
 	}
 }
+
+// GenerateHighFanOutGraph generates a WorkflowGraph with a single orchestrator node
+// that fans out to `fanout` worker nodes, triggering the max_parallel_branches rule.
+//
+// Expected findings depend on the fanout value:
+//   - fanout >= 100 → max_parallel_branches: Critical (Confidence=1.0)
+//   - fanout >= 20  → max_parallel_branches: Warning  (Confidence=0.9)
+//   - fanout >= 10  → max_parallel_branches: Info     (Confidence=0.7)
+//   - fanout < 10   → no findings
+func GenerateHighFanOutGraph(seed int64, fanout int) *domain.WorkflowGraph {
+	_ = seed // deterministic pattern; seed reserved for future randomization
+
+	if fanout < 0 {
+		fanout = 0
+	}
+
+	nodes := make(map[string]*domain.Node, fanout+2)
+	edges := make([]domain.Edge, 0, fanout*2)
+
+	// Orchestrator node — no max_concurrency, so max_parallel_branches applies
+	nodes["orchestrator"] = &domain.Node{
+		ID:   "orchestrator",
+		Name: "ParallelOrchestrator",
+		Type: domain.NodeTypeLLM,
+		Config: map[string]any{
+			"model": "gemini-2.0-flash-001",
+		},
+	}
+
+	// Worker nodes
+	for i := 0; i < fanout; i++ {
+		workerID := fmt.Sprintf("worker_%03d", i)
+		nodes[workerID] = &domain.Node{
+			ID:   workerID,
+			Name: workerID,
+			Type: domain.NodeTypeLLM,
+			Config: map[string]any{
+				"model": "gpt-4o-mini",
+			},
+		}
+		edges = append(edges, domain.Edge{From: "orchestrator", To: workerID})
+	}
+
+	// Aggregator output node
+	nodes["aggregator"] = &domain.Node{
+		ID:     "aggregator",
+		Name:   "ResultAggregator",
+		Type:   domain.NodeTypeOutput,
+		Config: map[string]any{},
+	}
+
+	// Each worker converges to aggregator
+	for i := 0; i < fanout; i++ {
+		workerID := fmt.Sprintf("worker_%03d", i)
+		edges = append(edges, domain.Edge{From: workerID, To: "aggregator"})
+	}
+
+	return &domain.WorkflowGraph{
+		Nodes:       nodes,
+		Edges:       edges,
+		EntryNodeID: "orchestrator",
+	}
+}

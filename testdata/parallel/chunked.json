@@ -1,0 +1,129 @@
+{
+  "entry_node_id": "orchestrator",
+  "nodes": [
+    {
+      "id": "orchestrator",
+      "name": "ChunkedOrchestrator",
+      "type": "llm",
+      "config": {
+        "model": "gemini-2.0-flash-001"
+      }
+    },
+    {
+      "id": "chunk_a",
+      "name": "ChunkA_Coordinator",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini"
+      }
+    },
+    {
+      "id": "chunk_b",
+      "name": "ChunkB_Coordinator",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini"
+      }
+    },
+    {
+      "id": "chunk_c",
+      "name": "ChunkC_Coordinator",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini"
+      }
+    },
+    {"id": "worker_a_0", "name": "worker_a_0", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_a_1", "name": "worker_a_1", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_a_2", "name": "worker_a_2", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_a_3", "name": "worker_a_3", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_a_4", "name": "worker_a_4", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_a_5", "name": "worker_a_5", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_a_6", "name": "worker_a_6", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_a_7", "name": "worker_a_7", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_a_8", "name": "worker_a_8", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_b_0", "name": "worker_b_0", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_b_1", "name": "worker_b_1", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_b_2", "name": "worker_b_2", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_b_3", "name": "worker_b_3", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_b_4", "name": "worker_b_4", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_b_5", "name": "worker_b_5", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_b_6", "name": "worker_b_6", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_b_7", "name": "worker_b_7", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_b_8", "name": "worker_b_8", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_c_0", "name": "worker_c_0", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_c_1", "name": "worker_c_1", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_c_2", "name": "worker_c_2", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_c_3", "name": "worker_c_3", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_c_4", "name": "worker_c_4", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_c_5", "name": "worker_c_5", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_c_6", "name": "worker_c_6", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_c_7", "name": "worker_c_7", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {"id": "worker_c_8", "name": "worker_c_8", "type": "llm", "config": {"model": "gpt-4o-mini"}},
+    {
+      "id": "aggregator",
+      "name": "ResultAggregator",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    {"from": "orchestrator", "to": "chunk_a"},
+    {"from": "orchestrator", "to": "chunk_b"},
+    {"from": "orchestrator", "to": "chunk_c"},
+    {"from": "chunk_a", "to": "worker_a_0"},
+    {"from": "chunk_a", "to": "worker_a_1"},
+    {"from": "chunk_a", "to": "worker_a_2"},
+    {"from": "chunk_a", "to": "worker_a_3"},
+    {"from": "chunk_a", "to": "worker_a_4"},
+    {"from": "chunk_a", "to": "worker_a_5"},
+    {"from": "chunk_a", "to": "worker_a_6"},
+    {"from": "chunk_a", "to": "worker_a_7"},
+    {"from": "chunk_a", "to": "worker_a_8"},
+    {"from": "chunk_b", "to": "worker_b_0"},
+    {"from": "chunk_b", "to": "worker_b_1"},
+    {"from": "chunk_b", "to": "worker_b_2"},
+    {"from": "chunk_b", "to": "worker_b_3"},
+    {"from": "chunk_b", "to": "worker_b_4"},
+    {"from": "chunk_b", "to": "worker_b_5"},
+    {"from": "chunk_b", "to": "worker_b_6"},
+    {"from": "chunk_b", "to": "worker_b_7"},
+    {"from": "chunk_b", "to": "worker_b_8"},
+    {"from": "chunk_c", "to": "worker_c_0"},
+    {"from": "chunk_c", "to": "worker_c_1"},
+    {"from": "chunk_c", "to": "worker_c_2"},
+    {"from": "chunk_c", "to": "worker_c_3"},
+    {"from": "chunk_c", "to": "worker_c_4"},
+    {"from": "chunk_c", "to": "worker_c_5"},
+    {"from": "chunk_c", "to": "worker_c_6"},
+    {"from": "chunk_c", "to": "worker_c_7"},
+    {"from": "chunk_c", "to": "worker_c_8"},
+    {"from": "worker_a_0", "to": "aggregator"},
+    {"from": "worker_a_1", "to": "aggregator"},
+    {"from": "worker_a_2", "to": "aggregator"},
+    {"from": "worker_a_3", "to": "aggregator"},
+    {"from": "worker_a_4", "to": "aggregator"},
+    {"from": "worker_a_5", "to": "aggregator"},
+    {"from": "worker_a_6", "to": "aggregator"},
+    {"from": "worker_a_7", "to": "aggregator"},
+    {"from": "worker_a_8", "to": "aggregator"},
+    {"from": "worker_b_0", "to": "aggregator"},
+    {"from": "worker_b_1", "to": "aggregator"},
+    {"from": "worker_b_2", "to": "aggregator"},
+    {"from": "worker_b_3", "to": "aggregator"},
+    {"from": "worker_b_4", "to": "aggregator"},
+    {"from": "worker_b_5", "to": "aggregator"},
+    {"from": "worker_b_6", "to": "aggregator"},
+    {"from": "worker_b_7", "to": "aggregator"},
+    {"from": "worker_b_8", "to": "aggregator"},
+    {"from": "worker_c_0", "to": "aggregator"},
+    {"from": "worker_c_1", "to": "aggregator"},
+    {"from": "worker_c_2", "to": "aggregator"},
+    {"from": "worker_c_3", "to": "aggregator"},
+    {"from": "worker_c_4", "to": "aggregator"},
+    {"from": "worker_c_5", "to": "aggregator"},
+    {"from": "worker_c_6", "to": "aggregator"},
+    {"from": "worker_c_7", "to": "aggregator"},
+    {"from": "worker_c_8", "to": "aggregator"}
+  ]
+}

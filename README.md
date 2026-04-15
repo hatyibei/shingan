@@ -181,6 +181,7 @@ go test -tags=demo -v -run TestDemo_ .
 | redundant_llm_call | 同一prompt_template×modelの重複呼出 | Warning | 0.9 (完全一致) |
 | pii_leak_scanner | RAG/PII源ノードから外部シンクへのHuman gate なしパス | Warning | 0.6 (RAG) / 0.3 (名前ヒント) |
 | secret_exposure_scanner | Node.Config にハードコードされた APIキー・シークレット | Critical | 0.95 (Critical/Warning) / 0.5 (Info) |
+| max_parallel_branches | 単一ノードの fan-out (outgoing edges数) が上限超過 | Critical | 1.0 (Critical) / 0.9 (Warning) / 0.7 (Info) |
 
 ## サポートフォーマット
 

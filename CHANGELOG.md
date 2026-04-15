@@ -5,6 +5,15 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 ## [Unreleased]
 
 ### Added
+- `max_parallel_branches` ルール (Issue #1 実装)
+  - fan-out >= 100 → Critical (Confidence=1.0)
+  - fan-out >= 20  → Warning  (Confidence=0.9)
+  - fan-out >= 10  → Info     (Confidence=0.7)
+  - `Config["max_concurrency"]` 設定済みノードはスキップ
+  - `testdata/parallel/` — high_fanout.json, chunked.json, max_concurrency.json
+  - `domain/testutil`: `GenerateHighFanOutGraph(seed, fanout)` 追加
+  - `cmd/shingan-gen`: `--pattern high-fanout` オプション追加
+  - `docs/parallel-branches.md` — 検出ロジック・ParallelAgent関連・max_concurrency解説
 - `deprecated_model` ルール (Issue #2): 停止済み/非推奨LLMモデルを検出
   - `modelShutdown` → Critical (confidence 1.0): 実行時に API エラーが発生するモデル
   - `modelDeprecated` → Warning (confidence 0.9): ~6 ヶ月以内に shutdown 予定のモデル

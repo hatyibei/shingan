@@ -40,6 +40,7 @@ func allRules() []domain.AnalysisRule {
 		rules.NewPIILeakScanner(),
 		rules.NewSecretExposureScanner(),
 		rules.NewDeprecatedModelChecker(),
+		rules.NewMaxParallelBranchesChecker(),
 	}
 }
 
@@ -423,5 +424,65 @@ func TestGenerateRandomGraph_ZeroN(t *testing.T) {
 	}
 	if len(g.Nodes) != 0 {
 		t.Errorf("expected 0 nodes for n=0, got %d", len(g.Nodes))
+	}
+}
+
+// ---- GenerateHighFanOutGraph ----
+
+func TestGenerateHighFanOutGraph_ReturnsValidGraph(t *testing.T) {
+	g := testutil.GenerateHighFanOutGraph(42, 100)
+	if g == nil {
+		t.Fatal("expected non-nil graph")
+	}
+	if len(g.Nodes) == 0 {
+		t.Error("expected at least one node")
+	}
+	if g.EntryNodeID == "" {
+		t.Error("expected EntryNodeID to be set")
+	}
+	if _, ok := g.Nodes[g.EntryNodeID]; !ok {
+		t.Errorf("entry node %q not found in Nodes map", g.EntryNodeID)
+	}
+}
+
+func TestGenerateHighFanOutGraph_FanOut100_TriggersCritical(t *testing.T) {
+	g := testutil.GenerateHighFanOutGraph(42, 100)
+	findings := rules.NewMaxParallelBranchesChecker().Analyze(g)
+	if !hasFinding(findings, "max_parallel_branches", domain.Critical) {
+		t.Errorf("expected max_parallel_branches Critical finding for fan-out=100, got %d findings: %+v", len(findings), findings)
+	}
+}
+
+func TestGenerateHighFanOutGraph_FanOut20_TriggersWarning(t *testing.T) {
+	g := testutil.GenerateHighFanOutGraph(42, 20)
+	findings := rules.NewMaxParallelBranchesChecker().Analyze(g)
+	if !hasFinding(findings, "max_parallel_branches", domain.Warning) {
+		t.Errorf("expected max_parallel_branches Warning finding for fan-out=20, got %d findings: %+v", len(findings), findings)
+	}
+}
+
+func TestGenerateHighFanOutGraph_FanOut5_NoFindings(t *testing.T) {
+	g := testutil.GenerateHighFanOutGraph(42, 5)
+	findings := rules.NewMaxParallelBranchesChecker().Analyze(g)
+	if len(findings) != 0 {
+		t.Errorf("fan-out=5: expected 0 findings, got %d: %+v", len(findings), findings)
+	}
+}
+
+func TestGenerateHighFanOutGraph_OtherRulesClean(t *testing.T) {
+	// fan-out=100グラフ: max_parallel_branches以外のルールは0件であること
+	g := testutil.GenerateHighFanOutGraph(42, 100)
+	otherRules := []domain.AnalysisRule{
+		rules.NewCycleDetector(),
+		rules.NewLoopGuardChecker(),
+		rules.NewReachabilityChecker(),
+		rules.NewRedundantLLMDetector(),
+		rules.NewPIILeakScanner(),
+		rules.NewSecretExposureScanner(),
+	}
+	for _, r := range otherRules {
+		if fs := r.Analyze(g); len(fs) != 0 {
+			t.Errorf("rule %q: expected 0 findings on high-fanout graph, got %d: %+v", r.Name(), len(fs), fs)
+		}
 	}
 }
