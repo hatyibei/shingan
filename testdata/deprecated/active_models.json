@@ -1,0 +1,33 @@
+{
+  "nodes": [
+    {
+      "id": "entry_llm",
+      "name": "entry LLM",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o",
+        "prompt_template": "classify_request"
+      }
+    },
+    {
+      "id": "mid_llm",
+      "name": "mid LLM",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-5-sonnet",
+        "prompt_template": "summarize_output"
+      }
+    },
+    {
+      "id": "output",
+      "name": "output",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    {"from": "entry_llm", "to": "mid_llm"},
+    {"from": "mid_llm", "to": "output"}
+  ],
+  "entry_node_id": "entry_llm"
+}

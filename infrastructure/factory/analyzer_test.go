@@ -96,11 +96,11 @@ func TestCreate_RedundantLLMCall(t *testing.T) {
 	}
 }
 
-func TestCreateAll_ReturnsEightRules(t *testing.T) {
+func TestCreateAll_ReturnsTenRules(t *testing.T) {
 	f := factory.NewAnalyzerFactory()
 	all := f.CreateAll()
-	if len(all) != 8 {
-		t.Fatalf("expected 8 rules, got %d", len(all))
+	if len(all) != 10 {
+		t.Fatalf("expected 10 rules, got %d", len(all))
 	}
 }
 
@@ -117,6 +117,8 @@ func TestCreateAll_ContainsExpectedNames(t *testing.T) {
 		"loop_guard":              false,
 		"pii_leak_scanner":        false,
 		"secret_exposure_scanner": false,
+		"max_parallel_branches":   false,
+		"deprecated_model":        false,
 	}
 
 	for _, rule := range all {
@@ -171,6 +173,34 @@ func TestCreate_SecretExposureScanner(t *testing.T) {
 		t.Errorf("expected *rules.SecretExposureScanner, got %T", rule)
 	}
 	if rule.Name() != "secret_exposure_scanner" {
+		t.Errorf("unexpected Name(): %s", rule.Name())
+	}
+}
+
+func TestCreate_MaxParallelBranches(t *testing.T) {
+	f := factory.NewAnalyzerFactory()
+	rule, err := f.Create("max_parallel_branches")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := rule.(*rules.MaxParallelBranchesChecker); !ok {
+		t.Errorf("expected *rules.MaxParallelBranchesChecker, got %T", rule)
+	}
+	if rule.Name() != "max_parallel_branches" {
+		t.Errorf("unexpected Name(): %s", rule.Name())
+	}
+}
+
+func TestCreate_DeprecatedModel(t *testing.T) {
+	f := factory.NewAnalyzerFactory()
+	rule, err := f.Create("deprecated_model")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := rule.(*rules.DeprecatedModelChecker); !ok {
+		t.Errorf("expected *rules.DeprecatedModelChecker, got %T", rule)
+	}
+	if rule.Name() != "deprecated_model" {
 		t.Errorf("unexpected Name(): %s", rule.Name())
 	}
 }

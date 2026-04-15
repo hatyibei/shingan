@@ -39,6 +39,7 @@ func allRules() []domain.AnalysisRule {
 		rules.NewRedundantLLMDetector(),
 		rules.NewPIILeakScanner(),
 		rules.NewSecretExposureScanner(),
+		rules.NewDeprecatedModelChecker(),
 	}
 }
 
@@ -344,6 +345,50 @@ func TestGenerateSecretExposureGraph_OtherRulesClean(t *testing.T) {
 	for _, r := range otherRules {
 		if fs := r.Analyze(g); len(fs) != 0 {
 			t.Errorf("rule %q: expected 0 findings on secret-exposure graph, got %d: %+v", r.Name(), len(fs), fs)
+		}
+	}
+}
+
+// ---- GenerateDeprecatedModelGraph ----
+
+func TestGenerateDeprecatedModelGraph_ReturnsValidGraph(t *testing.T) {
+	g := testutil.GenerateDeprecatedModelGraph(42)
+	if g == nil {
+		t.Fatal("expected non-nil graph")
+	}
+	if len(g.Nodes) == 0 {
+		t.Error("expected at least one node")
+	}
+	if g.EntryNodeID == "" {
+		t.Error("expected EntryNodeID to be set")
+	}
+	if _, ok := g.Nodes[g.EntryNodeID]; !ok {
+		t.Errorf("entry node %q not found in Nodes map", g.EntryNodeID)
+	}
+}
+
+func TestGenerateDeprecatedModelGraph_TriggersDeprecatedModelCritical(t *testing.T) {
+	g := testutil.GenerateDeprecatedModelGraph(42)
+	findings := rules.NewDeprecatedModelChecker().Analyze(g)
+	if !hasFinding(findings, "deprecated_model", domain.Critical) {
+		t.Errorf("expected deprecated_model Critical finding, got %d findings: %+v", len(findings), findings)
+	}
+}
+
+func TestGenerateDeprecatedModelGraph_OtherRulesClean(t *testing.T) {
+	g := testutil.GenerateDeprecatedModelGraph(42)
+	// Rules other than deprecated_model should produce 0 findings
+	otherRules := []domain.AnalysisRule{
+		rules.NewCycleDetector(),
+		rules.NewLoopGuardChecker(),
+		rules.NewReachabilityChecker(),
+		rules.NewRedundantLLMDetector(),
+		rules.NewPIILeakScanner(),
+		rules.NewSecretExposureScanner(),
+	}
+	for _, r := range otherRules {
+		if fs := r.Analyze(g); len(fs) != 0 {
+			t.Errorf("rule %q: expected 0 findings on deprecated-model graph, got %d: %+v", r.Name(), len(fs), fs)
 		}
 	}
 }

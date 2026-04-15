@@ -4,6 +4,16 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Added
+- `deprecated_model` ルール (Issue #2): 停止済み/非推奨LLMモデルを検出
+  - `modelShutdown` → Critical (confidence 1.0): 実行時に API エラーが発生するモデル
+  - `modelDeprecated` → Warning (confidence 0.9): ~6 ヶ月以内に shutdown 予定のモデル
+  - OpenAI 7件 (shutdown) + 2件 (deprecated)、Anthropic 7件 (shutdown) + 1件 (deprecated)、Google 3件 (shutdown)、計20モデルをカバー
+  - `testdata/deprecated/`: `shutdown_models.json` (Critical×3)、`deprecated_models.json` (Warning×1)、`active_models.json` (0件)
+  - `domain/testutil/generate.go`: `GenerateDeprecatedModelGraph(seed)` 追加
+  - `cmd/shingan-gen`: `--pattern deprecated-model` オプション追加
+  - `docs/deprecated-models.md`: モデル分類テーブル、マイグレーション推奨先、各プロバイダの公式 deprecation policy リンク
+
 ## [0.4.0] - 2026-04-15
 
 ### Added

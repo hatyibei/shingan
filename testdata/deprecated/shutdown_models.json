@@ -1,0 +1,43 @@
+{
+  "nodes": [
+    {
+      "id": "openai_shutdown",
+      "name": "OpenAI shutdown model",
+      "type": "llm",
+      "config": {
+        "model": "gpt-3.5-turbo-0613",
+        "prompt_template": "classify_request"
+      }
+    },
+    {
+      "id": "anthropic_shutdown",
+      "name": "Anthropic shutdown model",
+      "type": "llm",
+      "config": {
+        "model": "claude-2",
+        "prompt_template": "summarize_text"
+      }
+    },
+    {
+      "id": "google_shutdown",
+      "name": "Google shutdown model",
+      "type": "llm",
+      "config": {
+        "model": "gemini-pro",
+        "prompt_template": "generate_response"
+      }
+    },
+    {
+      "id": "output",
+      "name": "output",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    {"from": "openai_shutdown", "to": "anthropic_shutdown"},
+    {"from": "anthropic_shutdown", "to": "google_shutdown"},
+    {"from": "google_shutdown", "to": "output"}
+  ],
+  "entry_node_id": "openai_shutdown"
+}

@@ -1,0 +1,23 @@
+{
+  "nodes": [
+    {
+      "id": "openai_deprecated",
+      "name": "OpenAI deprecated model",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4-32k",
+        "prompt_template": "large_context_analysis"
+      }
+    },
+    {
+      "id": "output",
+      "name": "output",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    {"from": "openai_deprecated", "to": "output"}
+  ],
+  "entry_node_id": "openai_deprecated"
+}

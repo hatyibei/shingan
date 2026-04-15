@@ -36,6 +36,10 @@ func (f *AnalyzerFactory) Create(ruleType string) (domain.AnalysisRule, error) {
 		return rules.NewPIILeakScanner(), nil
 	case "secret_exposure_scanner":
 		return rules.NewSecretExposureScanner(), nil
+	case "max_parallel_branches":
+		return rules.NewMaxParallelBranchesChecker(), nil
+	case "deprecated_model":
+		return rules.NewDeprecatedModelChecker(), nil
 	default:
 		return nil, fmt.Errorf("unknown rule type: %q", ruleType)
 	}
@@ -52,5 +56,7 @@ func (f *AnalyzerFactory) CreateAll() []domain.AnalysisRule {
 		rules.NewLoopGuardChecker(),
 		rules.NewPIILeakScanner(),
 		rules.NewSecretExposureScanner(),
+		rules.NewMaxParallelBranchesChecker(),
+		rules.NewDeprecatedModelChecker(),
 	}
 }

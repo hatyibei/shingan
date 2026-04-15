@@ -391,6 +391,50 @@ func GenerateSecretExposureGraph(seed int64) *domain.WorkflowGraph {
 	}
 }
 
+// GenerateDeprecatedModelGraph generates a WorkflowGraph that triggers the
+// deprecated_model rule with a Critical finding.
+//
+// Structure:
+//   - entry LLM node whose Config["model"] is "gpt-3.5-turbo-0613" (shutdown model)
+//
+// Expected findings:
+//   - deprecated_model: Critical (gpt-3.5-turbo-0613 was shut down on 2024-09-13)
+func GenerateDeprecatedModelGraph(seed int64) *domain.WorkflowGraph {
+	_ = seed // deterministic pattern
+
+	nodes := make(map[string]*domain.Node)
+	var edges []domain.Edge
+
+	// LLM node using a shutdown model — triggers deprecated_model Critical.
+	nodes["deprecated_entry"] = &domain.Node{
+		ID:   "deprecated_entry",
+		Name: "deprecated_llm_agent",
+		Type: domain.NodeTypeLLM,
+		Config: map[string]any{
+			"model":           "gpt-3.5-turbo-0613",
+			"prompt_template": "classify_request",
+		},
+	}
+
+	// Output node
+	nodes["deprecated_output"] = &domain.Node{
+		ID:     "deprecated_output",
+		Name:   "output",
+		Type:   domain.NodeTypeOutput,
+		Config: map[string]any{},
+	}
+
+	edges = append(edges,
+		domain.Edge{From: "deprecated_entry", To: "deprecated_output"},
+	)
+
+	return &domain.WorkflowGraph{
+		Nodes:       nodes,
+		Edges:       edges,
+		EntryNodeID: "deprecated_entry",
+	}
+}
+
 // GenerateBuggyGraph generates a WorkflowGraph that fires all 7 analysis rules.
 //
 // Rules triggered:
