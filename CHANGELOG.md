@@ -4,6 +4,8 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-15
+
 ### Added
 - `max_parallel_branches` ルール (Issue #1 実装)
   - fan-out >= 100 → Critical (Confidence=1.0)
