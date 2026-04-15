@@ -154,6 +154,12 @@ func (s *SecretExposureScanner) scanString(node *domain.Node, key, val string, f
 
 	for _, p := range secretPatterns {
 		if p.pattern.MatchString(val) {
+			// Confidence by severity: Critical/Warning patterns use precise regexes (0.95),
+			// Info patterns (jwt, generic_secret) are broader heuristics (0.5).
+			confidence := 0.95
+			if p.severity == domain.Info {
+				confidence = 0.5
+			}
 			*findings = append(*findings, domain.Finding{
 				RuleName: "secret_exposure_scanner",
 				Severity: p.severity,
@@ -163,6 +169,7 @@ func (s *SecretExposureScanner) scanString(node *domain.Node, key, val string, f
 					node.ID, key, p.name,
 				),
 				Suggestion: "Secrets should be injected via environment variables or a secret manager at runtime, never hardcoded in workflow configuration.",
+				Confidence: confidence,
 			})
 			// Emit at most one Finding per config key to avoid duplicate noise
 			// when multiple patterns match the same value.

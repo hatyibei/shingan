@@ -133,6 +133,49 @@ func TestJSONReporter_MixedSeverity(t *testing.T) {
 	}
 }
 
+// TestJSONReporter_ConfidenceField verifies that confidence is serialized and
+// that high_confidence_count reflects findings with Confidence >= 0.9.
+func TestJSONReporter_ConfidenceField(t *testing.T) {
+	r := reporter.NewJSONReporter()
+	findings := []domain.Finding{
+		{RuleName: "r1", Severity: domain.Critical, Confidence: 0.95},
+		{RuleName: "r2", Severity: domain.Warning, Confidence: 0.6},
+		{RuleName: "r3", Severity: domain.Info, Confidence: 0.3},
+	}
+
+	out, err := r.Format(findings)
+	if err != nil {
+		t.Fatalf("Format() unexpected error: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+
+	// Verify confidence field is present in each finding.
+	fs := result["findings"].([]interface{})
+	for i, fi := range fs {
+		m := fi.(map[string]interface{})
+		if _, ok := m["confidence"]; !ok {
+			t.Errorf("findings[%d] missing 'confidence' field", i)
+		}
+	}
+	if fs[0].(map[string]interface{})["confidence"].(float64) != 0.95 {
+		t.Errorf("findings[0].confidence = %v, want 0.95", fs[0].(map[string]interface{})["confidence"])
+	}
+
+	// Verify summary.high_confidence_count.
+	summary := result["summary"].(map[string]interface{})
+	hcc, ok := summary["high_confidence_count"]
+	if !ok {
+		t.Fatal("summary missing 'high_confidence_count' field")
+	}
+	if hcc.(float64) != 1 {
+		t.Errorf("high_confidence_count = %v, want 1", hcc)
+	}
+}
+
 // TestJSONReporter_SeverityStrings verifies all severity values are serialized
 // as their string labels, not as integers.
 func TestJSONReporter_SeverityStrings(t *testing.T) {

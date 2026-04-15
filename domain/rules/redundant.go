@@ -85,6 +85,7 @@ func (r *RedundantLLMDetector) Analyze(graph *domain.WorkflowGraph) []domain.Fin
 					"ノード %s は同じprompt_templateとmodelで実行されています。結果のキャッシュ or 重複排除を検討してください",
 					idList,
 				),
+				Confidence: 0.9,
 			})
 		}
 	}

@@ -124,6 +124,7 @@ func (e *ErrorHandlerChecker) Analyze(graph *domain.WorkflowGraph) []domain.Find
 				NodeID:     node.ID,
 				Message:    fmt.Sprintf("Tool node %q (category=%q) has no conditional outgoing edges: error handling is missing", node.ID, category),
 				Suggestion: "このノード後に条件分岐ノードを配置して、失敗時フローを定義してください",
+				Confidence: 0.8,
 			})
 
 		case domain.NodeTypeLLM:
@@ -171,6 +172,7 @@ func (e *ErrorHandlerChecker) Analyze(graph *domain.WorkflowGraph) []domain.Find
 					NodeID:     node.ID,
 					Message:    fmt.Sprintf("LLM node %q uses tool(s) but has no conditional outgoing edges: error handling for tool failures is missing", node.ID),
 					Suggestion: "ツール呼び出し後に条件分岐ノードを配置して、失敗時フローを定義してください",
+					Confidence: 0.8,
 				})
 			}
 		}

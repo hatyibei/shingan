@@ -4,6 +4,32 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-15
+
+### Added
+- `Finding.Confidence float64` フィールド追加 (0.0–1.0, `domain/finding.go`)
+  - 1.0 = 確定的検出 (DFS back-edge, BFS 到達性など)
+  - <0.5 = ヒューリスティック (名前ヒントベース)
+- 全8ルールが各検出に Confidence を付与:
+  - `cycle_detection`: 1.0 (DFS back-edge検出は確定)
+  - `loop_guard`: 1.0 (Config["max_iterations"]の有無は確定)
+  - `unreachable_node`: 1.0 (BFS到達性は確定)
+  - `error_handler_checker`: 0.8 (2ホップ先ヒューリスティック)
+  - `redundant_llm_call`: 0.9 (prompt_template完全一致)
+  - `cost_estimation`: 0.7 (モデル価格階層は変動あり)
+  - `pii_leak_scanner`: 0.6 (RAGソース) / 0.3 (名前ヒント)
+  - `secret_exposure_scanner`: 0.95 (Critical/Warning パターン) / 0.5 (Info汎用パターン)
+- `--min-confidence` CLI フラグ (float64, デフォルト 0.0) — 閾値未満の Finding を除外
+- Orchestrator ソート順: Severity DESC → Confidence DESC → RuleName ASC
+- Orchestrator: Confidence 0.0 を 1.0 に正規化 (後方互換)
+- JSONReporter: `findings[*].confidence` フィールド追加、`summary.high_confidence_count` (>=0.9 の件数) 追加
+- MarkdownReporter: Confidence 列追加 (例: "95%", "⚠ 30%"=低信頼マーク)
+- SARIFReporter: `result.properties.confidence` で拡張フィールドに格納、`rule.properties.precision` ("high"/"medium"/"low") 追加
+- `docs/confidence-scoring.md` — 設計思想、各ルール根拠、CI統合例
+
+### Changed
+- Orchestrator のソート: 同一 Severity 内で Confidence 降順が第2ソートキーに (従来は RuleName のみ)
+
 ## [0.3.0] - 2026-04-15
 
 ### Added

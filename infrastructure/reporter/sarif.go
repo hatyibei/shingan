@@ -40,6 +40,19 @@ func sarifLevel(s domain.Severity) string {
 	}
 }
 
+// sarifPrecision converts a confidence value to a SARIF precision string.
+// high: >=0.9, medium: 0.6–0.9, low: <0.6
+func sarifPrecision(confidence float64) string {
+	switch {
+	case confidence >= 0.9:
+		return "high"
+	case confidence >= 0.6:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
 // ---- SARIF JSON structures ----
 
 type sarifRoot struct {
@@ -65,11 +78,12 @@ type sarifDriver struct {
 }
 
 type sarifRule struct {
-	ID               string              `json:"id"`
-	Name             string              `json:"name"`
-	ShortDescription sarifMessage        `json:"shortDescription"`
-	FullDescription  sarifMessage        `json:"fullDescription"`
-	DefaultConfig    sarifDefaultConfig  `json:"defaultConfiguration"`
+	ID               string                 `json:"id"`
+	Name             string                 `json:"name"`
+	ShortDescription sarifMessage           `json:"shortDescription"`
+	FullDescription  sarifMessage           `json:"fullDescription"`
+	DefaultConfig    sarifDefaultConfig     `json:"defaultConfiguration"`
+	Properties       map[string]interface{} `json:"properties,omitempty"`
 }
 
 type sarifDefaultConfig struct {
@@ -81,10 +95,11 @@ type sarifMessage struct {
 }
 
 type sarifResult struct {
-	RuleID    string            `json:"ruleId"`
-	Level     string            `json:"level"`
-	Message   sarifMessage      `json:"message"`
-	Locations []sarifLocation   `json:"locations"`
+	RuleID     string                 `json:"ruleId"`
+	Level      string                 `json:"level"`
+	Message    sarifMessage           `json:"message"`
+	Locations  []sarifLocation        `json:"locations"`
+	Properties map[string]interface{} `json:"properties,omitempty"`
 }
 
 type sarifLocation struct {
@@ -104,10 +119,11 @@ type sarifArtifactLocation struct {
 // Artifact URIs use the synthetic scheme "workflow://nodes/<nodeID>"
 // since Shingan's Workflow Graph does not carry source file locations.
 func (r *SARIFReporter) Format(findings []domain.Finding) ([]byte, error) {
-	// Build ordered unique rules, preserving first-seen severity per rule.
+	// Build ordered unique rules, preserving first-seen severity and confidence per rule.
 	type ruleKey struct {
-		name     string
-		severity domain.Severity
+		name       string
+		severity   domain.Severity
+		confidence float64
 	}
 	seen := make(map[string]bool)
 	var orderedRules []ruleKey
@@ -115,7 +131,11 @@ func (r *SARIFReporter) Format(findings []domain.Finding) ([]byte, error) {
 	for _, f := range findings {
 		if !seen[f.RuleName] {
 			seen[f.RuleName] = true
-			orderedRules = append(orderedRules, ruleKey{name: f.RuleName, severity: f.Severity})
+			orderedRules = append(orderedRules, ruleKey{
+				name:       f.RuleName,
+				severity:   f.Severity,
+				confidence: f.Confidence,
+			})
 		}
 	}
 
@@ -127,6 +147,9 @@ func (r *SARIFReporter) Format(findings []domain.Finding) ([]byte, error) {
 			ShortDescription: sarifMessage{Text: rk.name},
 			FullDescription:  sarifMessage{Text: rk.name},
 			DefaultConfig:    sarifDefaultConfig{Level: sarifLevel(rk.severity)},
+			Properties: map[string]interface{}{
+				"precision": sarifPrecision(rk.confidence),
+			},
 		})
 	}
 
@@ -147,6 +170,9 @@ func (r *SARIFReporter) Format(findings []domain.Finding) ([]byte, error) {
 						ArtifactLocation: sarifArtifactLocation{URI: nodeURI},
 					},
 				},
+			},
+			Properties: map[string]interface{}{
+				"confidence": f.Confidence,
 			},
 		})
 	}

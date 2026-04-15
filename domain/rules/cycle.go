@@ -131,6 +131,7 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 			NodeID:     cycleNodeID,
 			Message:    fmt.Sprintf("cycle detected at unknown node %q", cycleNodeID),
 			Suggestion: "Remove the cycle or add a Control node with max_iterations < 100.",
+			Confidence: 1.0,
 		}
 	}
 
@@ -152,7 +153,8 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 						"cycle detected inside Loop node %q via sub-agent %q — MaxIterations not set: risk of infinite loop",
 						parentControl.ID, cycleNodeID,
 					),
-					Suggestion: "Set MaxIterations on the Loop (LoopAgent) node to prevent infinite loops.",
+					Suggestion:  "Set MaxIterations on the Loop (LoopAgent) node to prevent infinite loops.",
+					Confidence: 1.0,
 				}
 			}
 			maxIter, err := toInt(raw)
@@ -166,6 +168,7 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 						parentControl.ID, cycleNodeID,
 					),
 					Suggestion: "Consider reducing max_iterations below 100 to limit long-running workflows.",
+					Confidence: 1.0,
 				}
 			}
 			// max_iterations is set and < 100 — safe loop, no finding.
@@ -182,6 +185,7 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 			),
 			Suggestion: "Cycles must be managed by a Loop (LoopAgent) node. " +
 				"Review the graph edges or add a Loop node to guard the cycle.",
+			Confidence: 1.0,
 		}
 	}
 
@@ -197,6 +201,7 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 				cycleNodeID,
 			),
 			Suggestion: "Set max_iterations to a value less than 100 on the Loop node.",
+			Confidence: 1.0,
 		}
 	}
 
@@ -212,6 +217,7 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 				cycleNodeID, fmt.Sprint(raw),
 			),
 			Suggestion: "Set max_iterations to a valid integer less than 100.",
+			Confidence: 1.0,
 		}
 	}
 
@@ -225,6 +231,7 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 				cycleNodeID, maxIter,
 			),
 			Suggestion: "Consider reducing max_iterations below 100 or adding an early-exit condition.",
+			Confidence: 1.0,
 		}
 	}
 

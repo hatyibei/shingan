@@ -231,6 +231,62 @@ func TestSARIFReporter_SpecFields(t *testing.T) {
 	}
 }
 
+// TestSARIFReporter_ConfidenceProperties verifies that result.properties.confidence
+// and rule.properties.precision are set correctly.
+func TestSARIFReporter_ConfidenceProperties(t *testing.T) {
+	r := reporter.NewSARIFReporter()
+	findings := []domain.Finding{
+		{RuleName: "cycle_detection", Severity: domain.Critical, NodeID: "n1",
+			Message: "cycle", Confidence: 0.95},
+		{RuleName: "pii_leak_scanner", Severity: domain.Warning, NodeID: "n2",
+			Message: "pii", Confidence: 0.3},
+	}
+
+	out, err := r.Format(findings)
+	if err != nil {
+		t.Fatalf("Format() unexpected error: %v", err)
+	}
+
+	doc := parseSARIF(t, out)
+	run := sarifRun0(t, doc)
+
+	// Check result properties.confidence.
+	results := run["results"].([]interface{})
+	if len(results) != 2 {
+		t.Fatalf("results length = %d, want 2", len(results))
+	}
+	res0 := results[0].(map[string]interface{})
+	props0, ok := res0["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("results[0] missing 'properties'")
+	}
+	if conf := props0["confidence"].(float64); conf != 0.95 {
+		t.Errorf("results[0].properties.confidence = %v, want 0.95", conf)
+	}
+
+	// Check rule properties.precision.
+	driver := run["tool"].(map[string]interface{})["driver"].(map[string]interface{})
+	rules := driver["rules"].([]interface{})
+	if len(rules) != 2 {
+		t.Fatalf("rules length = %d, want 2", len(rules))
+	}
+	// First rule (cycle_detection, confidence=0.95) should have precision "high".
+	rule0 := rules[0].(map[string]interface{})
+	ruleProps0, ok := rule0["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("rules[0] missing 'properties'")
+	}
+	if prec := ruleProps0["precision"].(string); prec != "high" {
+		t.Errorf("rules[0].properties.precision = %q, want \"high\"", prec)
+	}
+	// Second rule (pii_leak_scanner, confidence=0.3) should have precision "low".
+	rule1 := rules[1].(map[string]interface{})
+	ruleProps1 := rule1["properties"].(map[string]interface{})
+	if prec := ruleProps1["precision"].(string); prec != "low" {
+		t.Errorf("rules[1].properties.precision = %q, want \"low\"", prec)
+	}
+}
+
 // TestSARIFReporter_EmptyNodeID verifies that a finding with no NodeID uses
 // the "workflow://graph" fallback URI.
 func TestSARIFReporter_EmptyNodeID(t *testing.T) {

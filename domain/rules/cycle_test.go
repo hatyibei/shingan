@@ -258,3 +258,24 @@ func TestCycleDetector_NoFinding_SubAgentCycleUnderSafeLoopAgent(t *testing.T) {
 		t.Errorf("expected 0 findings for safe loop (max_iter < 100), got %d: %+v", len(findings), findings)
 	}
 }
+
+// TestCycleDetector_Confidence verifies that all CycleDetector findings have Confidence == 1.0.
+func TestCycleDetector_Confidence(t *testing.T) {
+	// Graph with an unguarded cycle (Loop node, no max_iterations) → Critical finding.
+	g := mustBuild(t, testutil.NewBuilder().
+		AddNode("loop", domain.NodeTypeLoop).
+		AddNode("work", domain.NodeTypeLLM).
+		AddEdge("loop", "work").
+		AddEdge("work", "loop").
+		Entry("loop"))
+
+	findings := rules.NewCycleDetector().Analyze(g)
+	if len(findings) == 0 {
+		t.Fatal("expected ≥1 finding, got 0")
+	}
+	for _, f := range findings {
+		if f.Confidence != 1.0 {
+			t.Errorf("finding %q: Confidence = %.2f, want 1.0", f.RuleName, f.Confidence)
+		}
+	}
+}

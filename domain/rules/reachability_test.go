@@ -203,3 +203,22 @@ func TestReachabilityChecker_NilGraph(t *testing.T) {
 		t.Errorf("expected 0 findings for nil graph, got %d", len(findings))
 	}
 }
+
+// TestReachabilityChecker_Confidence verifies all findings have Confidence == 1.0.
+func TestReachabilityChecker_Confidence(t *testing.T) {
+	// Graph with an unreachable node.
+	g := mustBuild(t, testutil.NewBuilder().
+		AddNode("start", domain.NodeTypeLLM).
+		AddNode("orphan", domain.NodeTypeLLM).
+		Entry("start"))
+
+	findings := rules.NewReachabilityChecker().Analyze(g)
+	if len(findings) == 0 {
+		t.Fatal("expected ≥1 finding, got 0")
+	}
+	for _, f := range findings {
+		if f.Confidence != 1.0 {
+			t.Errorf("Confidence = %.2f, want 1.0", f.Confidence)
+		}
+	}
+}

@@ -155,3 +155,25 @@ func TestCostAnalyzer_NilGraph(t *testing.T) {
 		t.Errorf("expected 0 findings for nil graph, got %d", len(findings))
 	}
 }
+
+// TestCostAnalyzer_Confidence verifies all findings have Confidence == 0.7.
+func TestCostAnalyzer_Confidence(t *testing.T) {
+	g := mustBuild(t, testutil.NewBuilder().
+		AddNodeWithConfig("llm1", domain.NodeTypeLLM, map[string]any{
+			"model":           "gpt-4o",
+			"task_complexity": "simple",
+		}).
+		AddNode("out", domain.NodeTypeOutput).
+		AddEdge("llm1", "out").
+		Entry("llm1"))
+
+	findings := rules.NewCostAnalyzer().Analyze(g)
+	if len(findings) == 0 {
+		t.Fatal("expected ≥1 finding, got 0")
+	}
+	for _, f := range findings {
+		if f.Confidence != 0.7 {
+			t.Errorf("Confidence = %.2f, want 0.7", f.Confidence)
+		}
+	}
+}

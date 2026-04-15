@@ -217,3 +217,41 @@ func TestSecretExposure_Name(t *testing.T) {
 		t.Errorf("Name() = %q, want secret_exposure_scanner", got)
 	}
 }
+
+// TestSecretExposure_Confidence_CriticalPattern verifies Critical findings have Confidence == 0.95.
+func TestSecretExposure_Confidence_CriticalPattern(t *testing.T) {
+	g := buildSecret(t, testutil.NewBuilder().
+		AddNodeWithConfig("n1", domain.NodeTypeLLM, map[string]any{
+			"api_key": "AKIAIOSFODNN7EXAMPLE1234", // AWS access key pattern
+		}).
+		Entry("n1"))
+
+	findings := rules.NewSecretExposureScanner().Analyze(g)
+	if len(findings) == 0 {
+		t.Fatal("expected ≥1 finding, got 0")
+	}
+	for _, f := range findings {
+		if f.Severity == domain.Critical && f.Confidence != 0.95 {
+			t.Errorf("Critical finding Confidence = %.2f, want 0.95", f.Confidence)
+		}
+	}
+}
+
+// TestSecretExposure_Confidence_InfoPattern verifies Info findings have Confidence == 0.5.
+func TestSecretExposure_Confidence_InfoPattern(t *testing.T) {
+	g := buildSecret(t, testutil.NewBuilder().
+		AddNodeWithConfig("n1", domain.NodeTypeLLM, map[string]any{
+			"config": "password=supersecretpasswordvalue123456",
+		}).
+		Entry("n1"))
+
+	findings := rules.NewSecretExposureScanner().Analyze(g)
+	if len(findings) == 0 {
+		t.Fatal("expected ≥1 finding for generic_secret pattern, got 0")
+	}
+	for _, f := range findings {
+		if f.Severity == domain.Info && f.Confidence != 0.5 {
+			t.Errorf("Info finding Confidence = %.2f, want 0.5", f.Confidence)
+		}
+	}
+}

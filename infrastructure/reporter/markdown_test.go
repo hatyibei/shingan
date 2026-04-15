@@ -131,6 +131,34 @@ func TestMarkdownReporter_EmptyNodeID(t *testing.T) {
 	}
 }
 
+// TestMarkdownReporter_ConfidenceColumn verifies that the Confidence column appears in output.
+func TestMarkdownReporter_ConfidenceColumn(t *testing.T) {
+	r := reporter.NewMarkdownReporter()
+	findings := []domain.Finding{
+		{RuleName: "rule-a", Severity: domain.Critical, Confidence: 0.95, Message: "high conf"},
+		{RuleName: "rule-b", Severity: domain.Warning, Confidence: 0.3, Message: "low conf"},
+	}
+
+	out, err := r.Format(findings)
+	if err != nil {
+		t.Fatalf("Format() unexpected error: %v", err)
+	}
+
+	s := string(out)
+	// Column header should be present.
+	if !strings.Contains(s, "Confidence") {
+		t.Error("output missing 'Confidence' column header")
+	}
+	// High confidence (95%) should appear without warning mark.
+	if !strings.Contains(s, "95%") {
+		t.Error("output missing '95%' for high-confidence finding")
+	}
+	// Low confidence (30%) should appear with warning mark.
+	if !strings.Contains(s, "⚠ 30%") {
+		t.Error("output missing '⚠ 30%' for low-confidence finding")
+	}
+}
+
 // TestMarkdownReporter_SummaryTable verifies the summary table contains correct counts.
 func TestMarkdownReporter_SummaryTable(t *testing.T) {
 	r := reporter.NewMarkdownReporter()

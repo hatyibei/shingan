@@ -41,6 +41,7 @@ func (r *ReachabilityChecker) Analyze(graph *domain.WorkflowGraph) []domain.Find
 				NodeID:     "",
 				Message:    "entry node is not set: reachability analysis cannot be performed",
 				Suggestion: "Set EntryNodeID to the ID of the node where workflow execution begins.",
+				Confidence: 1.0,
 			},
 		}
 	}
@@ -56,6 +57,7 @@ func (r *ReachabilityChecker) Analyze(graph *domain.WorkflowGraph) []domain.Find
 					graph.EntryNodeID,
 				),
 				Suggestion: "Ensure EntryNodeID matches a registered node ID.",
+				Confidence: 1.0,
 			},
 		}
 	}
@@ -98,6 +100,7 @@ func (r *ReachabilityChecker) Analyze(graph *domain.WorkflowGraph) []domain.Find
 				id, nodeTypeName(node.Type), graph.EntryNodeID,
 			),
 			Suggestion: "Connect the node to the main workflow or remove it if it is unused.",
+			Confidence: 1.0,
 		})
 	}
 

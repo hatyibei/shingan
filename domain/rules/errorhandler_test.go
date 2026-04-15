@@ -316,3 +316,27 @@ func TestErrorHandlerChecker_LLMWithoutTools_NoFinding(t *testing.T) {
 		t.Errorf("expected 0 findings (no tool targets), got %d: %+v", len(findings), findings)
 	}
 }
+
+// TestErrorHandlerChecker_Confidence verifies all findings have Confidence == 0.8.
+func TestErrorHandlerChecker_Confidence(t *testing.T) {
+	g := mustBuild(t, testutil.NewBuilder().
+		AddNode("llm", domain.NodeTypeLLM).
+		AddNode("browser_tool", domain.NodeTypeTool).
+		AddEdge("llm", "browser_tool").
+		AddEdge("browser_tool", "llm"). // back edge so tool has outgoing edge
+		Entry("llm"))
+
+	// Override category to "browser" so tool has category.
+	g.Nodes["browser_tool"].Config = map[string]any{"category": "browser"}
+
+	checker := NewErrorHandlerChecker()
+	findings := checker.Analyze(g)
+	if len(findings) == 0 {
+		t.Fatal("expected ≥1 finding, got 0")
+	}
+	for _, f := range findings {
+		if f.Confidence != 0.8 {
+			t.Errorf("Confidence = %.2f, want 0.8", f.Confidence)
+		}
+	}
+}

@@ -8,6 +8,15 @@ import (
 	"github.com/hatyibei/shingan/domain"
 )
 
+// confidenceLabel converts a confidence value to a display string with optional warning mark.
+func confidenceLabel(c float64) string {
+	pct := int(c * 100)
+	if c < 0.7 {
+		return fmt.Sprintf("⚠ %d%%", pct)
+	}
+	return fmt.Sprintf("%d%%", pct)
+}
+
 // MarkdownReporter implements application.ReportFormatter for human-readable Markdown output.
 type MarkdownReporter struct{}
 
@@ -76,16 +85,17 @@ func (r *MarkdownReporter) Format(findings []domain.Finding) ([]byte, error) {
 		}
 
 		fmt.Fprintf(&buf, "## %s\n\n", g.label)
-		buf.WriteString("| Rule | Node | Message | Suggestion |\n")
-		buf.WriteString("|------|------|---------|------------|\n")
+		buf.WriteString("| Rule | Node | Confidence | Message | Suggestion |\n")
+		buf.WriteString("|------|------|------------|---------|------------|\n")
 		for _, f := range section {
 			nodeID := f.NodeID
 			if nodeID == "" {
 				nodeID = "(graph)"
 			}
-			fmt.Fprintf(&buf, "| %s | %s | %s | %s |\n",
+			fmt.Fprintf(&buf, "| %s | %s | %s | %s | %s |\n",
 				escapeMD(f.RuleName),
 				escapeMD(nodeID),
+				confidenceLabel(f.Confidence),
 				escapeMD(f.Message),
 				escapeMD(f.Suggestion),
 			)

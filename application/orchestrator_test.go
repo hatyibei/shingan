@@ -156,3 +156,52 @@ func TestAnalyze_NilGraph(t *testing.T) {
 		t.Fatalf("expected 1 finding, got %d", len(got))
 	}
 }
+
+// TestAnalyze_SameSeveritySortsByConfidenceDescending verifies that within the
+// same Severity, findings with higher Confidence appear first.
+func TestAnalyze_SameSeveritySortsByConfidenceDescending(t *testing.T) {
+	o := application.NewAnalysisOrchestrator()
+
+	rules := []domain.AnalysisRule{
+		&fakeRule{name: "rule_a", findings: []domain.Finding{
+			{RuleName: "rule_a", Severity: domain.Warning, Confidence: 0.5, Message: "low confidence"},
+		}},
+		&fakeRule{name: "rule_b", findings: []domain.Finding{
+			{RuleName: "rule_b", Severity: domain.Warning, Confidence: 0.9, Message: "high confidence"},
+		}},
+	}
+
+	got := o.Analyze(minimalGraph(), rules)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 findings, got %d", len(got))
+	}
+	// Higher confidence should appear first.
+	if got[0].Confidence < got[1].Confidence {
+		t.Errorf("expected Confidence DESC: got[0]=%.2f should be >= got[1]=%.2f",
+			got[0].Confidence, got[1].Confidence)
+	}
+	if got[0].RuleName != "rule_b" {
+		t.Errorf("expected rule_b (high confidence) first, got %q", got[0].RuleName)
+	}
+}
+
+// TestAnalyze_ZeroConfidenceNormalizedToOne verifies that findings with
+// Confidence 0.0 (unset) are normalized to 1.0 by the orchestrator.
+func TestAnalyze_ZeroConfidenceNormalizedToOne(t *testing.T) {
+	o := application.NewAnalysisOrchestrator()
+
+	rules := []domain.AnalysisRule{
+		&fakeRule{name: "old_rule", findings: []domain.Finding{
+			// Confidence not set — defaults to 0.0 in Go.
+			{RuleName: "old_rule", Severity: domain.Info, Message: "unset confidence"},
+		}},
+	}
+
+	got := o.Analyze(minimalGraph(), rules)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(got))
+	}
+	if got[0].Confidence != 1.0 {
+		t.Errorf("expected Confidence normalized to 1.0, got %.2f", got[0].Confidence)
+	}
+}

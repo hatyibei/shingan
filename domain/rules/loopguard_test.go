@@ -163,3 +163,22 @@ func TestLoopGuardChecker_BackwardCompat_ControlIsLoop(t *testing.T) {
 		t.Errorf("Severity = %v, want Critical", findings[0].Severity)
 	}
 }
+
+// TestLoopGuardChecker_Confidence verifies all findings have Confidence == 1.0.
+func TestLoopGuardChecker_Confidence(t *testing.T) {
+	g := mustBuild(t, testutil.NewBuilder().
+		AddNode("loop", domain.NodeTypeLoop).
+		AddNode("work", domain.NodeTypeLLM).
+		AddEdge("loop", "work").
+		Entry("loop"))
+
+	findings := rules.NewLoopGuardChecker().Analyze(g)
+	if len(findings) == 0 {
+		t.Fatal("expected ≥1 finding, got 0")
+	}
+	for _, f := range findings {
+		if f.Confidence != 1.0 {
+			t.Errorf("Confidence = %.2f, want 1.0", f.Confidence)
+		}
+	}
+}

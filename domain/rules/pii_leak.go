@@ -180,8 +180,10 @@ func (p *PIILeakScanner) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
 				// If this predecessor is a PII source, emit a Finding.
 				if src, ok := ragSources[pred]; ok {
 					severity := domain.Warning
+					confidence := 0.6 // RAG source: strong signal
 					if src.kind == kindHint {
 						severity = domain.Info
+						confidence = 0.3 // name hint: heuristic, weak signal
 					}
 					findings = append(findings, domain.Finding{
 						RuleName: p.Name(),
@@ -195,6 +197,7 @@ func (p *PIILeakScanner) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
 							"ノード %q と %q の間にHuman承認ノードを挿入するか、PIIフィールドをサニタイズしてください (GDPR/CCPA/個人情報保護法対応)",
 							pred, sinkID,
 						),
+						Confidence: confidence,
 					})
 					// Continue expanding backwards from the source to find more upstream sources.
 				}

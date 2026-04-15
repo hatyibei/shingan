@@ -61,6 +61,7 @@ func (l *LoopGuardChecker) Analyze(graph *domain.WorkflowGraph) []domain.Finding
 				),
 				Suggestion: "Set MaxIterations to a bounded value " +
 					"(recommended: 3-10 for testing, 50-100 for production)",
+				Confidence: 1.0,
 			})
 			continue
 		}
@@ -78,6 +79,7 @@ func (l *LoopGuardChecker) Analyze(graph *domain.WorkflowGraph) []domain.Finding
 				),
 				Suggestion: "Set MaxIterations to a bounded value " +
 					"(recommended: 3-10 for testing, 50-100 for production)",
+				Confidence: 1.0,
 			})
 		}
 		// Numeric value present → no finding from LoopGuardChecker

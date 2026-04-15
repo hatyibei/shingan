@@ -54,11 +54,23 @@ func (o *AnalysisOrchestrator) Analyze(graph *domain.WorkflowGraph, rules []doma
 		allFindings = append(allFindings, batch...)
 	}
 
+	// Normalize: a Confidence of 0.0 means "not set by rule" — treat as 1.0
+	// for backward compatibility (safe-side default).
+	for i := range allFindings {
+		if allFindings[i].Confidence == 0.0 {
+			allFindings[i].Confidence = 1.0
+		}
+	}
+
 	// Primary sort: Severity descending (Critical=2 > Warning=1 > Info=0).
-	// Secondary sort: RuleName ascending for deterministic output.
+	// Secondary sort: Confidence descending (high-confidence findings first).
+	// Tertiary sort: RuleName ascending for deterministic output.
 	sort.SliceStable(allFindings, func(i, j int) bool {
 		if allFindings[i].Severity != allFindings[j].Severity {
 			return allFindings[i].Severity > allFindings[j].Severity
+		}
+		if allFindings[i].Confidence != allFindings[j].Confidence {
+			return allFindings[i].Confidence > allFindings[j].Confidence
 		}
 		return allFindings[i].RuleName < allFindings[j].RuleName
 	})

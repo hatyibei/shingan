@@ -21,19 +21,21 @@ func (r *JSONReporter) ContentType() string {
 
 // jsonFinding is the JSON-serializable representation of a domain.Finding.
 type jsonFinding struct {
-	Rule       string `json:"rule"`
-	Severity   string `json:"severity"`
-	NodeID     string `json:"node_id"`
-	Message    string `json:"message"`
-	Suggestion string `json:"suggestion"`
+	Rule       string  `json:"rule"`
+	Severity   string  `json:"severity"`
+	NodeID     string  `json:"node_id"`
+	Message    string  `json:"message"`
+	Suggestion string  `json:"suggestion"`
+	Confidence float64 `json:"confidence"`
 }
 
 // jsonSummary holds aggregate counts per severity.
 type jsonSummary struct {
-	Total    int `json:"total"`
-	Critical int `json:"critical"`
-	Warning  int `json:"warning"`
-	Info     int `json:"info"`
+	Total              int `json:"total"`
+	Critical           int `json:"critical"`
+	Warning            int `json:"warning"`
+	Info               int `json:"info"`
+	HighConfidenceCount int `json:"high_confidence_count"`
 }
 
 // jsonReport is the top-level JSON structure.
@@ -55,6 +57,7 @@ func (r *JSONReporter) Format(findings []domain.Finding) ([]byte, error) {
 			NodeID:     f.NodeID,
 			Message:    f.Message,
 			Suggestion: f.Suggestion,
+			Confidence: f.Confidence,
 		})
 		switch f.Severity {
 		case domain.Critical:
@@ -63,6 +66,9 @@ func (r *JSONReporter) Format(findings []domain.Finding) ([]byte, error) {
 			summary.Warning++
 		case domain.Info:
 			summary.Info++
+		}
+		if f.Confidence >= 0.9 {
+			summary.HighConfidenceCount++
 		}
 	}
 

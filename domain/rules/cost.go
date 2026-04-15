@@ -97,6 +97,7 @@ func (c *CostAnalyzer) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
 					node.ID, model,
 				),
 				Suggestion: "ループ内で高額モデルが使用されています。推定コストが反復回数×単価でスケールします。miniモデルへの置換を検討してください",
+				Confidence: 0.7,
 			})
 			continue
 		}
@@ -113,6 +114,7 @@ func (c *CostAnalyzer) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
 					node.ID, model,
 				),
 				Suggestion: "単純タスクに高額モデルが使用されています。より安価なモデルを検討してください",
+				Confidence: 0.7,
 			})
 		}
 	}

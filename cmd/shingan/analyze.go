@@ -13,10 +13,11 @@ import (
 
 // analyzeFlags holds the parsed flag values for the analyze subcommand.
 type analyzeFlags struct {
-	input      string
-	format     string // input format: "json" or "adk-go"
-	output     string // output format: "json" or "markdown"
-	outputFile string // output file path (empty = stdout)
+	input         string
+	format        string  // input format: "json" or "adk-go"
+	output        string  // output format: "json" or "markdown"
+	outputFile    string  // output file path (empty = stdout)
+	minConfidence float64 // minimum confidence threshold (0.0 = include all)
 }
 
 // newAnalyzeCmd builds and returns the cobra.Command for "shingan analyze".
@@ -47,6 +48,7 @@ Exit codes:
 	cmd.Flags().StringVar(&flags.format, "format", "json", "Input format: json or adk-go")
 	cmd.Flags().StringVar(&flags.output, "output", "json", "Output format: json, markdown, or sarif")
 	cmd.Flags().StringVar(&flags.outputFile, "output-file", "", "Output file path (default: stdout)")
+	cmd.Flags().Float64Var(&flags.minConfidence, "min-confidence", 0.0, "Exclude findings with confidence below this threshold (0.0–1.0)")
 
 	_ = cmd.MarkFlagRequired("input")
 
@@ -85,6 +87,11 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 
 	orchestrator := application.NewAnalysisOrchestrator()
 	findings := orchestrator.Analyze(graph, rules)
+
+	// 3b. Filter by minimum confidence threshold if specified.
+	if flags.minConfidence > 0.0 {
+		findings = filterByConfidence(findings, flags.minConfidence)
+	}
 
 	// 4. Format the output.
 	reporterFactory := factory.NewReporterFactory()
@@ -231,6 +238,17 @@ func writeOutput(path string, data []byte) error {
 		return fmt.Errorf("write file %q: %w", path, err)
 	}
 	return nil
+}
+
+// filterByConfidence returns only findings whose Confidence >= minConfidence.
+func filterByConfidence(findings []domain.Finding, minConfidence float64) []domain.Finding {
+	filtered := make([]domain.Finding, 0, len(findings))
+	for _, f := range findings {
+		if f.Confidence >= minConfidence {
+			filtered = append(filtered, f)
+		}
+	}
+	return filtered
 }
 
 // exitCode calculates the appropriate CLI exit code for a set of findings.

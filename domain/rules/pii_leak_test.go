@@ -336,3 +336,43 @@ func TestPIILeakScanner_Name(t *testing.T) {
 		t.Errorf("Name() = %q, want %q", got, "pii_leak_scanner")
 	}
 }
+
+// TestPIILeakScanner_Confidence_RAGSource verifies RAG source findings have Confidence == 0.6.
+func TestPIILeakScanner_Confidence_RAGSource(t *testing.T) {
+	g := buildPII(t, testutil.NewBuilder().
+		AddNodeWithConfig("rag", domain.NodeTypeTool, map[string]any{"category": "rag"}).
+		AddNodeWithConfig("api_sink", domain.NodeTypeTool, map[string]any{"category": "api"}).
+		AddEdge("rag", "api_sink").
+		Entry("rag"))
+
+	findings := rules.NewPIILeakScanner().Analyze(g)
+	if len(findings) == 0 {
+		t.Fatal("expected ≥1 finding, got 0")
+	}
+	for _, f := range findings {
+		if f.Confidence != 0.6 {
+			t.Errorf("RAG source Confidence = %.2f, want 0.6", f.Confidence)
+		}
+	}
+}
+
+// TestPIILeakScanner_Confidence_HintSource verifies name-hint source findings have Confidence == 0.3.
+func TestPIILeakScanner_Confidence_HintSource(t *testing.T) {
+	g := buildPII(t, testutil.NewBuilder().
+		AddNodeWithConfig("user_data", domain.NodeTypeTool, map[string]any{"category": "code"}).
+		AddNodeWithConfig("api_sink", domain.NodeTypeTool, map[string]any{"category": "api"}).
+		AddEdge("user_data", "api_sink").
+		Entry("user_data"))
+	// The node name "user_data" contains "user" — a PII hint keyword.
+	g.Nodes["user_data"].Name = "user_data"
+
+	findings := rules.NewPIILeakScanner().Analyze(g)
+	if len(findings) == 0 {
+		t.Fatal("expected ≥1 finding, got 0")
+	}
+	for _, f := range findings {
+		if f.Confidence != 0.3 {
+			t.Errorf("hint source Confidence = %.2f, want 0.3", f.Confidence)
+		}
+	}
+}

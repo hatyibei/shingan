@@ -42,4 +42,8 @@ type Finding struct {
 	Message string
 	// Suggestion is an actionable recommendation for fixing the issue.
 	Suggestion string
+	// Confidence is the rule's certainty that this is a true positive (0.0–1.0).
+	// 1.0 = deterministic detection (e.g. DFS back-edge), <0.5 = heuristic.
+	// The orchestrator normalises 0.0 to 1.0 for backward compatibility.
+	Confidence float64
 }

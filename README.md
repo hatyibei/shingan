@@ -171,16 +171,16 @@ go test -tags=demo -v -run TestDemo_ .
 
 ## 解析ルール一覧
 
-| Rule ID | 検出対象 | 最高 Severity |
-|---|---|---|
-| cycle_detection | 非Loopノードのサイクル、LoopAgent管理下のサイクル | Critical |
-| loop_guard | LoopAgent (Loop型) のMaxIterations未設定 | Critical |
-| unreachable_node | エントリから到達不能なLLM/Toolノード | Warning |
-| error_handler_checker | 外部I/Oノード後のエラーハンドリング欠落 | Critical |
-| cost_estimation | ループ内の高額LLMモデル、単純タスクへの高額モデル適用 | Warning |
-| redundant_llm_call | 同一prompt_template×modelの重複呼出 | Warning |
-| pii_leak_scanner | RAG/PII源ノードから外部シンクへのHuman gate なしパス | Warning |
-| secret_exposure_scanner | Node.Config にハードコードされた APIキー・シークレット | Critical |
+| Rule ID | 検出対象 | 最高 Severity | Confidence |
+|---|---|---|---|
+| cycle_detection | 非Loopノードのサイクル、LoopAgent管理下のサイクル | Critical | 1.0 (確定) |
+| loop_guard | LoopAgent (Loop型) のMaxIterations未設定 | Critical | 1.0 (確定) |
+| unreachable_node | エントリから到達不能なLLM/Toolノード | Warning | 1.0 (確定) |
+| error_handler_checker | 外部I/Oノード後のエラーハンドリング欠落 | Critical | 0.8 (ヒューリスティック) |
+| cost_estimation | ループ内の高額LLMモデル、単純タスクへの高額モデル適用 | Warning | 0.7 (価格変動あり) |
+| redundant_llm_call | 同一prompt_template×modelの重複呼出 | Warning | 0.9 (完全一致) |
+| pii_leak_scanner | RAG/PII源ノードから外部シンクへのHuman gate なしパス | Warning | 0.6 (RAG) / 0.3 (名前ヒント) |
+| secret_exposure_scanner | Node.Config にハードコードされた APIキー・シークレット | Critical | 0.95 (Critical/Warning) / 0.5 (Info) |
 
 ## サポートフォーマット
 
@@ -205,8 +205,9 @@ go test -tags=demo -v -run TestDemo_ .
 ## ロードマップ
 
 - **v0.1（2026-04）**: ADK-Go + JSON + SamuraiAI想定スキーマ対応、6ルール、CLI + goa API、SARIF出力、Vertex AIランタイムデモ ✓
-- **v0.2**: n8nパーサー、SamuraiAI公式スキーマ対応、CI Plugin
-- **v0.3**: PIIリークルール、信頼度スコア、設計-実行時観測統合
+- **v0.2**: n8nパーサー、SamuraiAI公式スキーマ対応、CI Plugin ✓
+- **v0.3**: PIIリークルール (pii_leak_scanner / secret_exposure_scanner)、8ルール体制 ✓
+- **v0.4**: 信頼度スコア (Confidence 0.0–1.0)、`--min-confidence` CLI フラグ、SARIF precision、CI統合強化 ✓
 - **v1.0**: LangGraph/Dify対応、マルチフレームワーク安定版
 
 ## 開発

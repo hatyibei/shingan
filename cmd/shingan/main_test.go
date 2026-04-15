@@ -340,6 +340,86 @@ func TestExecuteAnalyze_SARIFOutput(t *testing.T) {
 	}
 }
 
+// TestMinConfidence_FiltersLowConfidence verifies that --min-confidence filters out
+// findings below the threshold and affects the exit code accordingly.
+func TestMinConfidence_FiltersLowConfidence(t *testing.T) {
+	outPath := filepath.Join(t.TempDir(), "result.json")
+	// Run with min-confidence=0.9 — should exclude pii_leak (0.6/0.3), cost (0.7),
+	// error_handler (0.8) findings. cycle, loop_guard, unreachable (1.0) and
+	// redundant (0.9) should pass.
+	flags := &analyzeFlags{
+		input:         testdataPath("buggy.json"),
+		output:        "json",
+		outputFile:    outPath,
+		minConfidence: 0.9,
+	}
+
+	_, err := executeAnalyze(flags)
+	if err != nil {
+		t.Fatalf("executeAnalyze: %v", err)
+	}
+
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read output file: %v", err)
+	}
+
+	var report struct {
+		Findings []struct {
+			Confidence float64 `json:"confidence"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal(data, &report); err != nil {
+		t.Fatalf("parse output JSON: %v", err)
+	}
+	// All returned findings must have confidence >= 0.9.
+	for i, f := range report.Findings {
+		if f.Confidence < 0.9 {
+			t.Errorf("findings[%d].confidence = %.2f, want >= 0.9", i, f.Confidence)
+		}
+	}
+}
+
+// TestMinConfidence_FilterByConfidence_ZeroIncludesAll verifies that --min-confidence=0
+// (default) does not filter any findings.
+func TestMinConfidence_FilterByConfidence_ZeroIncludesAll(t *testing.T) {
+	outPathFiltered := filepath.Join(t.TempDir(), "filtered.json")
+	outPathAll := filepath.Join(t.TempDir(), "all.json")
+
+	flagsFiltered := &analyzeFlags{
+		input:         testdataPath("buggy.json"),
+		output:        "json",
+		outputFile:    outPathFiltered,
+		minConfidence: 0.0,
+	}
+	flagsAll := &analyzeFlags{
+		input:      testdataPath("buggy.json"),
+		output:     "json",
+		outputFile: outPathAll,
+	}
+
+	if _, err := executeAnalyze(flagsFiltered); err != nil {
+		t.Fatalf("executeAnalyze filtered: %v", err)
+	}
+	if _, err := executeAnalyze(flagsAll); err != nil {
+		t.Fatalf("executeAnalyze all: %v", err)
+	}
+
+	filteredData, _ := os.ReadFile(outPathFiltered)
+	allData, _ := os.ReadFile(outPathAll)
+
+	var filteredReport, allReport struct {
+		Summary struct{ Total int `json:"total"` } `json:"summary"`
+	}
+	json.Unmarshal(filteredData, &filteredReport)
+	json.Unmarshal(allData, &allReport)
+
+	if filteredReport.Summary.Total != allReport.Summary.Total {
+		t.Errorf("min-confidence=0.0 filtered count %d != no-filter count %d",
+			filteredReport.Summary.Total, allReport.Summary.Total)
+	}
+}
+
 // TestADKGo_Directory_MergesAllFiles verifies directory-mode merges nodes from all fixture files.
 func TestADKGo_Directory_MergesAllFiles(t *testing.T) {
 	flags := &analyzeFlags{
