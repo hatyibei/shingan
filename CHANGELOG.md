@@ -18,8 +18,9 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 - `docs/source-pos.md` 追加 — 設計意図、IsZero 規則、Parser 別埋め方、LSP/CodeAction との関係
 
 ### Backward Compatibility
-- 既存 testdata (`testdata/**.json`) は `pos` フィールドを持たないまま動作
-- `Node.Pos` は omitempty なので既存 consumer に影響なし
+- 既存 testdata (`testdata/**.json`) は `pos` フィールドを持たないまま動作 (`TestJSONParser_NoPosField_BackwardCompat` で gating)
+- 既存 consumer (Reporter / Orchestrator) は `Pos` フィールドを参照しないため挙動不変
+- 注意: `Pos` は値型 (struct) のため `json:"pos,omitempty"` タグでも `WorkflowGraph` を JSON 出力すると常に `"pos": {...}` キーが出る (空でも `"pos": {}`)。consumer 側で未知フィールドを許容していれば問題ないが、出力サイズ最小化が必要な場合は将来 `*SourcePos` 化を検討
 
 ## [0.5.0] - 2026-04-15
 

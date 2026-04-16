@@ -91,6 +91,14 @@ func (b *adkgoBuilder) sourcePos(pos token.Pos) domain.SourcePos {
 - `"pos"` フィールドがなければ `SourcePos{}` (IsZero)
 - 既存 v0.5.0 以前の testdata は未修正で動く (backward compatible)
 
+> ⚠️ `omitempty` の挙動: Go の `encoding/json` は struct 値を "empty" と
+> 判定しない。したがって `Pos` がゼロ値であっても、`WorkflowGraph` を
+> `json.Marshal` した出力には常に `"pos": {}` が含まれる。これは入力解析には
+> 影響せず (空オブジェクトは ゼロ値にデコードされる)、また既存 consumer は
+> `Pos` フィールドを参照しないため互換性も保たれる。出力サイズ最小化が要件に
+> なった時点で `Pos` を `*SourcePos` に変更する選択肢があるが、Phase 2 では
+> 値型のままで進める (nil チェックの省略を優先)。
+
 ### SamuraiAI Parser (`infrastructure/parser/samurai.go`)
 
 想定スキーマ段階なので、入力 JSON に位置情報がある前提にしない。
@@ -113,5 +121,7 @@ SamuraiAI スキーマ確定後に map して上書きする。
 
 - 既存 JSON testdata は `pos` フィールドを持たない — 全テストが
   green のまま (`TestJSONParser_NoPosField_BackwardCompat` が gating)
-- 既存の consumer (Reporter / Orchestrator) は `Pos` を無視して動作 —
-  `SourcePos` はあくまで optional な追加情報
+- 既存の consumer (Reporter / Orchestrator) は `Pos` を読まないため挙動不変
+- ただし `WorkflowGraph` を JSON シリアライズして外部に渡している箇所
+  (現状は無し) では、ゼロ値でも `"pos": {}` が出力に出る点に注意 —
+  受け側が strict mode でなければ無害

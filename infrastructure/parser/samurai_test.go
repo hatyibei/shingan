@@ -304,6 +304,51 @@ func TestSamuraiParser_AllNodeTypeMappings(t *testing.T) {
 	}
 }
 
+// TestSamuraiParser_PreservesSourcePos は SamuraiNode に "pos" が含まれていれば
+// 変換後の domain.Node.Pos に保持されること、含まれていなければゼロ値のままで
+// あること (backward compatible) を確認する。
+//
+// 想定スキーマ段階のため optional 仕様: 実 SamuraiAI スキーマ確定後に
+// この test の入力を本物のキー名にマップし直す。
+func TestSamuraiParser_PreservesSourcePos(t *testing.T) {
+	input := []byte(`{
+		"version": "1.0",
+		"workflow_id": "wf_pos",
+		"entry_node": "with_pos",
+		"nodes": [
+			{"id": "with_pos",    "type": "llm", "name": "WithPos",   "config": {}, "pos": {"file": "wf.json", "line": 12, "col": 3}},
+			{"id": "without_pos", "type": "llm", "name": "WithoutPos","config": {}}
+		],
+		"edges": [{"from": "with_pos", "to": "without_pos"}]
+	}`)
+
+	p := parser.NewSamuraiParser()
+	graph, err := p.Parse(input)
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	withPos := graph.Nodes["with_pos"]
+	if withPos == nil {
+		t.Fatal("node 'with_pos' not found")
+	}
+	if withPos.Pos.IsZero() {
+		t.Fatalf("with_pos.Pos is zero; expected preserved input pos")
+	}
+	want := domain.SourcePos{File: "wf.json", Line: 12, Col: 3}
+	if withPos.Pos != want {
+		t.Errorf("with_pos.Pos = %+v, want %+v", withPos.Pos, want)
+	}
+
+	withoutPos := graph.Nodes["without_pos"]
+	if withoutPos == nil {
+		t.Fatal("node 'without_pos' not found")
+	}
+	if !withoutPos.Pos.IsZero() {
+		t.Errorf("without_pos.Pos = %+v, want zero (no pos in input)", withoutPos.Pos)
+	}
+}
+
 // ─── helper functions ─────────────────────────────────────────────────────────
 
 func buildSingleNodeWorkflow(nodeType string) []byte {
