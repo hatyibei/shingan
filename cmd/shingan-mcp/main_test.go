@@ -272,6 +272,34 @@ func TestInitializeHandshake(t *testing.T) {
 	}
 }
 
+// TestRecoverHandler_TurnsPanicIntoErrorResult confirms that a panic inside
+// a tool handler is caught and translated into a clean MCP error response,
+// instead of crashing the stdio server and leaving the client with EOF.
+func TestRecoverHandler_TurnsPanicIntoErrorResult(t *testing.T) {
+	var res *mcp.CallToolResult
+	func() {
+		defer recoverHandler("shingan_test_tool", &res)
+		panic("synthetic boom")
+	}()
+
+	if res == nil {
+		t.Fatal("recoverHandler did not set a result on panic")
+	}
+	if !res.IsError {
+		t.Fatal("expected IsError=true after panic recovery")
+	}
+	if len(res.Content) == 0 {
+		t.Fatal("expected error content on recovery")
+	}
+	text, ok := res.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", res.Content[0])
+	}
+	if !strings.Contains(text.Text, "shingan_test_tool") || !strings.Contains(text.Text, "synthetic boom") {
+		t.Errorf("recovery message missing tool name or panic value: %q", text.Text)
+	}
+}
+
 // TestFindingDTO_JSONShape guarantees the wire format stays stable for
 // clients that parse the findings as JSON rather than trusting structured
 // output.

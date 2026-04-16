@@ -115,12 +115,32 @@ func registerTools(server *mcp.Server, deps *toolDeps) {
 
 // ---- Tool handlers -----------------------------------------------------------
 
+// recoverHandler turns a panic inside a tool handler into a clean MCP error
+// response so a single misbehaving rule cannot bring down the entire server
+// (the client would otherwise see EOF on stdio with no diagnostic).
+//
+// Usage:
+//
+//	defer recoverHandler("analyzeGraph", &res)
+//
+// On recover it overwrites `*res` with an errorResult that includes the
+// originating tool name and panic value. The structured-output return value
+// is left as the caller's zero value, which is what MCP clients expect when
+// IsError=true.
+func recoverHandler(tool string, res **mcp.CallToolResult) {
+	if r := recover(); r != nil {
+		*res = errorResult(fmt.Sprintf("internal error in %s: %v", tool, r))
+	}
+}
+
 // analyzeGraph implements shingan_analyze_graph.
 func (d *toolDeps) analyzeGraph(
 	_ context.Context,
 	_ *mcp.CallToolRequest,
 	args AnalyzeGraphArgs,
-) (*mcp.CallToolResult, FindingList, error) {
+) (res *mcp.CallToolResult, _ FindingList, _ error) {
+	defer recoverHandler("shingan_analyze_graph", &res)
+
 	if strings.TrimSpace(args.GraphJSON) == "" {
 		return errorResult("graph_json is required"), FindingList{}, nil
 	}
@@ -138,7 +158,9 @@ func (d *toolDeps) analyzeFile(
 	_ context.Context,
 	_ *mcp.CallToolRequest,
 	args AnalyzeFileArgs,
-) (*mcp.CallToolResult, FindingList, error) {
+) (res *mcp.CallToolResult, _ FindingList, _ error) {
+	defer recoverHandler("shingan_analyze_file", &res)
+
 	if args.Path == "" {
 		return errorResult("path is required"), FindingList{}, nil
 	}
@@ -165,7 +187,9 @@ func (d *toolDeps) explainRule(
 	_ context.Context,
 	_ *mcp.CallToolRequest,
 	args ExplainRuleArgs,
-) (*mcp.CallToolResult, RuleExplanation, error) {
+) (res *mcp.CallToolResult, _ RuleExplanation, _ error) {
+	defer recoverHandler("shingan_explain_rule", &res)
+
 	text, ok := ruleExplanations[args.RuleName]
 	if !ok {
 		return errorResult(fmt.Sprintf(
@@ -184,9 +208,14 @@ func (d *toolDeps) suggestModel(
 	_ context.Context,
 	_ *mcp.CallToolRequest,
 	args SuggestModelArgs,
-) (*mcp.CallToolResult, ModelRecommendation, error) {
+) (res *mcp.CallToolResult, _ ModelRecommendation, _ error) {
+	defer recoverHandler("shingan_suggest_model", &res)
+
 	rec := recommendModel(args.NodeDescription, args.InputTokenEstimate)
-	body, _ := json.MarshalIndent(rec, "", "  ")
+	body, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		return errorResult(fmt.Sprintf("marshal recommendation: %v", err)), ModelRecommendation{}, nil
+	}
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(body)}},
 	}, rec, nil
@@ -349,20 +378,38 @@ func recommendModel(description string, inputTokens int) ModelRecommendation {
 	}
 }
 
+// Cost-estimation tunables. Pulled out as named constants so the heuristic
+// is self-documenting and easy to tweak without hunting through arithmetic.
+const (
+	// defaultInputTokens is assumed when the caller passes a non-positive
+	// input_token_estimate — a "modest chat turn" baseline.
+	defaultInputTokens = 500
+	// outputTokenFloor is the lower bound for the inferred output length.
+	// Real LLM responses rarely fall below ~50 tokens once headers + JSON
+	// scaffolding are included.
+	outputTokenFloor = 50
+	// outputToInputRatio approximates response size as ~10% of input. Tool
+	// workloads (extraction, classification) tend to be input-heavy.
+	outputToInputRatio = 10
+	// costRoundingFactor truncates the float to 6 decimal places for stable
+	// JSON output (avoids spurious diffs from float jitter).
+	costRoundingFactor = 1_000_000
+	// tokensPerMillion converts $/1M-token prices to per-token cost.
+	tokensPerMillion = 1_000_000.0
+)
+
 // estimateCostUSD returns a rough per-call cost using the supplied
 // input/output $/1M-token prices and the caller-provided input token
-// estimate. Output is assumed to be ~10% of input (conservative for tool
-// workloads) with a 50-token floor for tiny calls.
+// estimate. See the package-level constants above for the assumptions.
 func estimateCostUSD(inputPricePerMillion, outputPricePerMillion float64, inputTokens int) float64 {
 	if inputTokens <= 0 {
-		inputTokens = 500 // unknown → assume a modest chat turn
+		inputTokens = defaultInputTokens
 	}
-	outputTokens := inputTokens / 10
-	if outputTokens < 50 {
-		outputTokens = 50
+	outputTokens := inputTokens / outputToInputRatio
+	if outputTokens < outputTokenFloor {
+		outputTokens = outputTokenFloor
 	}
-	cost := (float64(inputTokens)/1_000_000.0)*inputPricePerMillion +
-		(float64(outputTokens)/1_000_000.0)*outputPricePerMillion
-	// Round to 6 decimal places for stable JSON output.
-	return float64(int(cost*1_000_000)) / 1_000_000
+	cost := (float64(inputTokens)/tokensPerMillion)*inputPricePerMillion +
+		(float64(outputTokens)/tokensPerMillion)*outputPricePerMillion
+	return float64(int(cost*costRoundingFactor)) / costRoundingFactor
 }
