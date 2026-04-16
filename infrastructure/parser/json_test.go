@@ -82,3 +82,75 @@ func TestJSONParser_EmptyInput(t *testing.T) {
 		t.Error("expected error for empty input, got nil")
 	}
 }
+
+// TestJSONParser_PreservesSourcePos verifies that a Node's "pos" field is
+// round-tripped from the JSON input into domain.Node.Pos unchanged.
+// This is Phase 2 Parser contract: position-aware consumers (LSP) may feed
+// JSON graphs containing source positions exported from external tools.
+func TestJSONParser_PreservesSourcePos(t *testing.T) {
+	input := []byte(`{
+		"nodes": [
+			{"id": "a", "name": "NodeA", "type": "llm", "pos": {"file": "agent.py", "line": 42, "col": 7}},
+			{"id": "b", "name": "NodeB", "type": "tool"}
+		],
+		"edges": [{"from": "a", "to": "b"}],
+		"entry_node_id": "a"
+	}`)
+
+	p := parser.NewJSONParser()
+	graph, err := p.Parse(input)
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	nodeA := graph.Nodes["a"]
+	if nodeA == nil {
+		t.Fatal("node 'a' not found")
+	}
+	if nodeA.Pos.IsZero() {
+		t.Fatalf("node 'a' Pos is zero; expected preserved input position")
+	}
+	wantA := domain.SourcePos{File: "agent.py", Line: 42, Col: 7}
+	if nodeA.Pos != wantA {
+		t.Errorf("node 'a' Pos = %+v, want %+v", nodeA.Pos, wantA)
+	}
+
+	// Node 'b' omitted the "pos" field; it must remain zero (backward-compat).
+	nodeB := graph.Nodes["b"]
+	if nodeB == nil {
+		t.Fatal("node 'b' not found")
+	}
+	if !nodeB.Pos.IsZero() {
+		t.Errorf("node 'b' Pos = %+v, want zero (field omitted in input)", nodeB.Pos)
+	}
+}
+
+// TestJSONParser_NoPosField_BackwardCompat verifies that input JSON without
+// any "pos" field — the v0.5.0 format — still parses cleanly with zero Pos
+// on every node.
+func TestJSONParser_NoPosField_BackwardCompat(t *testing.T) {
+	// Legacy format — no "pos" on any node.
+	input := []byte(`{
+		"nodes": [
+			{"id": "a", "name": "NodeA", "type": "llm"},
+			{"id": "b", "name": "NodeB", "type": "output"}
+		],
+		"edges": [{"from": "a", "to": "b"}],
+		"entry_node_id": "a"
+	}`)
+
+	p := parser.NewJSONParser()
+	graph, err := p.Parse(input)
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	for _, id := range []string{"a", "b"} {
+		n := graph.Nodes[id]
+		if n == nil {
+			t.Fatalf("node %q not found", id)
+		}
+		if !n.Pos.IsZero() {
+			t.Errorf("node %q Pos = %+v, want zero", id, n.Pos)
+		}
+	}
+}

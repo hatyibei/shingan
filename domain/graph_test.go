@@ -179,3 +179,28 @@ func TestNodeType_UnmarshalJSON_BackwardCompat(t *testing.T) {
 		t.Errorf("expected NodeTypeLoop, got %v", g.Nodes["n"].Type)
 	}
 }
+
+// TestSourcePos_IsZero covers the IsZero predicate over the key state combinations:
+// fully unset (true), any single field populated (false), and fully populated (false).
+func TestSourcePos_IsZero(t *testing.T) {
+	tests := []struct {
+		name string
+		pos  domain.SourcePos
+		want bool
+	}{
+		{"empty", domain.SourcePos{}, true},
+		{"file_only", domain.SourcePos{File: "foo.go"}, false},
+		{"line_only", domain.SourcePos{Line: 10}, false},
+		{"col_only", domain.SourcePos{Col: 5}, false},
+		{"file_and_line", domain.SourcePos{File: "foo.go", Line: 10}, false},
+		{"all_fields", domain.SourcePos{File: "foo.go", Line: 10, Col: 5}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.pos.IsZero(); got != tc.want {
+				t.Errorf("SourcePos{File:%q,Line:%d,Col:%d}.IsZero() = %v, want %v",
+					tc.pos.File, tc.pos.Line, tc.pos.Col, got, tc.want)
+			}
+		})
+	}
+}

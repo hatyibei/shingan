@@ -4,6 +4,33 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Added
+- `domain.SourcePos{File, Line, Col}` 構造体追加 — `Node` の optional フィールド `Pos` に付与 (Phase 2 基盤、LSP/CodeAction/VS Code 拡張の前提)
+  - `SourcePos.IsZero()` ヘルパー — 位置情報の有無判定規則
+  - `domain/graph_test.go`: `TestSourcePos_IsZero` 追加 (6ケース table-driven)
+- ADK-Go Parser (`infrastructure/parser/adkgo.go`): 既存 `token.FileSet` から位置を取得して `Node.Pos` に埋め込み
+  - `sourcePos(token.Pos) SourcePos` ヘルパーメソッド追加
+  - `processAgentLit` / `processRealAPIConfig` / `processToolElement` / `extractRealSubAgents` / `processSubAgent` の全 Node 生成経路で Pos をセット
+  - `TestADKGoParser_SourcePos_BareStructLiteral` / `TestADKGoParser_SourcePos_RealAPI` 追加
+- JSON Parser: `pos` フィールドが入力に含まれていれば自動デコード (Node.Pos の `json:"pos,omitempty"` タグ経由、Parser 本体は無変更)
+  - `TestJSONParser_PreservesSourcePos` / `TestJSONParser_NoPosField_BackwardCompat` 追加
+- SamuraiAI Parser: `SamuraiNode.Pos *SourcePos` 追加、入力にあれば保持 (想定スキーマのため optional)
+- `docs/source-pos.md` 追加 — 設計意図、IsZero 規則、Parser 別埋め方、LSP/CodeAction との関係
+- Phase 2-E 差分モード & progressive adoption
+  - `--since=<git-ref>` CLI フラグ — `git diff --name-only <ref>..HEAD` で得た変更ファイルのみ解析。変更ゼロなら 0 findings で exit 0。
+  - `--save-baseline=<path>` CLI フラグ — 現在の findings を baseline JSON として永続化。
+  - `--baseline=<path>` CLI フラグ — baseline に含まれる findings を抑止。fingerprint は `(rule, node_id, message)` の組で比較。
+  - `--baseline` + `--save-baseline` 併用時は filter 後の findings のみ保存（新規 finding だけを次の baseline に載せる）。
+  - `domain/baseline.go` — `Baseline`, `FindingFingerprint`, `Contains`, `Fingerprint`, `NewBaselineFromFindings` を追加（stdlib only, I/O なし）。
+  - `infrastructure/baseline/baseline_io.go` — `Save` / `Load` を Onion 原則で infrastructure 層に分離。
+  - `action.yml` — `baseline-file` と `since` 入力を追加。既存フローは完全後方互換。
+  - `docs/diff-mode.md` — 典型ロールアウトフロー、baseline JSON スキーマ、progressive adoption cookbook。
+
+### Backward Compatibility
+- 既存 testdata (`testdata/**.json`) は `pos` フィールドを持たないまま動作
+- `Node.Pos` は omitempty なので既存 consumer に影響なし
+- 新規 CLI フラグ (`--since`, `--baseline`, `--save-baseline`) は省略時は従来挙動
+
 ## [0.5.0] - 2026-04-15
 
 ### Added

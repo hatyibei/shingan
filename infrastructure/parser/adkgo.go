@@ -107,6 +107,20 @@ type adkgoBuilder struct {
 	varFuncToolNames map[string]string            // var name -> tool name from functiontool.New(Config{Name:...}, ...)
 }
 
+// sourcePos converts a token.Pos into a domain.SourcePos using the builder's FileSet.
+// Returns a zero SourcePos for token.NoPos so IsZero remains a reliable predicate.
+func (b *adkgoBuilder) sourcePos(pos token.Pos) domain.SourcePos {
+	if !pos.IsValid() {
+		return domain.SourcePos{}
+	}
+	p := b.fset.Position(pos)
+	return domain.SourcePos{
+		File: p.Filename,
+		Line: p.Line,
+		Col:  p.Column,
+	}
+}
+
 // collectVarDecls pre-scans the file for package-level var declarations of agent composite literals.
 // It handles both bare struct literals (`var x = &SequentialAgent{...}`) and
 // real ADK-Go SDK constructor calls (`var x, _ = loopagent.New(loopagent.Config{...})`).
@@ -446,6 +460,14 @@ func (b *adkgoBuilder) processRealAPIConfig(cfg *ast.CompositeLit, agentType str
 
 	nodeID := b.resolveNodeID(name)
 
+	// Anchor the source position at the Config literal; fall back to the
+	// enclosing call expression so we still record a location when the Config
+	// composite is unusual.
+	pos := b.sourcePos(cfg.Pos())
+	if pos.IsZero() && callExpr != nil {
+		pos = b.sourcePos(callExpr.Pos())
+	}
+
 	switch agentType {
 	case "LlmAgent":
 		node := &domain.Node{
@@ -453,6 +475,7 @@ func (b *adkgoBuilder) processRealAPIConfig(cfg *ast.CompositeLit, agentType str
 			Name:   name,
 			Type:   domain.NodeTypeLLM,
 			Config: make(map[string]any),
+			Pos:    pos,
 		}
 		if instr := stringFieldValue(topFields, "Instruction"); instr != "" {
 			node.Config["instruction"] = instr
@@ -466,6 +489,7 @@ func (b *adkgoBuilder) processRealAPIConfig(cfg *ast.CompositeLit, agentType str
 			Name:   name,
 			Type:   domain.NodeTypeControl,
 			Config: make(map[string]any),
+			Pos:    pos,
 		}
 		b.nodes[nodeID] = node
 		if subAgentFields != nil {
@@ -478,6 +502,7 @@ func (b *adkgoBuilder) processRealAPIConfig(cfg *ast.CompositeLit, agentType str
 			Name:   name,
 			Type:   domain.NodeTypeLoop,
 			Config: make(map[string]any),
+			Pos:    pos,
 		}
 		// MaxIterations is in loopagent.Config directly (not inside AgentConfig).
 		if maxIter := intFieldValue(topFields, "MaxIterations"); maxIter != nil {
@@ -494,6 +519,7 @@ func (b *adkgoBuilder) processRealAPIConfig(cfg *ast.CompositeLit, agentType str
 			Name:   name,
 			Type:   domain.NodeTypeControl,
 			Config: make(map[string]any),
+			Pos:    pos,
 		}
 		b.nodes[nodeID] = node
 		if subAgentFields != nil {
@@ -506,6 +532,7 @@ func (b *adkgoBuilder) processRealAPIConfig(cfg *ast.CompositeLit, agentType str
 			Name:   name,
 			Type:   domain.NodeTypeLLM,
 			Config: make(map[string]any),
+			Pos:    pos,
 		}
 		b.nodes[nodeID] = node
 	}
@@ -589,6 +616,7 @@ func (b *adkgoBuilder) extractRealSubAgents(fields map[string]ast.Expr) []string
 						Name:   ident.Name,
 						Type:   domain.NodeTypeLLM,
 						Config: make(map[string]any),
+						Pos:    b.sourcePos(ident.Pos()),
 					}
 				}
 				result = append(result, nodeID)
@@ -639,6 +667,9 @@ func (b *adkgoBuilder) processAgentLit(cl *ast.CompositeLit, parent *string) str
 	name := stringFieldValue(fields, "Name")
 	nodeID := b.resolveNodeID(name)
 
+	// The composite literal token is the declared position of the agent.
+	pos := b.sourcePos(cl.Pos())
+
 	switch typeName {
 	case "LlmAgent":
 		node := &domain.Node{
@@ -646,6 +677,7 @@ func (b *adkgoBuilder) processAgentLit(cl *ast.CompositeLit, parent *string) str
 			Name:   name,
 			Type:   domain.NodeTypeLLM,
 			Config: make(map[string]any),
+			Pos:    pos,
 		}
 		if model := stringFieldValue(fields, "Model"); model != "" {
 			node.Config["model"] = model
@@ -664,6 +696,7 @@ func (b *adkgoBuilder) processAgentLit(cl *ast.CompositeLit, parent *string) str
 			Name:   name,
 			Type:   domain.NodeTypeControl,
 			Config: make(map[string]any),
+			Pos:    pos,
 		}
 		b.nodes[nodeID] = node
 		b.processSubAgentsSequential(fields, nodeID)
@@ -674,6 +707,7 @@ func (b *adkgoBuilder) processAgentLit(cl *ast.CompositeLit, parent *string) str
 			Name:   name,
 			Type:   domain.NodeTypeLoop,
 			Config: make(map[string]any),
+			Pos:    pos,
 		}
 		if maxIter := intFieldValue(fields, "MaxIterations"); maxIter != nil {
 			node.Config["max_iterations"] = *maxIter
@@ -687,6 +721,7 @@ func (b *adkgoBuilder) processAgentLit(cl *ast.CompositeLit, parent *string) str
 			Name:   name,
 			Type:   domain.NodeTypeControl,
 			Config: make(map[string]any),
+			Pos:    pos,
 		}
 		b.nodes[nodeID] = node
 		b.processSubAgentsParallel(fields, nodeID)
@@ -698,6 +733,7 @@ func (b *adkgoBuilder) processAgentLit(cl *ast.CompositeLit, parent *string) str
 			Name:   name,
 			Type:   domain.NodeTypeLLM,
 			Config: make(map[string]any),
+			Pos:    pos,
 		}
 		b.nodes[nodeID] = node
 	}
@@ -789,6 +825,7 @@ func (b *adkgoBuilder) processSubAgent(expr ast.Expr) string {
 				Name:   ident.Name,
 				Type:   domain.NodeTypeLLM,
 				Config: make(map[string]any),
+				Pos:    b.sourcePos(ident.Pos()),
 			}
 		}
 		return nodeID
@@ -831,6 +868,7 @@ func (b *adkgoBuilder) processToolElement(expr ast.Expr) string {
 					Name:   toolName,
 					Type:   domain.NodeTypeTool,
 					Config: map[string]any{"category": inferToolCategory(toolName)},
+					Pos:    b.sourcePos(ident.Pos()),
 				}
 			}
 			return nodeID
@@ -848,6 +886,7 @@ func (b *adkgoBuilder) processToolElement(expr ast.Expr) string {
 			Name:   name,
 			Type:   domain.NodeTypeTool,
 			Config: map[string]any{"category": inferToolCategory(name)},
+			Pos:    b.sourcePos(expr.Pos()),
 		}
 	}
 	return nodeID
