@@ -183,6 +183,24 @@ func TestSince_HEADReturnsZero(t *testing.T) {
 	}
 }
 
+// TestSince_RejectsLeadingDash verifies --since values that start with "-"
+// are rejected before reaching git, defending against accidental option
+// smuggling like --exec=...
+func TestSince_RejectsLeadingDash(t *testing.T) {
+	cases := []string{"-x", "--exec=touch /tmp/pwn", "-rev"}
+	for _, since := range cases {
+		_, err := executeAnalyze(&analyzeFlags{
+			input:      testdataPath("buggy.json"),
+			output:     "json",
+			outputFile: filepath.Join(t.TempDir(), "out.json"),
+			since:      since,
+		})
+		if err == nil {
+			t.Errorf("--since=%q: expected rejection, got nil error", since)
+		}
+	}
+}
+
 // TestSince_InvalidRef verifies --since with a bogus ref returns an error.
 func TestSince_InvalidRef(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {

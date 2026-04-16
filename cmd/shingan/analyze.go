@@ -366,7 +366,15 @@ func filterNew(findings []domain.Finding, b *domain.Baseline) []domain.Finding {
 // filepath.Walk outputs succeed regardless of trailing slashes or `./` prefixes.
 // If git is unavailable or the diff fails, an error is returned: silently
 // treating --since as a no-op would defeat the purpose of progressive adoption.
+//
+// since is rejected if it starts with "-" so that values like "--exec=evil"
+// can never be smuggled in as a git CLI option (defense-in-depth: exec.Command
+// already avoids shell interpretation, but git itself would still parse a
+// leading "-" as an option flag).
 func changedFiles(since, inputPrefix string) ([]string, error) {
+	if strings.HasPrefix(since, "-") {
+		return nil, fmt.Errorf("--since value must not start with '-': %q", since)
+	}
 	cmd := exec.Command("git", "diff", "--name-only", fmt.Sprintf("%s..HEAD", since))
 	out, err := cmd.Output()
 	if err != nil {

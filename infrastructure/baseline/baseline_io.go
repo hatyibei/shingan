@@ -13,7 +13,9 @@ import (
 )
 
 // Save writes b to path as pretty-printed JSON. Parent directories are created
-// if they do not exist. Existing files are overwritten atomically.
+// if they do not exist. Existing files are overwritten in place
+// (os.WriteFile truncate-then-write — not atomic; concurrent readers may see
+// partial contents).
 func Save(path string, b *domain.Baseline) error {
 	if b == nil {
 		return fmt.Errorf("save baseline: nil baseline")
