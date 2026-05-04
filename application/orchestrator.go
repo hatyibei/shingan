@@ -149,6 +149,65 @@ func (o *AnalysisOrchestrator) Analyze(graph *domain.WorkflowGraph, rules []doma
 	return combined
 }
 
+// GraphWithSource pairs a WorkflowGraph with the source file that produced
+// it. Used by the multi-file directory pipeline (ADR-012) so per-file
+// independent graphs can attribute their findings back to the originating
+// file via Finding.SourceFile.
+type GraphWithSource struct {
+	Graph      *domain.WorkflowGraph
+	SourceFile string
+}
+
+// AnalyzeMulti runs Analyze on each (graph, sourceFile) pair independently
+// and returns a single sorted []Finding with each Finding stamped with its
+// graph's SourceFile. Sort order matches Analyze (Severity DESC →
+// Confidence DESC → RuleName ASC); all per-graph results are concatenated
+// before the final sort so two findings from different files with the same
+// (severity, confidence, rule) interleave deterministically.
+//
+// Per ADR-012: this is the canonical entry point for directory-mode
+// analysis (multi-file ADK-Go, multi-file LangGraph) so independent agent
+// definitions in different files are NOT merged into a single graph and
+// don't produce spurious unreachable_node findings.
+//
+// An empty `inputs` slice returns an empty (non-nil) slice. nil inputs
+// are skipped silently.
+func (o *AnalysisOrchestrator) AnalyzeMulti(inputs []GraphWithSource, rules []domain.AnalysisRule) []domain.Finding {
+	if len(inputs) == 0 || len(rules) == 0 {
+		return []domain.Finding{}
+	}
+
+	combined := make([]domain.Finding, 0, len(inputs)*8)
+	for _, in := range inputs {
+		if in.Graph == nil {
+			continue
+		}
+		findings := o.Analyze(in.Graph, rules)
+		for i := range findings {
+			findings[i].SourceFile = in.SourceFile
+		}
+		combined = append(combined, findings...)
+	}
+
+	sort.SliceStable(combined, func(i, j int) bool {
+		if combined[i].Severity != combined[j].Severity {
+			return combined[i].Severity > combined[j].Severity
+		}
+		if combined[i].Confidence != combined[j].Confidence {
+			return combined[i].Confidence > combined[j].Confidence
+		}
+		if combined[i].RuleName != combined[j].RuleName {
+			return combined[i].RuleName < combined[j].RuleName
+		}
+		// Stable tiebreaker for findings sharing rule + severity + confidence
+		// across files: SourceFile path ASC. Keeps directory output
+		// deterministic regardless of filesystem walk order.
+		return combined[i].SourceFile < combined[j].SourceFile
+	})
+
+	return combined
+}
+
 // classify splits rules into the four execution buckets used by Analyze.
 //
 // Priority order: GlobalRule > PathRule > LocalRule > AnalysisRule. A rule

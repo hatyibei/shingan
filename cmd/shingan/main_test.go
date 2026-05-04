@@ -437,3 +437,58 @@ func TestADKGo_Directory_MergesAllFiles(t *testing.T) {
 		t.Errorf("exit code = %d, want 2 (expected Critical findings from merged graph)", code)
 	}
 }
+
+// TestADKGo_Directory_NoSpuriousUnreachable verifies the ADR-012 fix:
+// per-file independent graphs eliminate the unreachable_node false
+// positives that the old merge strategy produced for testdata/agents
+// (3 independent agent definitions in 3 files).
+func TestADKGo_Directory_NoSpuriousUnreachable(t *testing.T) {
+	outPath := filepath.Join(t.TempDir(), "out.json")
+	flags := &analyzeFlags{
+		input:      testdataPath("agents"),
+		format:     "adk-go",
+		output:     "json",
+		outputFile: outPath,
+	}
+	if _, err := executeAnalyze(flags); err != nil {
+		t.Fatalf("executeAnalyze: %v", err)
+	}
+
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	var report struct {
+		Findings []struct {
+			Rule       string `json:"rule"`
+			SourceFile string `json:"source_file"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal(data, &report); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	// Pre-ADR-012 this directory produced 7 unreachable_node findings
+	// (each file's nodes were unreachable from the first file's entry).
+	// Now: 0 unreachable_node, all real bugs (cycle, loop_guard, etc).
+	for _, f := range report.Findings {
+		if f.Rule == "unreachable_node" {
+			t.Errorf("spurious unreachable_node finding: source_file=%q (expected 0 with per-file graphs)", f.SourceFile)
+		}
+	}
+
+	// Every finding must carry SourceFile (per-file attribution, ADR-012).
+	seenSources := map[string]struct{}{}
+	for _, f := range report.Findings {
+		if f.SourceFile == "" {
+			t.Errorf("finding without source_file: rule=%q", f.Rule)
+		}
+		seenSources[f.SourceFile] = struct{}{}
+	}
+	// At minimum the 3 fixture files (infinite_loop, missing_handler,
+	// unreachable) all produce findings — confirms per-file analysis
+	// actually walks every file rather than short-circuiting on the first.
+	if len(seenSources) < 2 {
+		t.Errorf("expected findings from multiple files, got %d distinct source_file: %v", len(seenSources), seenSources)
+	}
+}

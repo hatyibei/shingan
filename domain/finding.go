@@ -87,4 +87,11 @@ type Finding struct {
 	// been migrated yet may leave it empty; the JSON/SARIF reporters omit
 	// the field via `omitempty` semantics on the producing layer.
 	ConfidenceReason ConfidenceReason
+	// SourceFile is the absolute or repo-relative path of the file the
+	// finding originates from. Populated by the multi-file directory
+	// pipeline (ADR-012) so per-file independent graphs can attribute
+	// findings to their originating file even when Node.Pos is empty
+	// (e.g. JSON parser without position info). Single-file inputs leave
+	// it empty; consumers should fall back to Node.Pos.File when needed.
+	SourceFile string
 }

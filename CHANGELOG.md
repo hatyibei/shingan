@@ -5,6 +5,15 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 ## [Unreleased]
 
 ### Added
+- **ADR-012: multi-file directory analysis を per-file independent graph に変更 (#9 解決)**
+  - self-dogfood で `testdata/agents` の `unreachable_node` 偽陽性 7件を発見、原因は merge 戦略
+  - `domain.Finding.SourceFile` field 追加 — directory モード時に file 単位 attribution
+  - `application.GraphWithSource` 新規 + `Orchestrator.AnalyzeMulti(inputs, rules)` 追加 (既存 `Analyze` は維持)
+  - `cmd/shingan/analyze.go`: directory 経路を `loadAsMulti` + `AnalyzeMulti` に置換
+  - `cmd/shingan-mcp/tools.go`: 同様に `loadGraphsAsMulti` + `runAnalysisMulti`、ParseFile 優先
+  - `infrastructure/reporter/json.go`: `source_file` / `confidence_reason` フィールド出力 (omitempty)
+  - 結果: testdata/agents で 14 findings (Critical 4 / Warning 8 / Info 2) → **6 findings (Critical 4 / Warning 2)** へ偽陽性 8件削減
+  - regression test: `TestADKGo_Directory_NoSpuriousUnreachable` / `TestAnalyzeMulti_{StampsSourceFile,EmptyInputs,NilGraphSkipped}`
 - ESLint方式 visitor pattern + 3層ルール分離 (ADR-006/007/008/010) — refactor/visitor-pattern ブランチ
   - `domain/visitor.go` — `Listener`/`Selector`/`RuleContext` を新規追加。Listener は `OnNode[NodeType]` / `OnAny` / `OnEdge` / `OnGraph` の 4 ハンドラ束で、走査と判定を分離する。
   - `domain/rule.go` — `LocalRule` / `PathRule` / `GlobalRule` の 3 interface を追加。`AnalysisRule` は **Deprecated** 注記付きで残し、テスト double / 旧 caller は無改修で動く。

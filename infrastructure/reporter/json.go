@@ -20,13 +20,18 @@ func (r *JSONReporter) ContentType() string {
 }
 
 // jsonFinding is the JSON-serializable representation of a domain.Finding.
+// SourceFile (ADR-012) is omitted when empty for backward compatibility:
+// single-file inputs emit reports without the field, directory inputs
+// stamp every finding with its originating path.
 type jsonFinding struct {
-	Rule       string  `json:"rule"`
-	Severity   string  `json:"severity"`
-	NodeID     string  `json:"node_id"`
-	Message    string  `json:"message"`
-	Suggestion string  `json:"suggestion"`
-	Confidence float64 `json:"confidence"`
+	Rule             string  `json:"rule"`
+	Severity         string  `json:"severity"`
+	NodeID           string  `json:"node_id"`
+	Message          string  `json:"message"`
+	Suggestion       string  `json:"suggestion"`
+	Confidence       float64 `json:"confidence"`
+	ConfidenceReason string  `json:"confidence_reason,omitempty"`
+	SourceFile       string  `json:"source_file,omitempty"`
 }
 
 // jsonSummary holds aggregate counts per severity.
@@ -52,12 +57,14 @@ func (r *JSONReporter) Format(findings []domain.Finding) ([]byte, error) {
 
 	for _, f := range findings {
 		jf = append(jf, jsonFinding{
-			Rule:       f.RuleName,
-			Severity:   f.Severity.String(),
-			NodeID:     f.NodeID,
-			Message:    f.Message,
-			Suggestion: f.Suggestion,
-			Confidence: f.Confidence,
+			Rule:             f.RuleName,
+			Severity:         f.Severity.String(),
+			NodeID:           f.NodeID,
+			Message:          f.Message,
+			Suggestion:       f.Suggestion,
+			Confidence:       f.Confidence,
+			ConfidenceReason: string(f.ConfidenceReason),
+			SourceFile:       f.SourceFile,
 		})
 		switch f.Severity {
 		case domain.Critical:

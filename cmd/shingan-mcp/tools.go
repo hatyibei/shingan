@@ -51,6 +51,11 @@ type SuggestModelArgs struct {
 // FindingDTO is the wire form of a finding. Mirrors domain.Finding but
 // serialises Severity as its lowercase string ("critical" / "warning" / "info")
 // so downstream JSON consumers don't have to learn the Go enum values.
+//
+// SourceFile is populated when the finding comes from a directory analysis
+// (ADR-012): per-file independent graphs let the MCP client know which
+// file in a multi-file workflow the issue belongs to. Empty for single-
+// file inputs.
 type FindingDTO struct {
 	RuleName   string  `json:"rule_name"`
 	Severity   string  `json:"severity"`
@@ -58,6 +63,7 @@ type FindingDTO struct {
 	Message    string  `json:"message"`
 	Suggestion string  `json:"suggestion,omitempty"`
 	Confidence float64 `json:"confidence"`
+	SourceFile string  `json:"source_file,omitempty"`
 }
 
 // FindingList is the canonical output wrapper for both analyze tools.
@@ -174,12 +180,12 @@ func (d *toolDeps) analyzeFile(
 		return errorResult(err.Error()), FindingList{}, nil
 	}
 
-	graph, err := loadGraph(args.Path, framework, parser)
+	inputs, err := loadGraphsAsMulti(args.Path, framework, parser)
 	if err != nil {
 		return errorResult(fmt.Sprintf("load graph: %v", err)), FindingList{}, nil
 	}
 
-	return d.runAnalysis(graph)
+	return d.runAnalysisMulti(inputs)
 }
 
 // explainRule implements shingan_explain_rule.
@@ -223,11 +229,20 @@ func (d *toolDeps) suggestModel(
 
 // ---- Helpers -----------------------------------------------------------------
 
-// runAnalysis drives the orchestrator and maps the domain findings into the
-// wire DTO. Shared by both analyze* tools so the output shape is identical.
+// runAnalysis is a thin wrapper that runs runAnalysisMulti on a single
+// in-memory graph (shingan_analyze_graph tool path, no source file).
 func (d *toolDeps) runAnalysis(graph *domain.WorkflowGraph) (*mcp.CallToolResult, FindingList, error) {
+	return d.runAnalysisMulti([]application.GraphWithSource{{Graph: graph}})
+}
+
+// runAnalysisMulti drives the orchestrator over a slice of (graph,
+// sourceFile) pairs and maps the domain findings into the wire DTO. Per
+// ADR-012, directory inputs (shingan_analyze_file with a folder path)
+// produce one element per file so independent agent definitions are no
+// longer merged into a single graph.
+func (d *toolDeps) runAnalysisMulti(inputs []application.GraphWithSource) (*mcp.CallToolResult, FindingList, error) {
 	rules := d.analyzerFactory.CreateAll()
-	findings := d.orchestrator.Analyze(graph, rules)
+	findings := d.orchestrator.AnalyzeMulti(inputs, rules)
 
 	out := FindingList{
 		Findings: make([]FindingDTO, 0, len(findings)),
@@ -241,6 +256,7 @@ func (d *toolDeps) runAnalysis(graph *domain.WorkflowGraph) (*mcp.CallToolResult
 			Message:    f.Message,
 			Suggestion: f.Suggestion,
 			Confidence: f.Confidence,
+			SourceFile: f.SourceFile,
 		})
 	}
 
@@ -254,9 +270,16 @@ func (d *toolDeps) runAnalysis(graph *domain.WorkflowGraph) (*mcp.CallToolResult
 	}, out, nil
 }
 
-// loadGraph reads a workflow from disk. For adk-go with a directory path, all
-// *.go files are walked and merged (same behaviour as cmd/shingan analyze).
-func loadGraph(path, framework string, p application.WorkflowParser) (*domain.WorkflowGraph, error) {
+// loadGraphsAsMulti reads a workflow from disk and returns one
+// (graph, sourceFile) pair per parsed file. Per ADR-012, directory
+// inputs (currently only adk-go) produce per-file independent graphs
+// rather than a single merged graph, so independent agent definitions
+// in different files don't collide and trigger spurious findings.
+//
+// Single-file inputs return a one-element slice. Errors propagate;
+// per-file parse failures inside a directory are skipped silently
+// (mirrors CLI resilience).
+func loadGraphsAsMulti(path, framework string, p application.WorkflowParser) ([]application.GraphWithSource, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("stat %q: %w", path, err)
@@ -266,20 +289,24 @@ func loadGraph(path, framework string, p application.WorkflowParser) (*domain.Wo
 		// Prefer ParseFile when the parser implements it: ADK-Go's
 		// ParseFile threads the real path through go/types for the
 		// second-pass type analysis (functiontool.New[TArgs] generic
-		// inference), and LangGraph's ParseFile uses sys.path resolution.
-		// Falling back to ReadFile + Parse silently drops both, making
-		// MCP analysis return different findings from `shingan analyze`
-		// on the same file (Codex iter4 P2).
+		// inference), and LangGraph's ParseFile uses sys.path resolution
+		// (Codex iter4 P2).
+		var g *domain.WorkflowGraph
 		if fp, ok := p.(interface {
 			ParseFile(string) (*domain.WorkflowGraph, error)
 		}); ok {
-			return fp.ParseFile(path)
+			g, err = fp.ParseFile(path)
+		} else {
+			data, rerr := os.ReadFile(path)
+			if rerr != nil {
+				return nil, fmt.Errorf("read file %q: %w", path, rerr)
+			}
+			g, err = p.Parse(data)
 		}
-		data, err := os.ReadFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("read file %q: %w", path, err)
+			return nil, err
 		}
-		return p.Parse(data)
+		return []application.GraphWithSource{{Graph: g, SourceFile: path}}, nil
 	}
 
 	if framework != "adk-go" {
@@ -289,7 +316,7 @@ func loadGraph(path, framework string, p application.WorkflowParser) (*domain.Wo
 		)
 	}
 
-	merged := &domain.WorkflowGraph{Nodes: make(map[string]*domain.Node)}
+	var inputs []application.GraphWithSource
 	walkErr := filepath.Walk(path, func(p2 string, info os.FileInfo, werr error) error {
 		if werr != nil {
 			return werr
@@ -297,40 +324,31 @@ func loadGraph(path, framework string, p application.WorkflowParser) (*domain.Wo
 		if info.IsDir() || filepath.Ext(p2) != ".go" {
 			return nil
 		}
-		data, err := os.ReadFile(p2)
-		if err != nil {
-			return nil // skip unreadable files; mirrors CLI behaviour
+		// Use ParseFile when supported so per-file Pos.File matches the
+		// real path (Codex iter4 P2 + ADR-012).
+		var g *domain.WorkflowGraph
+		var perr error
+		if fp, ok := p.(interface {
+			ParseFile(string) (*domain.WorkflowGraph, error)
+		}); ok {
+			g, perr = fp.ParseFile(p2)
+		} else {
+			data, rerr := os.ReadFile(p2)
+			if rerr != nil {
+				return nil // skip unreadable files; mirrors CLI behaviour
+			}
+			g, perr = p.Parse(data)
 		}
-		g, err := p.Parse(data)
-		if err != nil {
+		if perr != nil {
 			return nil // skip unparseable files
 		}
-		for id, n := range g.Nodes {
-			if _, ok := merged.Nodes[id]; !ok {
-				merged.Nodes[id] = n
-			}
-		}
-		for _, e := range g.Edges {
-			dup := false
-			for _, ex := range merged.Edges {
-				if ex.From == e.From && ex.To == e.To && ex.Condition == e.Condition {
-					dup = true
-					break
-				}
-			}
-			if !dup {
-				merged.Edges = append(merged.Edges, e)
-			}
-		}
-		if merged.EntryNodeID == "" && g.EntryNodeID != "" {
-			merged.EntryNodeID = g.EntryNodeID
-		}
+		inputs = append(inputs, application.GraphWithSource{Graph: g, SourceFile: p2})
 		return nil
 	})
 	if walkErr != nil {
 		return nil, fmt.Errorf("walk %q: %w", path, walkErr)
 	}
-	return merged, nil
+	return inputs, nil
 }
 
 // errorResult wraps a plain-text error into an MCP CallToolResult that flags

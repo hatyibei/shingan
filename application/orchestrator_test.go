@@ -205,3 +205,62 @@ func TestAnalyze_ZeroConfidenceNormalizedToOne(t *testing.T) {
 		t.Errorf("expected Confidence normalized to 1.0, got %.2f", got[0].Confidence)
 	}
 }
+
+// TestAnalyzeMulti_StampsSourceFile verifies the ADR-012 contract: each
+// finding produced by AnalyzeMulti carries the SourceFile of the graph
+// that produced it, so directory-mode analyses can attribute findings
+// back to the originating file.
+func TestAnalyzeMulti_StampsSourceFile(t *testing.T) {
+	rules := []domain.AnalysisRule{
+		&fakeRule{name: "rule_a", findings: []domain.Finding{
+			{RuleName: "rule_a", NodeID: "n1", Message: "issue", Severity: domain.Warning},
+		}},
+	}
+	inputs := []application.GraphWithSource{
+		{Graph: &domain.WorkflowGraph{Nodes: map[string]*domain.Node{"n1": {ID: "n1"}}}, SourceFile: "fileA.go"},
+		{Graph: &domain.WorkflowGraph{Nodes: map[string]*domain.Node{"n1": {ID: "n1"}}}, SourceFile: "fileB.go"},
+	}
+
+	o := application.NewAnalysisOrchestrator()
+	got := o.AnalyzeMulti(inputs, rules)
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 findings (one per graph), got %d", len(got))
+	}
+	sources := map[string]int{}
+	for _, f := range got {
+		sources[f.SourceFile]++
+	}
+	if sources["fileA.go"] != 1 || sources["fileB.go"] != 1 {
+		t.Errorf("expected SourceFile distribution 1+1, got %v", sources)
+	}
+}
+
+// TestAnalyzeMulti_EmptyInputs returns an empty slice without panicking.
+func TestAnalyzeMulti_EmptyInputs(t *testing.T) {
+	o := application.NewAnalysisOrchestrator()
+	got := o.AnalyzeMulti(nil, []domain.AnalysisRule{&fakeRule{name: "x"}})
+	if len(got) != 0 {
+		t.Errorf("expected empty result for nil inputs, got %d", len(got))
+	}
+}
+
+// TestAnalyzeMulti_NilGraphSkipped silently skips nil-graph entries
+// rather than panicking; this matches the CLI's "warning + continue"
+// behaviour for unparseable files.
+func TestAnalyzeMulti_NilGraphSkipped(t *testing.T) {
+	rules := []domain.AnalysisRule{
+		&fakeRule{name: "rule_a", findings: []domain.Finding{
+			{RuleName: "rule_a", NodeID: "n1", Message: "issue", Severity: domain.Info},
+		}},
+	}
+	inputs := []application.GraphWithSource{
+		{Graph: nil, SourceFile: "broken.go"},
+		{Graph: &domain.WorkflowGraph{Nodes: map[string]*domain.Node{"n1": {ID: "n1"}}}, SourceFile: "good.go"},
+	}
+	o := application.NewAnalysisOrchestrator()
+	got := o.AnalyzeMulti(inputs, rules)
+	if len(got) != 1 || got[0].SourceFile != "good.go" {
+		t.Errorf("expected only good.go's finding, got %+v", got)
+	}
+}

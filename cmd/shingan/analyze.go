@@ -125,34 +125,32 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 		return 1, fmt.Errorf("create parser: %w", err)
 	}
 
-	// 3. Load and parse the FULL graph regardless of --since.
-	//    Per code review (Codex P1): --since must suppress pre-existing
-	//    findings, NOT alter graph semantics. Restricting the parse to
-	//    changed files yields incomplete graphs (missing entry node /
-	//    edges) and produces spurious findings such as bogus
-	//    `unreachable_node` errors. Filtering happens at the finding
-	//    level below.
-	graph, err := loadGraphWithParser(flags.input, inputFormat, workflowParser)
+	// 3. Load graphs. Per ADR-012: directory inputs yield ONE graph per
+	//    file (independent agent definitions are no longer merged into a
+	//    single graph). Single-file inputs return a one-element slice.
+	//    --since filtering still happens at the finding level (Codex P1).
+	inputs, err := loadAsMulti(flags.input, inputFormat, workflowParser, nil)
 	if err != nil {
 		return 1, fmt.Errorf("load graph: %w", err)
 	}
 
-	// 4. Run all analysis rules.
+	// 4. Run all analysis rules per-graph; AnalyzeMulti stamps each
+	//    finding with its originating SourceFile (ADR-012).
 	analyzerFactory := factory.NewAnalyzerFactory()
 	rules := analyzerFactory.CreateAll()
 
 	orchestrator := application.NewAnalysisOrchestrator()
-	findings := orchestrator.Analyze(graph, rules)
+	findings := orchestrator.AnalyzeMulti(inputs, rules)
 
-	// 4a. Apply --since at the FINDING level: keep only findings whose
-	//     associated node lives in a changed file. Findings on nodes
-	//     without source position information are kept (defensive: better
-	//     surface a finding than hide it). Per Codex P1 review.
-	//     repoRoot is threaded through so absolute Pos.File entries (e.g.
-	//     LangGraph shim) are normalised to repo-relative before lookup
-	//     (Codex iter2 P1).
+	// 4a. Apply --since at the FINDING level. With per-file graphs we now
+	//     have two ways to attribute a finding to a file:
+	//       - Finding.SourceFile (set by AnalyzeMulti from the per-file
+	//         input path) — primary signal
+	//       - Node.Pos.File (set by some parsers, e.g. ADK-Go ParseFile)
+	//         — fallback for legacy callers that bypass AnalyzeMulti
+	//     filterByChangedFilesMulti consults both, preferring SourceFile.
 	if flags.since != "" {
-		findings = filterByChangedFiles(findings, graph, changed, repoRoot)
+		findings = filterByChangedFilesMulti(findings, inputs, changed, repoRoot)
 	}
 
 	// 4b. Filter by minimum confidence threshold if specified.
@@ -207,8 +205,89 @@ func emitFindings(flags *analyzeFlags, outputFormat string, findings []domain.Fi
 // loadGraphWithParser loads and parses a WorkflowGraph from path using the given parser.
 // For adk-go format with a directory input, all *.go files are walked and their
 // nodes and edges are merged into a single graph.
+//
+// Deprecated: as of ADR-012, directory inputs yield one graph per file.
+// Use loadAsMulti for new callers; this wrapper exists only for legacy
+// integrations that still need a single-graph view (and tolerate the
+// merge-induced false positives the ADR catalogues).
 func loadGraphWithParser(path, inputFormat string, p application.WorkflowParser) (*domain.WorkflowGraph, error) {
 	return loadGraphFiltered(path, inputFormat, p, nil)
+}
+
+// loadAsMulti returns one (graph, sourceFile) pair per parsed file. Per
+// ADR-012 this is the canonical loader for the analyze pipeline:
+//
+//	single file input  → one-element slice with that file's path
+//	directory input    → one element per matching .go (adk-go) /
+//	                     .py (langgraph) file, each parsed independently
+//	                     so independent agent definitions don't merge
+//
+// `allow` is a repo-relative path allowlist used by --since: when
+// non-nil, files outside the set are skipped entirely. Empty allowlist
+// (allow != nil but len == 0) returns an empty slice.
+func loadAsMulti(path, inputFormat string, p application.WorkflowParser, allow []string) ([]application.GraphWithSource, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("stat %q: %w", path, err)
+	}
+
+	if !info.IsDir() {
+		// Single-file input. Honour --since allowlist if present.
+		if allow != nil && !fileInAllowlist(path, allow) {
+			return []application.GraphWithSource{}, nil
+		}
+		g, err := parseFile(path, p)
+		if err != nil {
+			return nil, err
+		}
+		return []application.GraphWithSource{{Graph: g, SourceFile: path}}, nil
+	}
+
+	// Directory input — pick the extension by format.
+	var ext string
+	switch inputFormat {
+	case "adk-go":
+		ext = ".go"
+	case "langgraph":
+		ext = ".py"
+	default:
+		return nil, fmt.Errorf("directory input is only supported for adk-go and langgraph formats; use a single JSON file for json/samurai formats")
+	}
+	return parseSourceDirectoryAsMulti(path, p, allow, ext)
+}
+
+// parseSourceDirectoryAsMulti walks a directory, parses every matching
+// file independently, and returns one GraphWithSource per file. Per
+// ADR-012 — the previous parseSourceDirectoryFiltered merged everything
+// into one graph and produced spurious unreachable_node findings on
+// directories holding multiple independent agent definitions.
+//
+// Files that fail to parse are skipped with a warning (mirrors CLI
+// resilience for incremental refactors); fatal walk errors propagate.
+func parseSourceDirectoryAsMulti(dir string, p application.WorkflowParser, allow []string, ext string) ([]application.GraphWithSource, error) {
+	var out []application.GraphWithSource
+	walkErr := filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return fmt.Errorf("walk error at %q: %w", path, walkErr)
+		}
+		if info.IsDir() || filepath.Ext(path) != ext {
+			return nil
+		}
+		if allow != nil && !fileInAllowlist(path, allow) {
+			return nil
+		}
+		g, err := parseFile(path, p)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "warning: skipping %q: %v\n", path, err)
+			return nil
+		}
+		out = append(out, application.GraphWithSource{Graph: g, SourceFile: path})
+		return nil
+	})
+	if walkErr != nil {
+		return nil, fmt.Errorf("walk directory %q: %w", dir, walkErr)
+	}
+	return out, nil
 }
 
 // loadGraphFiltered is loadGraphWithParser with an optional allowlist of file
@@ -543,6 +622,75 @@ func repoRelativePrefix(inputPrefix, repoRoot string) (string, error) {
 		return "", fmt.Errorf("input %q is outside repo root %q", inputPrefix, repoRoot)
 	}
 	return filepath.Clean(rel), nil
+}
+
+// filterByChangedFilesMulti is the ADR-012 successor to
+// filterByChangedFiles. With per-file independent graphs every Finding
+// carries its originating file in SourceFile; we look up the changed
+// set against that primary signal first, then fall back to Node.Pos.File
+// (set by some parsers like ADK-Go ParseFile / LangGraph) and finally
+// keep the finding defensively if neither attribution exists.
+//
+// `inputs` is the same []GraphWithSource passed to AnalyzeMulti so we
+// can resolve a finding's NodeID → Node when only Node.Pos.File is set.
+//
+// repoRoot lets normaliseToRepoRelative collapse absolute parser paths
+// (e.g. LangGraph shim) into the same coordinate system as `git diff
+// --name-only` output (Codex iter2 P1 fix, generalised).
+func filterByChangedFilesMulti(findings []domain.Finding, inputs []application.GraphWithSource, changed []string, repoRoot string) []domain.Finding {
+	if len(changed) == 0 {
+		return nil
+	}
+	changedSet := make(map[string]struct{}, len(changed))
+	for _, c := range changed {
+		changedSet[filepath.Clean(c)] = struct{}{}
+	}
+
+	// Index nodes by (sourceFile → nodeID → node) so SourceFile-less
+	// findings can resort to Node.Pos.File.
+	type nodeIndex map[string]*domain.Node
+	bySrc := make(map[string]nodeIndex, len(inputs))
+	for _, in := range inputs {
+		if in.Graph == nil {
+			continue
+		}
+		idx := make(nodeIndex, len(in.Graph.Nodes))
+		for id, n := range in.Graph.Nodes {
+			idx[id] = n
+		}
+		bySrc[in.SourceFile] = idx
+	}
+
+	out := make([]domain.Finding, 0, len(findings))
+	for _, f := range findings {
+		// Primary: Finding.SourceFile (ADR-012 attribution).
+		if f.SourceFile != "" {
+			key := normaliseToRepoRelative(f.SourceFile, repoRoot)
+			if _, hit := changedSet[key]; hit {
+				out = append(out, f)
+			}
+			continue
+		}
+
+		// Secondary: look up Node.Pos.File via per-source index.
+		var node *domain.Node
+		for _, idx := range bySrc {
+			if n, ok := idx[f.NodeID]; ok && n != nil {
+				node = n
+				break
+			}
+		}
+		if node == nil || node.Pos.IsZero() {
+			// Defensive keep: better surface than silent drop.
+			out = append(out, f)
+			continue
+		}
+		key := normaliseToRepoRelative(node.Pos.File, repoRoot)
+		if _, hit := changedSet[key]; hit {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // filterByChangedFiles keeps only findings whose associated node lives in a
