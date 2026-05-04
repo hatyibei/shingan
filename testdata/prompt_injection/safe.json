@@ -1,0 +1,44 @@
+{
+  "entry_node_id": "user_query",
+  "nodes": [
+    {
+      "id": "user_query",
+      "name": "user_query",
+      "type": "tool",
+      "config": {
+        "source": "user_input",
+        "description": "raw user prompt from chat UI"
+      }
+    },
+    {
+      "id": "validator",
+      "name": "schema_validator",
+      "type": "tool",
+      "config": {
+        "category": "transform",
+        "description": "JSON-schema validation; rejects content not matching the typed contract"
+      }
+    },
+    {
+      "id": "structured_caller",
+      "name": "structured_caller",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "messages_template": "[{\"role\":\"system\",\"content\":\"You are a customer-support assistant for ACME Corp.\"},{\"role\":\"user\",\"content\":\"{{validated_payload}}\"}]",
+        "description": "Renders user content into a separate role:user message; system prompt is a static literal"
+      }
+    },
+    {
+      "id": "output",
+      "name": "final_response",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    { "from": "user_query",        "to": "validator" },
+    { "from": "validator",         "to": "structured_caller", "condition": "schema_ok" },
+    { "from": "structured_caller", "to": "output" }
+  ]
+}

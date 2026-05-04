@@ -7,18 +7,19 @@
 //
 // Patterns:
 //
-//	random           — Random graph (may contain intentional bugs)
-//	clean            — Structurally correct graph (0 findings expected)
-//	buggy            — All 7 rules fire (Critical + Warning findings)
-//	infinite-loop    — LoopAgent without max_iterations (loop_guard + cycle_detection)
-//	unreachable      — Detached nodes (unreachable_node findings)
-//	pii-leak         — RAG→external API without Human gate (pii_leak_scanner)
-//	cycle            — Raw cycle without Loop node wrapper (cycle_detection)
-//	secret-exposure  — LLM node with hardcoded API key in prompt (secret_exposure_scanner)
-//	deprecated-model — LLM node using a shutdown model (deprecated_model Critical)
-//	high-fanout      — Orchestrator with --size fan-out workers (max_parallel_branches)
-//	temperature-misuse — LLM node with structured_output=true and temperature > 0 (temperature_misuse Warning)
-//	model-mismatch    — LLM node with model/provider disagreement (model_card_mismatch Critical)
+//	random                 — Random graph (may contain intentional bugs)
+//	clean                  — Structurally correct graph (0 findings expected)
+//	buggy                  — All 7 rules fire (Critical + Warning findings)
+//	infinite-loop          — LoopAgent without max_iterations (loop_guard + cycle_detection)
+//	unreachable            — Detached nodes (unreachable_node findings)
+//	pii-leak               — RAG→external API without Human gate (pii_leak_scanner)
+//	cycle                  — Raw cycle without Loop node wrapper (cycle_detection)
+//	secret-exposure        — LLM node with hardcoded API key in prompt (secret_exposure_scanner)
+//	deprecated-model       — LLM node using a shutdown model (deprecated_model Critical)
+//	high-fanout            — Orchestrator with --size fan-out workers (max_parallel_branches)
+//	temperature-misuse     — LLM node with structured_output=true and temperature > 0 (temperature_misuse Warning)
+//	model-mismatch         — LLM node with model/provider disagreement (model_card_mismatch Critical)
+//	prompt-injection-sink  — User input → LLM system_prompt with substitution (prompt_injection_sink Critical)
 package main
 
 import (
@@ -86,8 +87,10 @@ func generate(pattern string, size int, seed int64) (*domain.WorkflowGraph, erro
 		return testutil.GenerateTemperatureMisuseGraph(seed), nil
 	case "model-mismatch":
 		return testutil.GenerateModelCardMismatchGraph(seed), nil
+	case "prompt-injection-sink":
+		return testutil.GeneratePromptInjectionSinkGraph(seed), nil
 	default:
-		return nil, fmt.Errorf("unknown pattern %q: must be one of random, clean, buggy, infinite-loop, unreachable, pii-leak, cycle, secret-exposure, deprecated-model, high-fanout, temperature-misuse, model-mismatch", pattern)
+		return nil, fmt.Errorf("unknown pattern %q: must be one of random, clean, buggy, infinite-loop, unreachable, pii-leak, cycle, secret-exposure, deprecated-model, high-fanout, temperature-misuse, model-mismatch, prompt-injection-sink", pattern)
 	}
 }
 
@@ -103,19 +106,20 @@ func main() {
 		Long: `shingan-gen produces WorkflowGraph JSON files for use with shingan analyze.
 
 Patterns:
-  random          Random graph with intentional bugs (compatible with GenerateRandomGraph)
-  clean           Structurally correct graph — 0 findings expected
-  buggy           All 7 rules fire: loop_guard, cycle_detection, unreachable_node,
-                  error_handler_checker, cost_estimation, redundant_llm_call, pii_leak_scanner
-  infinite-loop   LoopAgent without max_iterations — triggers loop_guard + cycle_detection
-  unreachable     Detached nodes — triggers unreachable_node
-  pii-leak        RAG tool → external API without Human gate — triggers pii_leak_scanner
-  cycle           Raw cycle with no Loop node wrapper — triggers cycle_detection
-  secret-exposure  LLM node with hardcoded API key in prompt — triggers secret_exposure_scanner (Critical)
-  deprecated-model LLM node using a shutdown model — triggers deprecated_model (Critical)
-  high-fanout      Orchestrator with --size fan-out workers — triggers max_parallel_branches
-  temperature-misuse LLM node with structured_output=true and temperature>0 — triggers temperature_misuse (Warning)
-  model-mismatch    LLM node with model/provider disagreement — triggers model_card_mismatch (Critical)
+  random                Random graph with intentional bugs (compatible with GenerateRandomGraph)
+  clean                 Structurally correct graph — 0 findings expected
+  buggy                 All 7 rules fire: loop_guard, cycle_detection, unreachable_node,
+                        error_handler_checker, cost_estimation, redundant_llm_call, pii_leak_scanner
+  infinite-loop         LoopAgent without max_iterations — triggers loop_guard + cycle_detection
+  unreachable           Detached nodes — triggers unreachable_node
+  pii-leak              RAG tool → external API without Human gate — triggers pii_leak_scanner
+  cycle                 Raw cycle with no Loop node wrapper — triggers cycle_detection
+  secret-exposure       LLM node with hardcoded API key in prompt — triggers secret_exposure_scanner (Critical)
+  deprecated-model      LLM node using a shutdown model — triggers deprecated_model (Critical)
+  high-fanout           Orchestrator with --size fan-out workers — triggers max_parallel_branches
+  temperature-misuse    LLM node with structured_output=true and temperature>0 — triggers temperature_misuse (Warning)
+  model-mismatch        LLM node with model/provider disagreement — triggers model_card_mismatch (Critical)
+  prompt-injection-sink User-input tool → LLM system_prompt with {{var}} substitution — triggers prompt_injection_sink (Critical)
 
 The output is valid JSON compatible with: shingan analyze --format json --input <path>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -141,7 +145,7 @@ The output is valid JSON compatible with: shingan analyze --format json --input 
 		},
 	}
 
-	rootCmd.Flags().StringVar(&pattern, "pattern", "random", "Pattern: random|clean|buggy|infinite-loop|unreachable|pii-leak|cycle|secret-exposure|deprecated-model|high-fanout|temperature-misuse|model-mismatch")
+	rootCmd.Flags().StringVar(&pattern, "pattern", "random", "Pattern: random|clean|buggy|infinite-loop|unreachable|pii-leak|cycle|secret-exposure|deprecated-model|high-fanout|temperature-misuse|model-mismatch|prompt-injection-sink")
 	rootCmd.Flags().IntVar(&size, "size", 10, "Number of nodes (for random/clean/unreachable/cycle patterns)")
 	rootCmd.Flags().Int64Var(&seed, "seed", 42, "Random seed for reproducible output")
 	rootCmd.Flags().StringVar(&output, "output", "", "Output file path (default: stdout; use '-' for stdout)")

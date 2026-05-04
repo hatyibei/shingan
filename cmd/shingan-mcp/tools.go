@@ -39,7 +39,7 @@ type AnalyzeFileArgs struct {
 
 // ExplainRuleArgs is the input schema of shingan_explain_rule.
 type ExplainRuleArgs struct {
-	RuleName string `json:"rule_name" jsonschema:"one of the 10 built-in rule names (e.g. loop_guard, cycle_detection)"`
+	RuleName string `json:"rule_name" jsonschema:"one of the 11 built-in rule names (e.g. loop_guard, cycle_detection)"`
 }
 
 // SuggestModelArgs is the input schema of shingan_suggest_model.
