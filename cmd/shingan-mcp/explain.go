@@ -65,6 +65,11 @@ Example: A node using gpt-3.5-turbo-0301 (shutdown) or claude-2 (deprecated).`,
 Why it matters: Schema-bound or label-bound tasks need a deterministic decode. High temperature creates output drift between runs, breaks JSON parsing, and inflates eval variance.
 Severity: Warning when structured_output=true or response_format="json_object" alongside temp>0 (Confidence 0.9, exact_static_match). Warning for classification with temp>0.3 or code_generation with temp>0 (Confidence 0.7, heuristic_pattern). Info for extraction tasks with temp>0 (Confidence 0.5, heuristic_pattern). Falls back to node.Name keyword scanning when Config["task"] is absent.
 Example: An LLM node with model="gpt-4o-mini", structured_output=true, temperature=0.7 → Warning.`,
+
+	"model_card_mismatch": `model_card_mismatch — detects LLM nodes whose declared model name disagrees with the configured base_url or provider.
+Why it matters: A gpt-* model wired to api.anthropic.com will fail at runtime with a hard 4xx; the static check catches it before deploy.
+Severity: Critical when a known prefix (gpt-*, claude-*, gemini-*, o1-*, text-bison*, chat-bison*) disagrees with provider/base_url (Confidence 1.0, exact_static_match). Info when the model prefix is unknown but a provider is set (Confidence 0.4, heuristic_pattern, surfaced so the table can be extended). No finding when only base_url is set without provider for unknown prefixes, or when provider matches the model prefix even with a custom base_url (legitimate proxy).
+Example: model="gpt-4o" + base_url="https://api.anthropic.com/v1" → Critical.`,
 }
 
 // knownRuleNames returns the sorted list of rule identifiers, used to build

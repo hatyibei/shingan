@@ -438,6 +438,51 @@ func TestGenerateTemperatureMisuseGraph_OtherRulesClean(t *testing.T) {
 	}
 }
 
+// ---- GenerateModelCardMismatchGraph ----
+
+func TestGenerateModelCardMismatchGraph_ReturnsValidGraph(t *testing.T) {
+	g := testutil.GenerateModelCardMismatchGraph(42)
+	if g == nil {
+		t.Fatal("expected non-nil graph")
+	}
+	if len(g.Nodes) == 0 {
+		t.Error("expected at least one node")
+	}
+	if g.EntryNodeID == "" {
+		t.Error("expected EntryNodeID to be set")
+	}
+	if _, ok := g.Nodes[g.EntryNodeID]; !ok {
+		t.Errorf("entry node %q not found in Nodes map", g.EntryNodeID)
+	}
+}
+
+func TestGenerateModelCardMismatchGraph_TriggersModelCardMismatchCritical(t *testing.T) {
+	g := testutil.GenerateModelCardMismatchGraph(42)
+	findings := rules.NewModelCardMismatchChecker().Analyze(g)
+	if !hasFinding(findings, "model_card_mismatch", domain.Critical) {
+		t.Errorf("expected model_card_mismatch Critical finding, got %d findings: %+v", len(findings), findings)
+	}
+}
+
+func TestGenerateModelCardMismatchGraph_OtherRulesClean(t *testing.T) {
+	g := testutil.GenerateModelCardMismatchGraph(42)
+	otherRules := []domain.AnalysisRule{
+		rules.NewCycleDetector(),
+		rules.NewLoopGuardChecker(),
+		rules.NewReachabilityChecker(),
+		rules.NewRedundantLLMDetector(),
+		rules.NewPIILeakScanner(),
+		rules.NewSecretExposureScanner(),
+		rules.NewDeprecatedModelChecker(),
+		rules.NewTemperatureMisuseChecker(),
+	}
+	for _, r := range otherRules {
+		if fs := r.Analyze(g); len(fs) != 0 {
+			t.Errorf("rule %q: expected 0 findings on model-mismatch graph, got %d: %+v", r.Name(), len(fs), fs)
+		}
+	}
+}
+
 // ---- GenerateRandomGraph (existing) ----
 
 func TestGenerateRandomGraph_ReturnsValidGraph(t *testing.T) {

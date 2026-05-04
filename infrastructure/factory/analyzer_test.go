@@ -96,11 +96,11 @@ func TestCreate_RedundantLLMCall(t *testing.T) {
 	}
 }
 
-func TestCreateAll_ReturnsElevenRules(t *testing.T) {
+func TestCreateAll_ReturnsTwelveRules(t *testing.T) {
 	f := factory.NewAnalyzerFactory()
 	all := f.CreateAll()
-	if len(all) != 11 {
-		t.Fatalf("expected 11 rules, got %d", len(all))
+	if len(all) != 12 {
+		t.Fatalf("expected 12 rules, got %d", len(all))
 	}
 }
 
@@ -120,6 +120,7 @@ func TestCreateAll_ContainsExpectedNames(t *testing.T) {
 		"max_parallel_branches":   false,
 		"deprecated_model":        false,
 		"temperature_misuse":      false,
+		"model_card_mismatch":     false,
 	}
 
 	for _, rule := range all {
@@ -216,6 +217,20 @@ func TestCreate_TemperatureMisuse(t *testing.T) {
 		t.Errorf("expected *rules.TemperatureMisuseChecker, got %T", rule)
 	}
 	if rule.Name() != "temperature_misuse" {
+		t.Errorf("unexpected Name(): %s", rule.Name())
+	}
+}
+
+func TestCreate_ModelCardMismatch(t *testing.T) {
+	f := factory.NewAnalyzerFactory()
+	rule, err := f.Create("model_card_mismatch")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := rule.(*rules.ModelCardMismatchChecker); !ok {
+		t.Errorf("expected *rules.ModelCardMismatchChecker, got %T", rule)
+	}
+	if rule.Name() != "model_card_mismatch" {
 		t.Errorf("unexpected Name(): %s", rule.Name())
 	}
 }

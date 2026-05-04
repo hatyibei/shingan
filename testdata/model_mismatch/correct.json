@@ -1,0 +1,46 @@
+{
+  "nodes": [
+    {
+      "id": "openai_node",
+      "name": "openai_chat",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "base_url": "https://api.openai.com/v1",
+        "provider": "openai",
+        "prompt_template": "general_chat"
+      }
+    },
+    {
+      "id": "anthropic_node",
+      "name": "anthropic_chat",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-5-sonnet",
+        "provider": "anthropic",
+        "prompt_template": "summary"
+      }
+    },
+    {
+      "id": "vertex_node",
+      "name": "gemini_vertex",
+      "type": "llm",
+      "config": {
+        "model": "gemini-1.5-pro",
+        "base_url": "https://us-central1-aiplatform.googleapis.com/v1"
+      }
+    },
+    {
+      "id": "output",
+      "name": "output",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    {"from": "openai_node", "to": "anthropic_node"},
+    {"from": "anthropic_node", "to": "vertex_node"},
+    {"from": "vertex_node", "to": "output"}
+  ],
+  "entry_node_id": "openai_node"
+}

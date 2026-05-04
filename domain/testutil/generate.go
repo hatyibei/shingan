@@ -675,3 +675,50 @@ func GenerateTemperatureMisuseGraph(seed int64) *domain.WorkflowGraph {
 		EntryNodeID: "temp_extractor",
 	}
 }
+
+// GenerateModelCardMismatchGraph generates a WorkflowGraph that triggers the
+// model_card_mismatch rule with a Critical finding.
+//
+// Structure:
+//   - entry LLM node declaring model="gpt-4o" but base_url pointing to
+//     api.anthropic.com — the runtime call will fail.
+//
+// Expected findings:
+//   - model_card_mismatch: Critical (gpt-* model on Anthropic endpoint)
+func GenerateModelCardMismatchGraph(seed int64) *domain.WorkflowGraph {
+	_ = seed // deterministic pattern
+
+	nodes := make(map[string]*domain.Node)
+	var edges []domain.Edge
+
+	// LLM node with mismatched model and base_url. gpt-4o belongs to OpenAI,
+	// but base_url points to api.anthropic.com — Critical.
+	nodes["mismatch_llm"] = &domain.Node{
+		ID:   "mismatch_llm",
+		Name: "wired_to_wrong_provider",
+		Type: domain.NodeTypeLLM,
+		Config: map[string]any{
+			"model":           "gpt-4o",
+			"base_url":        "https://api.anthropic.com/v1",
+			"prompt_template": "general_chat",
+		},
+	}
+
+	// Output node
+	nodes["mismatch_output"] = &domain.Node{
+		ID:     "mismatch_output",
+		Name:   "output",
+		Type:   domain.NodeTypeOutput,
+		Config: map[string]any{},
+	}
+
+	edges = append(edges,
+		domain.Edge{From: "mismatch_llm", To: "mismatch_output"},
+	)
+
+	return &domain.WorkflowGraph{
+		Nodes:       nodes,
+		Edges:       edges,
+		EntryNodeID: "mismatch_llm",
+	}
+}
