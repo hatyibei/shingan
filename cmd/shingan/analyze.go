@@ -741,17 +741,34 @@ func filterByChangedFiles(findings []domain.Finding, graph *domain.WorkflowGraph
 	return out
 }
 
-// normaliseToRepoRelative converts a (possibly absolute) source path to a
-// repo-relative cleaned form for comparison against `git diff --name-only`
-// output. Absolute paths under repoRoot are made relative; paths outside
-// repoRoot or already-relative paths are cleaned and returned as-is.
-// repoRoot may be empty (test mode) — in that case path is just cleaned.
+// normaliseToRepoRelative converts a source path to a repo-relative
+// cleaned form for comparison against `git diff --name-only` output.
+//
+// Per Codex iter6 P2: relative paths (e.g. "file.go" passed via --input)
+// must be resolved through the current working directory before being
+// made repo-relative. A user invoking shingan from a subdirectory with
+// `--input file.go` previously got SourceFile="file.go" while git diff
+// emitted "pkg/file.go", causing --since to silently drop the finding.
+// We now: (1) make the path absolute via filepath.Abs (resolves CWD),
+// (2) make it relative to repoRoot. Falls back to the cleaned input
+// when either step fails or the path is outside repoRoot.
+//
+// repoRoot may be empty (test mode) — in that case path is just cleaned
+// without CWD or repo resolution.
 func normaliseToRepoRelative(path, repoRoot string) string {
 	clean := filepath.Clean(path)
-	if repoRoot == "" || !filepath.IsAbs(clean) {
+	if repoRoot == "" {
 		return clean
 	}
-	rel, err := filepath.Rel(repoRoot, clean)
+	abs := clean
+	if !filepath.IsAbs(abs) {
+		resolved, err := filepath.Abs(clean)
+		if err != nil {
+			return clean
+		}
+		abs = resolved
+	}
+	rel, err := filepath.Rel(repoRoot, abs)
 	if err != nil {
 		return clean
 	}
