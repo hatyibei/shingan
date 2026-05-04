@@ -14,11 +14,11 @@ const appBenchSeed = 42
 // allRules returns the full set of analysis rules used in production.
 //
 // Now that every rule registers itself via init(), AllBuiltins() returns
-// all 10 builtins (cycle, reachability, max_parallel_branches, deprecated_model,
+// all 11 builtins (cycle, reachability, max_parallel_branches, deprecated_model,
 // loop_guard, redundant_llm_call, secret_exposure_scanner, error_handler_checker,
-// cost_estimation, pii_leak_scanner) — three more than the pre-refactor bench
-// covered. The 1-walk dispatcher amortises the extra rules so the benchmark
-// stays comparable even with the larger rule set.
+// cost_estimation, pii_leak_scanner, prompt_injection_sink) — four more than
+// the pre-refactor bench covered. The 1-walk dispatcher amortises the extra
+// rules so the benchmark stays comparable even with the larger rule set.
 func allRules() []domain.AnalysisRule {
 	return rules.AllBuiltins()
 }

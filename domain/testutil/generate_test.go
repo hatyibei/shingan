@@ -41,6 +41,7 @@ func allRules() []domain.AnalysisRule {
 		rules.NewSecretExposureScanner(),
 		rules.NewDeprecatedModelChecker(),
 		rules.NewMaxParallelBranchesChecker(),
+		rules.NewPromptInjectionSink(),
 	}
 }
 
@@ -572,6 +573,55 @@ func TestGenerateHighFanOutGraph_OtherRulesClean(t *testing.T) {
 	for _, r := range otherRules {
 		if fs := r.Analyze(g); len(fs) != 0 {
 			t.Errorf("rule %q: expected 0 findings on high-fanout graph, got %d: %+v", r.Name(), len(fs), fs)
+		}
+	}
+}
+
+// ---- GeneratePromptInjectionSinkGraph ----
+
+func TestGeneratePromptInjectionSinkGraph_ReturnsValidGraph(t *testing.T) {
+	g := testutil.GeneratePromptInjectionSinkGraph(42)
+	if g == nil {
+		t.Fatal("expected non-nil graph")
+	}
+	if len(g.Nodes) == 0 {
+		t.Error("expected at least one node")
+	}
+	if g.EntryNodeID == "" {
+		t.Error("expected EntryNodeID to be set")
+	}
+	if _, ok := g.Nodes[g.EntryNodeID]; !ok {
+		t.Errorf("entry node %q not found in Nodes map", g.EntryNodeID)
+	}
+}
+
+func TestGeneratePromptInjectionSinkGraph_TriggersCriticalFinding(t *testing.T) {
+	g := testutil.GeneratePromptInjectionSinkGraph(42)
+	findings := rules.NewPromptInjectionSink().Analyze(g)
+	if len(findings) == 0 {
+		t.Fatal("expected at least one prompt_injection_sink finding")
+	}
+	if !hasFinding(findings, "prompt_injection_sink", domain.Critical) {
+		t.Errorf("expected prompt_injection_sink Critical finding, got %+v", findings)
+	}
+}
+
+func TestGeneratePromptInjectionSinkGraph_OtherRulesClean(t *testing.T) {
+	g := testutil.GeneratePromptInjectionSinkGraph(42)
+	// Independent rules that should NOT fire on this minimal injection graph.
+	other := []domain.AnalysisRule{
+		rules.NewCycleDetector(),
+		rules.NewLoopGuardChecker(),
+		rules.NewReachabilityChecker(),
+		rules.NewRedundantLLMDetector(),
+		rules.NewPIILeakScanner(),
+		rules.NewSecretExposureScanner(),
+		rules.NewDeprecatedModelChecker(),
+		rules.NewMaxParallelBranchesChecker(),
+	}
+	for _, r := range other {
+		if fs := r.Analyze(g); len(fs) != 0 {
+			t.Errorf("rule %q: expected 0 findings on prompt-injection graph, got %d: %+v", r.Name(), len(fs), fs)
 		}
 	}
 }

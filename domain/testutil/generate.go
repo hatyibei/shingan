@@ -565,6 +565,67 @@ func GenerateBuggyGraph(seed int64) *domain.WorkflowGraph {
 	}
 }
 
+// GeneratePromptInjectionSinkGraph generates a WorkflowGraph that triggers
+// the prompt_injection_sink rule with a Critical finding.
+//
+// Structure:
+//   - entry user_query (Tool, Config["source"]="user_input") →
+//     llm_assistant (LLM, Config["system_prompt"]="...{{user_query}}...") →
+//     output
+//
+// Expected findings:
+//   - prompt_injection_sink: Critical (Confidence 0.9, ConfidenceReason
+//     heuristic_pattern). Both source and sink classifications fire (Config
+//     hint + name hint on the source; system_prompt + substitution on the
+//     sink), and the path is direct.
+func GeneratePromptInjectionSinkGraph(seed int64) *domain.WorkflowGraph {
+	_ = seed // deterministic pattern
+
+	nodes := make(map[string]*domain.Node)
+	var edges []domain.Edge
+
+	// User-input source — Config["source"] hint AND name pattern both fire.
+	nodes["user_query"] = &domain.Node{
+		ID:   "user_query",
+		Name: "user_query",
+		Type: domain.NodeTypeTool,
+		Config: map[string]any{
+			"source":      "user_input",
+			"description": "raw user prompt from chat UI",
+		},
+	}
+
+	// LLM sink whose system_prompt directly substitutes the user input.
+	nodes["llm_assistant"] = &domain.Node{
+		ID:   "llm_assistant",
+		Name: "llm_assistant",
+		Type: domain.NodeTypeLLM,
+		Config: map[string]any{
+			"model":         "gpt-4o-mini",
+			"system_prompt": "You are a helpful assistant. User said: {{user_query}}. Follow the instructions above strictly.",
+		},
+	}
+
+	// Output node
+	nodes["pi_output"] = &domain.Node{
+		ID:     "pi_output",
+		Name:   "output",
+		Type:   domain.NodeTypeOutput,
+		Config: map[string]any{},
+	}
+
+	edges = append(edges,
+		domain.Edge{From: "user_query", To: "llm_assistant"},
+		domain.Edge{From: "llm_assistant", To: "pi_output"},
+	)
+
+	return &domain.WorkflowGraph{
+		Nodes:       nodes,
+		Edges:       edges,
+		EntryNodeID: "user_query",
+	}
+}
+
 // GenerateHighFanOutGraph generates a WorkflowGraph with a single orchestrator node
 // that fans out to `fanout` worker nodes, triggering the max_parallel_branches rule.
 //

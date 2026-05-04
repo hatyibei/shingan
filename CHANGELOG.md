@@ -32,6 +32,15 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
   - `testdata/temperature/{misuse,ok}.json` + README
   - `cmd/shingan-mcp/explain.go`: `temperature_misuse` 説明追加 (factory parity 維持)
   - `docs/temperature-misuse.md`: 検出ロジック / Suggestion / 例
+- **`prompt_injection_sink` rule (Phase 2 #1)** — Path tier (ADR-007)、13 番目の builtin。
+  - **Sources**: `Config["source"] == "user_input"` ノード、または name/ID が `(?i)^(user[_\-].*|.*[_\-]input|query|request|user_query|user_request)$` にマッチするノード
+  - **Sinks**: `NodeType.LLM` で Config に template-like field (system tier: `system_prompt` / `system` / `instruction(s)`、user tier: `prompt_template` / `user_message_template` / `user_template` / `prompt`) を持つノード
+  - **Substitution 検出**: `{{var}}` / `${var}` / `{var}` 3 種の構文を正規表現で検出
+  - **Severity マトリクス**: system tier × substitution あり → Critical (0.9) / system tier × なし → Warning (0.7) / user tier × あり → Info (0.5)。すべて `ConfidenceReason = heuristic_pattern`
+  - **アルゴリズム**: 各 sink から逆方向 BFS、`pii_leak_scanner` の reverse-BFS と同型 (Human-gate 境界は持たない)
+  - **新規ファイル**: `domain/rules/prompt_injection_sink.go` / `domain/rules/prompt_injection_sink_test.go` (12 ケース) / `testdata/prompt_injection/{leak,safe}.json` + `README.md` / `docs/rules/prompt-injection-sink.md`
+  - **生成 CLI**: `shingan-gen --pattern prompt-injection-sink` を追加 (`testutil.GeneratePromptInjectionSinkGraph`)
+  - **Factory 自動登録**: `init()` 内で `registerBuiltin()`、`AnalyzerFactory.Create("prompt_injection_sink")` で取得可能
 - **ADR-012: multi-file directory analysis を per-file independent graph に変更 (#9 解決)**
   - self-dogfood で `testdata/agents` の `unreachable_node` 偽陽性 7件を発見、原因は merge 戦略
   - `domain.Finding.SourceFile` field 追加 — directory モード時に file 単位 attribution

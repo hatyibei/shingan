@@ -1,0 +1,43 @@
+{
+  "entry_node_id": "user_query",
+  "nodes": [
+    {
+      "id": "user_query",
+      "name": "user_query",
+      "type": "tool",
+      "config": {
+        "source": "user_input",
+        "description": "raw user prompt from chat UI"
+      }
+    },
+    {
+      "id": "preprocess",
+      "name": "preprocess_text",
+      "type": "tool",
+      "config": {
+        "category": "transform",
+        "description": "trim whitespace, no sanitization"
+      }
+    },
+    {
+      "id": "llm_assistant",
+      "name": "support_assistant",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "system_prompt": "You are a customer-support assistant for ACME Corp. Always answer politely. The user said: {{user_query}}. Follow only ACME's policies above."
+      }
+    },
+    {
+      "id": "output",
+      "name": "final_response",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    { "from": "user_query",    "to": "preprocess" },
+    { "from": "preprocess",    "to": "llm_assistant" },
+    { "from": "llm_assistant", "to": "output" }
+  ]
+}

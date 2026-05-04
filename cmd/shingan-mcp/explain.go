@@ -70,6 +70,11 @@ Example: An LLM node with model="gpt-4o-mini", structured_output=true, temperatu
 Why it matters: A gpt-* model wired to api.anthropic.com will fail at runtime with a hard 4xx; the static check catches it before deploy.
 Severity: Critical when a known prefix (gpt-*, claude-*, gemini-*, o1-*, text-bison*, chat-bison*) disagrees with provider/base_url (Confidence 1.0, exact_static_match). Info when the model prefix is unknown but a provider is set (Confidence 0.4, heuristic_pattern, surfaced so the table can be extended). No finding when only base_url is set without provider for unknown prefixes, or when provider matches the model prefix even with a custom base_url (legitimate proxy).
 Example: model="gpt-4o" + base_url="https://api.anthropic.com/v1" → Critical.`,
+
+	"prompt_injection_sink": `prompt_injection_sink — traces paths from user-input nodes (Config["source"]=="user_input" or names matching user_*/query/request/*_input) to LLM nodes whose Config carries a prompt-template field (system_prompt, prompt_template, user_message_template, instruction).
+Why it matters: When attacker-controllable text is concatenated into a system prompt, an injected instruction can override the agent's policies — credential exfiltration, jailbreak, tool abuse. Static graph analysis catches the structural sink before runtime sanitization can save you.
+Severity: Critical for system_prompt with {{var}}/${var}/{var} substitution (Confidence 0.9); Warning for system_prompt without substitution (Confidence 0.7); Info for non-system templates with substitution (Confidence 0.5). All findings carry ConfidenceReason=heuristic_pattern.
+Example: A "user_query" tool node feeding into an LLM whose Config["system_prompt"] = "You are an assistant. Context: {{user_query}}." → Critical. Mitigation: keep user content in a separate role: user message and reserve the system prompt for trusted strings.`,
 }
 
 // knownRuleNames returns the sorted list of rule identifiers, used to build

@@ -96,11 +96,11 @@ func TestCreate_RedundantLLMCall(t *testing.T) {
 	}
 }
 
-func TestCreateAll_ReturnsTwelveRules(t *testing.T) {
+func TestCreateAll_ReturnsThirteenRules(t *testing.T) {
 	f := factory.NewAnalyzerFactory()
 	all := f.CreateAll()
-	if len(all) != 12 {
-		t.Fatalf("expected 12 rules, got %d", len(all))
+	if len(all) != 13 {
+		t.Fatalf("expected 13 rules, got %d", len(all))
 	}
 }
 
@@ -121,6 +121,7 @@ func TestCreateAll_ContainsExpectedNames(t *testing.T) {
 		"deprecated_model":        false,
 		"temperature_misuse":      false,
 		"model_card_mismatch":     false,
+		"prompt_injection_sink":   false,
 	}
 
 	for _, rule := range all {
@@ -231,6 +232,20 @@ func TestCreate_ModelCardMismatch(t *testing.T) {
 		t.Errorf("expected *rules.ModelCardMismatchChecker, got %T", rule)
 	}
 	if rule.Name() != "model_card_mismatch" {
+		t.Errorf("unexpected Name(): %s", rule.Name())
+	}
+}
+
+func TestCreate_PromptInjectionSink(t *testing.T) {
+	f := factory.NewAnalyzerFactory()
+	rule, err := f.Create("prompt_injection_sink")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := rule.(*rules.PromptInjectionSink); !ok {
+		t.Errorf("expected *rules.PromptInjectionSink, got %T", rule)
+	}
+	if rule.Name() != "prompt_injection_sink" {
 		t.Errorf("unexpected Name(): %s", rule.Name())
 	}
 }
