@@ -19,9 +19,15 @@
 3. [ADR-003: アーキテクチャ設計](#adr-003)
 4. [ADR-004: インフラストラクチャ設計](#adr-004)
 5. [ADR-005: 実装スコープとスケジュール](#adr-005)
-6. [Appendix A: 用語集](#appendix-a)
-7. [Appendix B: SamuraiAI ↔ ADK-Go ノードマッピング](#appendix-b)
-8. [Appendix C: 解析ルール詳細仕様](#appendix-c)
+6. [ADR-006: ESLint方式 visitor + selector + listener 採用](#adr-006)
+7. [ADR-007: Local / Path / Global の3層ルール分離](#adr-007)
+8. [ADR-008: Confidence × ConfidenceReason 二次元品質管理](#adr-008)
+9. [ADR-009: LSP 差分実行 + degraded mode](#adr-009)
+10. [ADR-010: Plugin SDK internal-first 戦略](#adr-010)
+11. [ADR-011: 主戦場 LangGraph シフト (ADR-002 補正)](#adr-011)
+12. [Appendix A: 用語集](#appendix-a)
+13. [Appendix B: SamuraiAI ↔ ADK-Go ノードマッピング](#appendix-b)
+14. [Appendix C: 解析ルール詳細仕様](#appendix-c)
 
 ---
 
@@ -679,6 +685,601 @@ Agentic開発（Claude Code / AgenticTeam）に渡すタスクの実行順序。
 
 ---
 
+<a id="adr-006"></a>
+# ADR-006: ESLint方式 visitor + selector + listener 採用
+
+## ステータス
+Proposed (2026-05-04) — Phase 0 完了後 v0.6.0 で実装予定
+
+## コンテキスト
+
+v0.5.0 時点で Shingan の各 `AnalysisRule` は `Analyze(graph *WorkflowGraph) []Finding` 1つの interface で動いており、各ルールが独立して graph 全体を for-range で走査している。
+
+```go
+// 現状の各ルール実装パターン (domain/rules/*.go)
+func (r *DeprecatedModelRule) Analyze(g *WorkflowGraph) []Finding {
+    for _, node := range g.Nodes() { /* check node.Model */ }
+}
+func (r *TemperatureMisuseRule) Analyze(g *WorkflowGraph) []Finding {
+    for _, node := range g.Nodes() { /* check node.Temperature */ }
+}
+```
+
+問題点:
+
+1. ルール数 N に対して走査回数 N回 → 計算量 **O(N × (V+E))**
+2. ルール 10 → 25 に拡張 (Phase 2) すると解析時間が線形悪化
+3. LSP 統合時 (ADR-009) typing latency が許容外 (200-500ms)
+4. 新ルール追加時に毎回 graph walk 実装が必要 → ルール作成コスト高い
+
+## 検討対象
+
+| 選択肢 | 内容 | 評価 |
+|---|---|---|
+| **A** | 現状維持 (各ルール独立 walk) | スケーラビリティ不足 |
+| **B** | ESLint 完全クローン (CSS-like 文字列 selector DSL + visitor) | DSL parse/補完/error表示/互換性が v0.x で全て沼る |
+| **C** | ESLint **思想**だけ採用 (型付き selector struct + 1walk dispatcher) | Go型安全と相性、最小実装で最大効果 |
+
+## 決定
+
+**選択肢 C を採用する。**
+
+走査は `application/walker.go` (新規) に集約し、各ルールは `Listener` interface を返す。
+
+```go
+// domain/visitor.go (新規)
+type NodeHandler func(ctx *RuleContext, node *Node)
+type EdgeHandler func(ctx *RuleContext, edge *Edge)
+
+type Listener struct {
+    OnNode  map[NodeType]NodeHandler  // NodeType.LLM 等で限定発火
+    OnEdge  EdgeHandler                // 全 edge で発火
+    OnGraph func(g *WorkflowGraph)     // walk 後の集計用
+}
+
+type Selector struct {
+    NodeTypes  []NodeType   // 反応する Node 種類 (string DSL は使わない)
+    Predicates []Predicate  // Inside, FanIn, EdgeFrom 等の構造的フィルタ
+}
+
+type Rule struct {
+    Meta   RuleMeta
+    Create func(ctx *RuleContext) Listener
+}
+```
+
+ルール側 (ESLint 風記法):
+
+```go
+// domain/rules/deprecated_model.go (refactor 後)
+func DeprecatedModel() Rule {
+    return Rule{
+        Meta: RuleMeta{Name: "deprecated_model", Severity: Warning, Fixable: true},
+        Create: func(ctx *RuleContext) Listener {
+            return Listener{
+                OnNode: map[NodeType]NodeHandler{
+                    NodeTypeLLM: func(c *RuleContext, n *Node) {
+                        if isDeprecated(n.Model) {
+                            c.Report(Finding{
+                                Node: n,
+                                Message: fmt.Sprintf("%s is deprecated", n.Model),
+                                Confidence: 1.0,
+                                ConfidenceReason: ReasonExactStaticMatch,  // ADR-008
+                                AutoFix: &TextEdit{Range: n.SourcePos, NewText: latest(n.Model)},
+                            })
+                        }
+                    },
+                },
+            }
+        },
+    }
+}
+```
+
+## 根拠
+
+**A 却下**: スケーラビリティ不足。25 ルール時に 70ms (推定) → C 方式で **20-25ms**。LSP typing latency も同様に改善。
+
+**B 却下**: ESLint の esquery (CSS-like 文字列 selector) は強力だが、Go 上で同等の DSL を作ると parse / 補完 / error表示 / 互換性 / ドキュメント生成 が v0.x で全て沼る。ESLint 内部 API も型付きで、esquery の文字列 selector はオプション機能。Go の型安全性を活かして **コンパイル時に selector 妥当性を検証**できる方が圧倒的に得。
+
+**C 採用**: 型付き struct なら IDE 補完が効き、ルール作成コストが激減。selector 表現力が将来不足したら拡張する (YAGNI)。
+
+## 性能予測
+
+| 指標 | 現状 | ESLint方式後 |
+|---|---|---|
+| 25 ルール時の graph walk回数 | 25 | **1** (Local) + 数回 (Path/Global) |
+| 1000 ノード解析時間 (推定) | ~70ms | **20-25ms** |
+| ルール追加コスト | graph walk 実装必要 | listener 関数 1個 |
+| LSP typing latency (cache hit) | 200-500ms | **10-30ms** |
+
+## 結果
+
+- **新規**: `domain/visitor.go` (Listener/Selector/Rule定義), `application/walker.go` (1walk dispatcher)
+- **書き換え**: 既存 `domain/rules/*.go` 10 ルール全部 (Local 5 / Path 4 / Global 4 の3層に再分類、ADR-007 参照)
+- **テスト維持**: 全 298 テストを green に保ったまま refactor (別ブランチ `refactor/visitor-pattern` で分離実装)
+
+## トレードオフ
+
+- 大規模 refactor → Phase 0 (ブランチ収穫) と並行で進めると複雑度高い、別ブランチで隔離
+- selector の表現力が ESLint esquery より制限あり → 必要が出たら拡張、現状の 7 NodeType + 数個の Predicate で十分
+
+---
+
+<a id="adr-007"></a>
+# ADR-007: Local / Path / Global の3層ルール分離
+
+## ステータス
+Proposed (2026-05-04) — **本ADR群で最重要**
+
+## コンテキスト
+
+ADR-006 で 1walk dispatcher を採用するが、`cycle` / `reachability` / `pii_leak` のような全域解析ルールは 1walk では成立しない。
+
+当初は「Local rule (1walk) と Global rule (専用パス)」の **2 分類** で計画していたが、別 AI レビューで重要な指摘を受けた:
+
+> ESLint はコード AST が対象なので Local rule が大半。一方 Shingan は workflow graph が対象で、PII leak / prompt injection sink / cost estimation / error handler 等の **「限定的経路を見るルール」** が多い。これを Local rule に押し込むと selector が過剰複雑化、Global rule に押し込むと O(V+E) で済むものが O(V²) になる。
+
+つまり Shingan は **Graph Linter** であり、ESLint clone ではない。ESLint 外形コピーは失敗パターン。
+
+## 決定
+
+**Local / Path / Global の3層に分離する。**
+
+| 層 | 判定範囲 | 走査方式 | 計算量 | v0.5 該当ルール (10個) |
+|---|---|---|---|---|
+| **🟢 Local** | 1 node または 1 edge メタデータ | 1walk + listener (ADR-006) | O((V+E) + N×const) | `deprecated_model` `secret_exposure` `temperature_misuse`*<br>`loopguard` `redundant_llm_call` |
+| **🟡 Path** | source → sink, loop内 subgraph, 直接近傍 | 限定経路解析 (逆BFS, subgraph抽出) | O(sinks × (V+E)) 最悪 | `pii_leak` `errorhandler`<br>`cost_estimation` (loop内LLM) |
+| **🔴 Global** | graph 全域必要 | graph 全域 1pass | O(V+E) | `cycle` `reachability`<br>`max_parallel_branches` |
+
+\* `temperature_misuse` は Phase 2 新ルール、現状未実装
+
+Phase 2 新ルール (10個追加予定) の振り分け:
+- **Local 追加**: `unbounded_tool_arg` `model_card_mismatch` `dynamic_node_construction` `missing_eval_dataset` `secret_in_prompt_template`
+- **Path 追加**: `prompt_injection_sink` `retry_storm` `eval_missing` `circular_dep_agents`
+- **Global 追加**: なし (graph 全域は既存 3 ルールで十分)
+
+最終構成: **Local 10 / Path 7 / Global 3 = 20 ルール**
+
+## 実装
+
+```go
+// domain/local_rule.go (新規) — ADR-006 の Listener 形式
+type LocalRule interface {
+    Meta() RuleMeta
+    Listener(ctx *RuleContext) Listener
+}
+
+// domain/path_rule.go (新規)
+type PathRule interface {
+    Meta() RuleMeta
+    Sources(g *WorkflowGraph) []*Node      // 起点抽出 (例: PII source ノード)
+    Sinks(g *WorkflowGraph) []*Node        // 終点抽出 (例: external API ノード)
+    Propagate(ctx *PathContext) []Finding  // 経路解析本体
+}
+
+// domain/global_rule.go (新規)
+type GlobalRule interface {
+    Meta() RuleMeta
+    AnalyzeGlobal(g *WorkflowGraph) []Finding
+}
+```
+
+実行順序 (`application/orchestrator.go` 改修):
+
+```
+Pass 1: Global rules を goroutine 並列実行
+        (cycle/reachability の結果を Pass 3 が利用するため最初)
+Pass 2: 1walk + Local rule listener 発火 (ADR-006)
+Pass 3: Path rules を goroutine 並列実行
+        (Pass 1 の reachability 情報を再利用、無駄な探索回避)
+Merge:  Sort by Severity DESC → Confidence DESC → RuleName ASC
+```
+
+## 根拠
+
+1. **計算複雑度の型強制**: 各層で異なる walker を持つことで、ルール作成時に「どの計算特性に属するか」が型で強制される。間違って Path rule を Global にしてしまう事故を回避。
+2. **Path rule 共通インフラの再利用**: `pii_leak` `prompt_injection_sink` 等は taint propagation の同じ仕組みを使う → `application/path_walker.go` に集約。
+3. **Global → Path への移行余地**: 将来 reachability を Path rule の起点拡張で代替可能になった場合の移行が綺麗。
+4. **ESLint 外形コピー回避**: Shingan の本質は Graph Linter であり、Local 主役の ESLint と異なる。3層化で本質を反映。
+
+## 結果
+
+- **新規**: `domain/{local_rule,path_rule,global_rule}.go` interface 定義
+- **新規**: `application/{walker,path_walker,global_walker}.go`
+- **書き換え**: 既存 10 ルールを 3 層のいずれかに振り分けて refactor
+
+## トレードオフ
+
+- ESLint には無い 3 分類 → 学習コストやや上がる、`docs/rule-authoring.md` で補う
+- 実装複雑度が 2 分類より高い → ADR-010 で外部 Plugin SDK 公開を v1.0 まで defer する判断と整合
+
+---
+
+<a id="adr-008"></a>
+# ADR-008: Confidence × ConfidenceReason 二次元品質管理
+
+## ステータス
+Accepted — Confidence は v0.4 で実装済、ConfidenceReason を Phase 0 で追加
+
+## コンテキスト
+
+v0.4 で全 Finding に Severity (Critical/Warning/Info) × Confidence (0.0-1.0) の 2 次元属性を導入済み。`--min-confidence` CLI フラグで閾値調整可能。
+
+しかし Confidence は単一数値のため意味が曖昧化しやすい。別 AI レビューで指摘:
+
+> Confidence には少なくとも3種類ある:
+> 1. **解析確度** — 静的にどれくらい確実に言えるか
+> 2. **影響確度** — 本当に問題につながる可能性
+> 3. **ルール成熟度** — そのルール自体の信頼度
+>
+> これを全部 `0.5` に混ぜると、ユーザーが解釈できなくなる。
+
+特に動的グラフの over-approximation (LangGraph の `conditional_edges` で戻り値型 untyped → 全 reachable nodes に保守的 edge) を confidence 0.5 で記録する場合、ユーザーは「何が 0.5 の根拠か」を知りたい。
+
+## 決定
+
+**`ConfidenceReason` enum を Finding に追加する。**
+
+```go
+// domain/finding.go (修正)
+type ConfidenceReason string
+const (
+    ReasonExactStaticMatch        ConfidenceReason = "exact_static_match"        // 1.0 推奨
+    ReasonOverApproximatedDynamic ConfidenceReason = "over_approximated_dynamic" // 0.5 推奨
+    ReasonParserFallback          ConfidenceReason = "parser_fallback"           // 0.4 推奨
+    ReasonExperimentalRule        ConfidenceReason = "experimental_rule"         // 0.6 推奨
+    ReasonHeuristicPattern        ConfidenceReason = "heuristic_pattern"         // 0.3-0.7
+)
+
+type Finding struct {
+    Severity         Severity
+    Confidence       float64
+    ConfidenceReason ConfidenceReason  // ← 追加
+    Node             *Node
+    Message          string
+    Suggestion       string
+    AutoFix          *TextEdit
+    // ...
+}
+```
+
+各ルールは Finding 生成時に Reason を必ず指定する (`go vet` 風の static check で未指定を検出)。
+
+## 出力例
+
+LSP hover / SARIF properties / Markdown reporter で Reason を表示:
+
+```
+[WARN] LangGraph conditional edge target dynamic
+  confidence: 0.5
+  reason: over_approximated_dynamic
+  detail: "conditional_edges fn returns str (untyped); all reachable nodes were
+          conservatively connected as edge candidates. To eliminate this warning,
+          annotate return type as Literal['a', 'b', 'c']."
+```
+
+SARIF v2.1.0 では `properties.confidenceReason` に格納:
+```json
+{
+  "ruleId": "dynamic_node_construction",
+  "level": "warning",
+  "properties": {
+    "confidence": 0.5,
+    "confidenceReason": "over_approximated_dynamic"
+  }
+}
+```
+
+## 根拠
+
+- **解釈可能性**: `--min-confidence=0.7` でフィルタしても、なぜそのルールが落ちたかをユーザーが理解できる
+- **ルール作成者へのガイドライン**: Confidence 値を選ぶ時に「どの Reason に該当するか」を考える習慣付け
+- **デバッグ容易性**: 偽陽性報告時に Reason を見れば対処方針が分かる (parser 改善 / DSL 拡張 / type annotation 推奨)
+
+## 結果
+
+- **修正**: `domain/finding.go` に `ConfidenceReason` enum と Finding フィールド追加
+- **修正**: 既存 10 ルールの Finding 生成箇所で Reason を指定 (refactor 必要)
+- **新規**: `infrastructure/reporter/{json,markdown,sarif}.go` で Reason 表示
+
+## トレードオフ
+
+- enum 追加で API 表面が増える → v0.x 期間中は破壊変更可、v1.0 で固定
+- 既存ルール 10 箇所の Finding 生成箇所修正必要 → ADR-006 の refactor と同時実施
+
+---
+
+<a id="adr-009"></a>
+# ADR-009: LSP 差分実行 + degraded mode
+
+## ステータス
+Proposed (2026-05-04) — Phase 0 A-2 で実装
+
+## コンテキスト
+
+phase2plan.md で LSP 統合を Phase 2 のフラッシップとして位置付け (`feat/lsp-server` ブランチ存在)。但し検証で `feat/lsp-server` HEAD = `feat/source-pos` HEAD で **実装は SourcePos foundation のみ、LSP本体ゼロ** が判明。
+
+LSP は IDE 統合の核だが、典型的失敗パターンが存在する:
+
+1. **typing latency**: 毎キー入力で full re-analysis → エディタ体験崩壊
+2. **Python parser 起動コスト**: subprocess fork + import で 数百ms、LSP に耐えない
+3. **parser crash 時の挙動**: 解析失敗で diagnostic ごと消えると「壊れた」と誤認される
+4. **環境差分**: Python 仮想環境/依存解決失敗で起動不能
+
+別 AI レビューで指摘:
+
+> LSP で一番ダメなのは、解析が失敗してエディタ体験ごと壊れること。
+
+## 決定
+
+**LSP は『差分実行 + SHA256 LRU cache + degraded mode』の3層防衛で実装する。**
+
+### 層1: 差分実行 + SHA256 LRU cache
+
+```go
+// infrastructure/cache/sha256_lru.go (新規)
+type AnalysisCache struct {
+    lru *simplelru.LRU  // SHA256(file_content) → []Finding
+}
+
+// cmd/shingan-lsp/diagnostics.go (新規)
+func (s *Server) didChange(uri string, content string) {
+    hash := sha256.Sum256([]byte(content))
+    if cached, ok := s.cache.Get(hash); ok {
+        s.publishDiagnostics(uri, cached)        // 10-30ms (cache hit)
+        return
+    }
+    graph := s.parse(content)
+    findings := s.walker.Walk(graph, s.listeners)
+    s.cache.Add(hash, findings)
+    s.publishDiagnostics(uri, findings)          // 200-500ms (cold)
+}
+```
+
+cache size = 512 (SHA256 keyed)。debounce 200ms で連続 typing を抑制。
+
+### 層2: 長寿命 Python subprocess (LangGraph parser)
+
+ADR-006 の C 案を実装する `infrastructure/parser/python_runtime.go`:
+
+```
+LSP 起動時:
+  1. python_health.Check() — Python 可用性 + langgraph import 確認
+  2. 健康なら長寿命 worker fork (`scripts/export_langgraph_server.py`)
+  3. JSON-RPC で stdin/stdout 通信
+  4. heartbeat 監視 (30秒毎)
+```
+
+毎ファイル毎に subprocess fork は **絶対しない**。1セッション = 1 worker。
+
+### 層3: Degraded mode (parser unavailable / crashed)
+
+```
+ケース A: Python parser available + healthy
+  → 全層 (Local/Path/Global) 解析実行
+  → 完全な diagnostic セット publish
+
+ケース B: Python parser unavailable (起動時検出)
+  → degraded mode、Local rule のうち Python不要なもののみ実行
+  → 例: secret_exposure (regex), deprecated_model (string match)
+  → diagnostic に "limited analysis: python not found" 注記表示
+  → ユーザーに `pip install shingan-langgraph` を案内
+
+ケース C: Python parser crashed mid-session
+  → 直前の cache 結果を保持
+  → parser_warning diagnostic 出す (Severity: Info)
+  → 再起動 attempt 3回 (exponential backoff: 1s, 5s, 30s)
+  → 全部失敗で degraded に降格
+```
+
+`infrastructure/parser/python_health.go` (新規) でヘルスチェック実装。
+
+## 根拠
+
+1. **エディタ体験を絶対に壊さない**: degraded でも軽量な検出 (secret/deprecated_model) は出続ける、ユーザーは「Shingan が動いている」と認識できる
+2. **環境差分への耐性**: Python 環境が無い CI 環境や Win 環境でも基本検出は動作
+3. **cache で typing latency 解決**: 同じファイル内容ならハッシュ一致で即返却
+
+## 結果
+
+- **新規**: `cmd/shingan-lsp/{main,server,diagnostics,hover,codeaction}.go`
+- **新規**: `infrastructure/cache/sha256_lru.go`
+- **新規**: `infrastructure/parser/python_health.go` `python_runtime.go`
+- **新規**: `scripts/export_langgraph_server.py` (long-lived JSON-RPC worker)
+
+## トレードオフ
+
+- degraded mode のドキュメント整備が必要 → `docs/lsp-degraded-mode.md`
+- Python crash 時の cache 信頼性 → cache TTL を 1時間に制限
+- LSP 起動時間 (Python健康チェック含む) で 1-2秒のオーバーヘッド → 許容範囲
+
+---
+
+<a id="adr-010"></a>
+# ADR-010: Plugin SDK internal-first 戦略
+
+## ステータス
+Proposed (2026-05-04)
+
+## コンテキスト
+
+ESLint のエコシステム拡大の最大要因は plugin (`eslint-plugin-react` 等)。Shingan も同様に外部ルール開発を可能にしないと検出能力が頭打ち。
+
+当初計画 (plan file ADR-015) では:
+- ABI: `init()` 関数による静的 registration
+- v0.x 期間中は `experimental:` prefix 必須、no stability promise
+
+但し別 AI レビューで指摘:
+
+> v0.x で Plugin SDK を出すと API 固定圧力が発生する。
+> WorkflowGraph / Node / Edge / Finding / Selector / Listener / RuleMeta / SourcePos
+> ここはまだ変わるはず。
+>
+> でも「公開SDK」として見せすぎると、使う人は勝手に期待する。
+> 人間は README の `experimental` を読まない。危険物取扱説明書より読まない。
+
+特に ADR-006 (visitor pattern) と ADR-008 (ConfidenceReason) で API 表面が変わる。これを v0.x で公開固定すると後悔する。
+
+## 決定
+
+**Plugin SDK は v1.0 まで internal-only、外部公開は v1.0 以降に限定する。**
+
+| 項目 | 旧計画 | 新方針 |
+|---|---|---|
+| Plugin 公開タイミング | v0.x で `experimental:` prefix 公開 | **v1.0 まで internal only**、公開は v1.0 以降 |
+| v0.x で出すもの | 外部 sample rule (`shingan-rule-template` 別 repo) | **authoring guide のみ** (`docs/rule-authoring.md`) |
+| ABI 安定化対象 | `experimental` 注記付きで部分安定 | **全て v1.0 まで破壊変更可能** |
+| 内部 registry | `domain/rules/registry.go` | 同左 (内部 builtin rule 用に使用) |
+
+## 実装
+
+```go
+// domain/rules/registry.go (新規、internal only)
+package rules
+
+var builtinRegistry = make([]Rule, 0)
+
+func registerBuiltin(r Rule) {  // ← 小文字、外部から呼べない
+    builtinRegistry = append(builtinRegistry, r)
+}
+
+func AllBuiltins() []Rule {  // ← 大文字、内部 application 層から呼ぶ
+    return builtinRegistry
+}
+
+// domain/rules/deprecated_model.go
+func init() {
+    registerBuiltin(DeprecatedModel())  // builtin only
+}
+```
+
+外部から `rules.Register(myRule)` は呼べない。これにより:
+
+1. v0.x で API 安定化圧力が発生しない
+2. 内部 builtin rule は同じ visitor パターンで書ける (ADR-006)
+3. v1.0 で `Register()` を public 化するだけで外部公開可能
+
+## v0.x 期間中の代替策
+
+外部ルール作成希望者には:
+
+- **`docs/rule-authoring.md`** で内部ルールの実装パターン解説
+- **fork して builtin として追加 → upstream PR** の方法を案内
+- v1.0 リリース時に `Register()` public 化 + sample plugin repo 公開
+
+## 根拠
+
+1. **負債回避**: ADR-006 の visitor 移行 + ADR-007 の3層分離 + ADR-008 の ConfidenceReason 追加で API 表面が複数回変わる、v0.x で固定すると全部 breaking
+2. **ユーザー期待管理**: `experimental` の注釈は人間に読まれない、最初から「外部公開なし」と明確化したほうが誠実
+3. **エコシステム形成タイミング**: v1.0 で対応FW (ADR-011) が LangGraph + ADK-Go + 1-2 個の段階で外部ルール需要が顕在化、それまでは builtin 拡充が優先
+
+## 結果
+
+- **新規**: `domain/rules/registry.go` (internal builtin registry)
+- **新規**: `docs/rule-authoring.md` (実装パターン解説、外部公開ではなく fork & PR の案内)
+- **明示記載**: README に「Plugin SDK は v1.0 で公開予定、v0.x は builtin rule のみ」
+
+## トレードオフ
+
+- 外部 contributor の参入障壁が上がる → 一方で「正規 PR 経由」で品質確保される
+- 早期エコシステム形成は遅れる → カテゴリ確立が先、ESLint も plugin 公開は v1.0 後
+
+---
+
+<a id="adr-011"></a>
+# ADR-011: 主戦場 LangGraph シフト (ADR-002 補正)
+
+## ステータス
+Proposed (2026-05-04) — ADR-002 の補正
+
+## コンテキスト
+
+ADR-002 (2026-04-14) では ADK-Go を初期解析対象とし、その理由として:
+
+- Goネイティブ実装、解析コスト最小
+- Vertex AI Agent Engine ネイティブデプロイ可能
+- SamuraiAI (Kiva) との構造的対応
+- 面接アピール
+
+を挙げた。これは2026年4月時点 (Kiva面接前) の判断として妥当だった。
+
+但し 2026-05-04 のユーザー方針再設定 (「使える静的解析ツール化」優先) と別 AI レビューで:
+
+> ADK-Go はあなたの技術アピールには良い。でもカテゴリ形成には LangGraph の方が強い。
+>
+> 1. workflow graph という Shingan の思想に一番合う
+> 2. Python AI agent 界隈で認知がある
+> 3. 動的性もあり、静的解析の価値を説明しやすい
+> 4. ADK-Go より市場が広い
+> 5. n8n より開発者向け lint 文化に近い
+
+ADK-Go と LangGraph の市場規模差:
+
+| FW | 推定 AI agent開発者シェア (2026年5月) | 静的解析価値 |
+|---|---|---|
+| LangGraph | 10-15% (Python AI agent の主流の一つ) | 高 (動的グラフ、conditional_edges 等) |
+| ADK-Go | 1-2% (Google 押しだが採用限定) | 中 (Go ネイティブで精度高いが対象狭い) |
+
+## 決定
+
+**主戦場を LangGraph に変更する。ADK-Go は 2 番手として維持・強化。**
+
+新しい parser 実装優先順位:
+
+| 順位 | FW | 理由 |
+|---|---|---|
+| 1 | **LangGraph** | カテゴリ形成、認知広い、動的性で価値説明 |
+| 2 | ADK-Go (既存) | Go ネイティブ差別化、Kiva SamuraiAI 連携 |
+| 3 | CrewAI | LangGraph の Python shim 再利用 |
+| 4 | n8n | JSON-DSL で軽量実装 |
+| 5 | Mastra | TS bridge、ROI 判断分岐 |
+
+## 実装
+
+Phase 1 (Reach 拡張) 着手対象を LangGraph 一点突破に変更:
+
+- 新規: `infrastructure/parser/langgraph.go` (Python subprocess wrapper)
+- 新規: `scripts/export_langgraph_server.py` (long-lived JSON-RPC worker、ADR-009 の degraded mode と統合)
+- 新規: `testdata/langgraph/` (simple_chain / branching / react_loop / rag / multi_agent)
+- 修正: `infrastructure/factory/parser.go` で `"langgraph"` ケース追加
+- 修正: `cmd/shingan/analyze.go` で `--format=langgraph` 対応
+- 新規: `docs/langgraph.md`
+
+ADK-Go parser は引き続き保持・強化:
+
+- ADR-007 の Path rule (PII leak, error handler) を ADK-Go でも動作確認
+- Kiva 入社後 SamuraiAI 連携時に ADK-Go の go/types ネイティブ精度を活用
+
+## 根拠
+
+1. **「使えるツール」化との整合**: 2026-05-04 user direction = マーケ defer、実用優先。LangGraph 対応は最大数のユーザーが触れるための前提
+2. **ESLint 方式との整合**: ESLint も最初は JS only → 1 エコシステム集中で天下取り。Shingan の最初は LangGraph (Python AI agent エコシステム)
+3. **ADR-002 の前提変化**: ADR-002 は面接前提 (Kiva技術アピール) で書かれた、Kiva 入社決定後の今は別判断軸 (市場形成) が優先
+4. **動的性の価値説明**: LangGraph の `conditional_edges` 動的グラフ → ADR-007 の Path rule + ADR-008 の ConfidenceReason の価値が最も明確に伝わる
+
+## ADR-002 との関係
+
+ADR-002 を **Superseded** にはしない。理由:
+
+- ADR-002 の Onion + Factory による拡張性確保の判断は今も有効
+- Parser は Onion で疎結合 → 「主戦場」が変わっても ADR-002 のアーキテクチャ判断は不変
+- 「ADK-Go を 2 番手」とするだけで、捨てるわけではない
+
+## 結果
+
+- Phase 1 着手対象を LangGraph に変更 (plan file `/home/hatyibei/.claude/plans/jiggly-crunching-whistle.md` に反映)
+- README の対応マトリクス更新 (LangGraph を Phase 1 primary、ADK-Go を current/maintained と明記)
+- ADK-Go テスト・ドキュメントは引き続きメンテ
+
+## トレードオフ
+
+- ADK-Go の Go ネイティブ精度 (面接アピール) が一時的に薄まる → Kiva 入社後 SamuraiAI 連携で再度活用
+- Python subprocess 依存が増える → ADR-009 の degraded mode で耐性確保
+- LangGraph API 変動 (0.x → 1.x) のメンテコスト → バージョン pinning + 週次 CI で実 LangGraph examples 解析
+
+---
+
 <a id="appendix-a"></a>
 # Appendix A: 用語集
 
@@ -691,8 +1292,20 @@ Agentic開発（Claude Code / AgenticTeam）に渡すタスクの実行順序。
 | SARIF | Static Analysis Results Interchange Format。GitHub Code Scanningが採用する静的解析結果の標準フォーマット |
 | Finding | 静的解析で検出された個々の問題 |
 | Severity | 問題の重要度。Critical（ワークフロー実行が確実に失敗する）/ Warning（失敗する可能性がある）/ Info（改善推奨） |
+| Confidence | 静的解析の確度。0.0-1.0 の連続値、`--min-confidence` フラグで閾値調整可能 (ADR-008) |
+| ConfidenceReason | Confidence 値の根拠を示す enum (`exact_static_match` / `over_approximated_dynamic` 等)、ADR-008 で導入 |
 | ADK-Go | Google Agent Development Kit の Go実装。エージェントワークフローをGoの構造体で定義する |
+| LangGraph | LangChain の workflow graph フレームワーク。`StateGraph` API で node/edge を定義、Python製。Shingan v0.6 主戦場 (ADR-011) |
 | goa | GoのDesign-first Webフレームワーク。DSLからサーバー、クライアント、OpenAPIを自動生成 |
+| Visitor pattern | AST/Graph を 1walk して node 種別ごとに listener を発火する走査方式。ESLint で採用、Shingan v0.6 で導入 (ADR-006) |
+| Selector | Visitor pattern で listener が反応する node 条件を表す型付き構造体 (NodeTypes + Predicates)、ESLint の esquery 文字列DSLは採用しない (ADR-006) |
+| Listener | Selector に該当する node が来た時に発火する handler 関数群 (`OnNode` `OnEdge` `OnGraph`) (ADR-006) |
+| Local rule | 1 node または 1 edge メタデータで判定可能な軽量ルール、1walk dispatcher で実行 (ADR-007) |
+| Path rule | source → sink、loop内、直接近傍など限定経路を見るルール、Shingan の主役 (ADR-007) |
+| Global rule | graph 全域必要なルール (cycle/reachability等)、専用パスで実行 (ADR-007) |
+| Degraded mode | LSP で Python parser unavailable/crashed 時に Local rule のうち軽量検出のみ動作させるモード (ADR-009) |
+| LSP | Language Server Protocol、IDE と言語サーバの通信プロトコル。Shingan v0.6 で stdio JSON-RPC 実装 |
+| MCP | Model Context Protocol、Claude Desktop / Cursor 等から外部ツール呼出する Anthropic 標準 |
 
 ---
 
@@ -809,3 +1422,4 @@ Agentic開発（Claude Code / AgenticTeam）に渡すタスクの実行順序。
 |---|---|---|
 | 2026-04-14 | 初版作成。ADR-001〜005、Appendix A〜C | hatyibei |
 | 2026-04-14 | ADR-005スケジュール修正。4/15水で全力ビルド、4/16木は動確・修正に変更。Phase 1-4の依存関係ベース実行順序に再構成 | hatyibei |
+| 2026-05-04 | ADR-006〜011 追加。「使える静的解析ツール」化方針への転換に伴い、ESLint方式 visitor pattern (006) / Local-Path-Global 3層分離 (007) / ConfidenceReason 二次元化 (008) / LSP差分実行+degraded mode (009) / Plugin SDK internal-first (010) / 主戦場 LangGraph シフト (011, ADR-002 補正) を確定。別AI壁打ちレビューの6盲点指摘を反映。Appendix A に新用語追加 | hatyibei |
