@@ -5,6 +5,18 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 ## [Unreleased]
 
 ### Added
+- **LangGraph parser** (Phase 1 主戦場、ADR-011)
+  - `infrastructure/parser/langgraph.go` — `WorkflowParser` 実装。`SupportedFormat() = "langgraph"`。`Parse(input []byte)` (in-memory) と `ParseFile(path)` (sys.path resolution 込み) の両系統を提供
+  - `infrastructure/parser/python_worker.go` — long-lived Python subprocess wrapper。newline-delimited JSON-RPC、`Setpgid` で process group ごと kill 可能、per-call 30s timeout、goroutine-safe (mutex serialise)
+  - `scripts/export_langgraph_server.py` — Python shim (stdlib only)。`langgraph.graph.StateGraph` を import して node/edge/conditional_edges/entry_point を抽出、Shingan WorkflowGraph JSON で返却。stdout 規律 (`sys.stdout = sys.stderr` で stray print を吸収)、langgraph 不在でも degraded で起動継続
+  - `scripts/requirements-shim.txt` — `langgraph>=0.2.0`、`pydantic>=2.0`
+  - `infrastructure/factory/parser.go` — `case "langgraph"` 追加
+  - `cmd/shingan/analyze.go` — `--format=langgraph` フラグ追加、ディレクトリ入力時に `.py` を再帰スキャン (新規 `parseSourceDirectoryFiltered` で `.go`/`.py` を統一処理)、`fileParser` capability 経由で path を直接 parser に渡す経路追加
+  - `testdata/langgraph/{simple_chain,branching,react_loop,rag,multi_agent}.py` — 5 リファレンスサンプル + `expected/*.json` ゴールデンファイル
+  - `docs/langgraph.md` — 設計、対応機能、Confidence/Reason、トラブルシュート、互換性
+  - `infrastructure/parser/python_worker_test.go` / `infrastructure/parser/langgraph_test.go` — protocol tests (Python あれば実行) / integration tests (langgraph 必要、無ければ skip)
+  - `cmd/shingan/langgraph_e2e_test.go` — E2E (`shingan analyze --format=langgraph` を subprocess 起動して exit code 検証、langgraph 必要時のみ実行)
+  - `conditional_edges` は **over-approximation**: mapping 各 value を `Edge.Condition` 付きで全候補登録 (ADR-008 `over_approximated_dynamic`)
 - `extensions/vscode-shingan` VS Code extension MVP (Phase 2-B) — `shingan-lsp` を spawn して diagnostics を表示する LSP client、status bar widget、3 commands (analyze file / analyze workspace / show rules)。`npx vsce package` で `.vsix` 生成可能
 - `domain.SourcePos{File, Line, Col}` 構造体追加 — `Node` の optional フィールド `Pos` に付与 (Phase 2 基盤、LSP/CodeAction/VS Code 拡張の前提)
   - `SourcePos.IsZero()` ヘルパー — 位置情報の有無判定規則
