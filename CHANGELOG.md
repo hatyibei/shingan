@@ -10,6 +10,28 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
   - 全 code template を `go build -tags=authoringguide_verify ./domain/rules/...` でコンパイル検証 (Local / Path / Global × `domain.LocalRule` / `domain.PathRule` / `domain.GlobalRule` / `domain.AnalysisRule` の dual-implementation を interface assertion で確認)
   - README.md の "ドキュメント" セクションにリンク追加
   - ADR-010 で確定した「Plugin SDK は v1.0 まで internal-only」方針に沿い、外部公開ではなく **fork → builtin として upstream PR** の経路を案内
+- **`model_card_mismatch` Local rule (Phase 2)**
+  - LLM ノードで `Config["model"]` (gpt-* / claude-* / gemini-* / o1-* / text-bison* / chat-bison*) と `base_url` / `provider` が矛盾しているケースを検出 — 実行時に確実に 4xx で落ちる
+  - 既知 prefix + プロバイダ/URL 不一致 → Critical / 1.0 / `exact_static_match`
+  - 既知 prefix + `provider` が一致 (custom base_url 許可) → noop (legitimate proxy / Azure OpenAI / Vertex AI 想定)
+  - 未知 prefix + `provider` 設定あり → Info / 0.4 / `heuristic_pattern` (knowledge gap surface、テーブル拡張トリガ)
+  - 未知 prefix + `base_url` のみ → noop (false positive 抑制)
+  - `domain/rules/model_card_mismatch.go` + 16 テスト (positive 3 / negative 7 / unknown 2 / meta 2 / Reason stamp 1 / nil guard 1)
+  - `domain/testutil/generate.go`: `GenerateModelCardMismatchGraph` (gpt-4o on api.anthropic.com) + 3 テスト
+  - `cmd/shingan-gen/main.go`: `--pattern model-mismatch` 追加
+  - `testdata/model_mismatch/{wrong,correct}.json` + README
+  - `cmd/shingan-mcp/explain.go`: `model_card_mismatch` 説明追加 (factory parity 維持)
+  - `docs/model-card-mismatch.md`: 検出ロジック / プロバイダテーブル / 例
+- **`temperature_misuse` Local rule (Phase 2)**
+  - LLM ノードで `temperature > 0` と決定論的タスク (structured_output / extraction / classification / code_generation) が同居しているケースを検出
+  - 優先度付き signal 評価: `structured_output=true` または `response_format="json_object"` → Warning / 0.9 / `exact_static_match` → `task=classification` (temp>0.3) / `code_generation` (temp>0) → Warning / 0.7 / `heuristic_pattern` → `task=extraction` / `structured_output` → Info / 0.5 / `heuristic_pattern`
+  - `Config["task"]` 不在時は `node.Name` のキーワード (extract / classif / codegen) で fallback
+  - `domain/rules/temperature_misuse.go` + 15 テスト (positive 4 / negative 4 / edge 2 / meta 2 / nil guard 1 / 全 finding に ConfidenceReason stamp 1)
+  - `domain/testutil/generate.go`: `GenerateTemperatureMisuseGraph` (structured_output + temp 0.7) + 3 テスト
+  - `cmd/shingan-gen/main.go`: `--pattern temperature-misuse` 追加
+  - `testdata/temperature/{misuse,ok}.json` + README
+  - `cmd/shingan-mcp/explain.go`: `temperature_misuse` 説明追加 (factory parity 維持)
+  - `docs/temperature-misuse.md`: 検出ロジック / Suggestion / 例
 - **ADR-012: multi-file directory analysis を per-file independent graph に変更 (#9 解決)**
   - self-dogfood で `testdata/agents` の `unreachable_node` 偽陽性 7件を発見、原因は merge 戦略
   - `domain.Finding.SourceFile` field 追加 — directory モード時に file 単位 attribution

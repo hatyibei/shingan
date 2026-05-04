@@ -17,6 +17,8 @@
 //	secret-exposure  — LLM node with hardcoded API key in prompt (secret_exposure_scanner)
 //	deprecated-model — LLM node using a shutdown model (deprecated_model Critical)
 //	high-fanout      — Orchestrator with --size fan-out workers (max_parallel_branches)
+//	temperature-misuse — LLM node with structured_output=true and temperature > 0 (temperature_misuse Warning)
+//	model-mismatch    — LLM node with model/provider disagreement (model_card_mismatch Critical)
 package main
 
 import (
@@ -80,8 +82,12 @@ func generate(pattern string, size int, seed int64) (*domain.WorkflowGraph, erro
 		return testutil.GenerateDeprecatedModelGraph(seed), nil
 	case "high-fanout":
 		return testutil.GenerateHighFanOutGraph(seed, size), nil
+	case "temperature-misuse":
+		return testutil.GenerateTemperatureMisuseGraph(seed), nil
+	case "model-mismatch":
+		return testutil.GenerateModelCardMismatchGraph(seed), nil
 	default:
-		return nil, fmt.Errorf("unknown pattern %q: must be one of random, clean, buggy, infinite-loop, unreachable, pii-leak, cycle, secret-exposure, deprecated-model, high-fanout", pattern)
+		return nil, fmt.Errorf("unknown pattern %q: must be one of random, clean, buggy, infinite-loop, unreachable, pii-leak, cycle, secret-exposure, deprecated-model, high-fanout, temperature-misuse, model-mismatch", pattern)
 	}
 }
 
@@ -108,6 +114,8 @@ Patterns:
   secret-exposure  LLM node with hardcoded API key in prompt — triggers secret_exposure_scanner (Critical)
   deprecated-model LLM node using a shutdown model — triggers deprecated_model (Critical)
   high-fanout      Orchestrator with --size fan-out workers — triggers max_parallel_branches
+  temperature-misuse LLM node with structured_output=true and temperature>0 — triggers temperature_misuse (Warning)
+  model-mismatch    LLM node with model/provider disagreement — triggers model_card_mismatch (Critical)
 
 The output is valid JSON compatible with: shingan analyze --format json --input <path>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -133,7 +141,7 @@ The output is valid JSON compatible with: shingan analyze --format json --input 
 		},
 	}
 
-	rootCmd.Flags().StringVar(&pattern, "pattern", "random", "Pattern: random|clean|buggy|infinite-loop|unreachable|pii-leak|cycle|secret-exposure|deprecated-model|high-fanout")
+	rootCmd.Flags().StringVar(&pattern, "pattern", "random", "Pattern: random|clean|buggy|infinite-loop|unreachable|pii-leak|cycle|secret-exposure|deprecated-model|high-fanout|temperature-misuse|model-mismatch")
 	rootCmd.Flags().IntVar(&size, "size", 10, "Number of nodes (for random/clean/unreachable/cycle patterns)")
 	rootCmd.Flags().Int64Var(&seed, "seed", 42, "Random seed for reproducible output")
 	rootCmd.Flags().StringVar(&output, "output", "", "Output file path (default: stdout; use '-' for stdout)")

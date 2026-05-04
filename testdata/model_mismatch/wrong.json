@@ -1,0 +1,45 @@
+{
+  "nodes": [
+    {
+      "id": "gpt_via_anthropic",
+      "name": "wired_to_wrong_provider",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o",
+        "base_url": "https://api.anthropic.com/v1",
+        "prompt_template": "general_chat"
+      }
+    },
+    {
+      "id": "claude_provider_openai",
+      "name": "claude_with_openai_provider",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-5-sonnet",
+        "provider": "openai",
+        "prompt_template": "summary"
+      }
+    },
+    {
+      "id": "gemini_anthropic",
+      "name": "gemini_anthropic_url",
+      "type": "llm",
+      "config": {
+        "model": "gemini-1.5-pro",
+        "base_url": "https://api.anthropic.com/v1"
+      }
+    },
+    {
+      "id": "output",
+      "name": "output",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    {"from": "gpt_via_anthropic", "to": "claude_provider_openai"},
+    {"from": "claude_provider_openai", "to": "gemini_anthropic"},
+    {"from": "gemini_anthropic", "to": "output"}
+  ],
+  "entry_node_id": "gpt_via_anthropic"
+}

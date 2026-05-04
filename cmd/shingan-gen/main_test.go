@@ -94,6 +94,20 @@ func TestGenerate_Cycle_ValidJSON(t *testing.T) {
 	}
 }
 
+func TestGenerate_TemperatureMisuse_ValidJSON(t *testing.T) {
+	g := roundTrip(t, "temperature-misuse", 0, 42)
+	if len(g.Nodes) == 0 {
+		t.Error("expected at least one node after round-trip")
+	}
+}
+
+func TestGenerate_ModelMismatch_ValidJSON(t *testing.T) {
+	g := roundTrip(t, "model-mismatch", 0, 42)
+	if len(g.Nodes) == 0 {
+		t.Error("expected at least one node after round-trip")
+	}
+}
+
 // ---- determinism test ----
 
 func TestGenerate_SeedReproducibility(t *testing.T) {
