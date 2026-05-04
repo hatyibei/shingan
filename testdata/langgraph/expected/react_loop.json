@@ -1,0 +1,11 @@
+{
+  "nodes": [
+    {"id": "model", "name": "model", "type": "llm", "config": {}},
+    {"id": "tools", "name": "tools", "type": "tool", "config": {}}
+  ],
+  "edges": [
+    {"from": "model", "to": "tools", "condition": "tools"},
+    {"from": "tools", "to": "model"}
+  ],
+  "entry_node_id": "model"
+}

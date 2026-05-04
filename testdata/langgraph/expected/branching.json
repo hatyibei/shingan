@@ -1,0 +1,14 @@
+{
+  "nodes": [
+    {"id": "triage", "name": "triage", "type": "llm", "config": {}},
+    {"id": "answer", "name": "answer", "type": "llm", "config": {}},
+    {"id": "escalate", "name": "escalate", "type": "llm", "config": {}},
+    {"id": "refund", "name": "refund", "type": "llm", "config": {}}
+  ],
+  "edges": [
+    {"from": "triage", "to": "answer", "condition": "answer"},
+    {"from": "triage", "to": "escalate", "condition": "escalate"},
+    {"from": "triage", "to": "refund", "condition": "refund"}
+  ],
+  "entry_node_id": "triage"
+}

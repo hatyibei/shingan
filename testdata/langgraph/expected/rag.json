@@ -1,0 +1,12 @@
+{
+  "nodes": [
+    {"id": "retrieve_docs", "name": "retrieve_docs", "type": "tool", "config": {}},
+    {"id": "llm_summarise", "name": "llm_summarise", "type": "llm", "config": {}},
+    {"id": "external_webhook_post", "name": "external_webhook_post", "type": "llm", "config": {}}
+  ],
+  "edges": [
+    {"from": "retrieve_docs", "to": "llm_summarise"},
+    {"from": "llm_summarise", "to": "external_webhook_post"}
+  ],
+  "entry_node_id": "retrieve_docs"
+}

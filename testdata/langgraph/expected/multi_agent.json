@@ -1,0 +1,17 @@
+{
+  "nodes": [
+    {"id": "supervisor", "name": "supervisor", "type": "llm", "config": {}},
+    {"id": "researcher", "name": "researcher", "type": "llm", "config": {}},
+    {"id": "coder", "name": "coder", "type": "llm", "config": {}},
+    {"id": "reviewer", "name": "reviewer", "type": "llm", "config": {}}
+  ],
+  "edges": [
+    {"from": "supervisor", "to": "researcher", "condition": "researcher"},
+    {"from": "supervisor", "to": "coder", "condition": "coder"},
+    {"from": "supervisor", "to": "reviewer", "condition": "reviewer"},
+    {"from": "researcher", "to": "supervisor"},
+    {"from": "coder", "to": "supervisor"},
+    {"from": "reviewer", "to": "supervisor"}
+  ],
+  "entry_node_id": "supervisor"
+}

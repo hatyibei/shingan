@@ -1,0 +1,10 @@
+{
+  "nodes": [
+    {"id": "classify", "name": "classify", "type": "llm", "config": {}},
+    {"id": "respond", "name": "respond", "type": "llm", "config": {}}
+  ],
+  "edges": [
+    {"from": "classify", "to": "respond"}
+  ],
+  "entry_node_id": "classify"
+}

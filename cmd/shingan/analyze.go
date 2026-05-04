@@ -53,7 +53,7 @@ Exit codes:
 	}
 
 	cmd.Flags().StringVar(&flags.input, "input", "", "Path to the workflow file or directory (required)")
-	cmd.Flags().StringVar(&flags.format, "format", "json", "Input format: json or adk-go")
+	cmd.Flags().StringVar(&flags.format, "format", "json", "Input format: json, adk-go, samurai, or langgraph")
 	cmd.Flags().StringVar(&flags.output, "output", "json", "Output format: json, markdown, or sarif")
 	cmd.Flags().StringVar(&flags.outputFile, "output-file", "", "Output file path (default: stdout)")
 	cmd.Flags().Float64Var(&flags.minConfidence, "min-confidence", 0.0, "Exclude findings with confidence below this threshold (0.0–1.0)")
@@ -192,16 +192,37 @@ func loadGraphFiltered(path, inputFormat string, p application.WorkflowParser, a
 		return parseFile(path, p)
 	}
 
-	// Directory input.
-	if inputFormat != "adk-go" {
-		return nil, fmt.Errorf("directory input is only supported for adk-go format; use a single JSON file for json format")
+	// Directory input. Per format-specific extension.
+	switch inputFormat {
+	case "adk-go":
+		return parseSourceDirectoryFiltered(path, p, allow, ".go")
+	case "langgraph":
+		return parseSourceDirectoryFiltered(path, p, allow, ".py")
+	default:
+		return nil, fmt.Errorf("directory input is only supported for adk-go and langgraph formats; use a single JSON file for json/samurai formats")
 	}
+}
 
-	return parseADKGoDirectoryFiltered(path, p, allow)
+// fileParser is an optional capability some parsers expose to receive a path
+// (so they can resolve language-specific imports relative to the file's
+// directory) instead of an opaque byte slice. Currently implemented by
+// LangGraphParser (sys.path resolution) and ADKGoParser (go/types pass).
+type fileParser interface {
+	ParseFile(path string) (*domain.WorkflowGraph, error)
 }
 
 // parseFile reads a single file and parses it with the given parser.
+// Parsers that implement `fileParser` receive the path directly so language-
+// specific module resolution can succeed (e.g. LangGraph's sys.path lookup
+// for sibling modules, ADK-Go's go/types second pass for generic instances).
 func parseFile(path string, p application.WorkflowParser) (*domain.WorkflowGraph, error) {
+	if fp, ok := p.(fileParser); ok {
+		graph, err := fp.ParseFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("parse %q: %w", path, err)
+		}
+		return graph, nil
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read file %q: %w", path, err)
@@ -216,13 +237,26 @@ func parseFile(path string, p application.WorkflowParser) (*domain.WorkflowGraph
 // parseADKGoDirectory walks a directory recursively, parses all *.go files,
 // and merges their nodes and edges into a single WorkflowGraph.
 // The entry node comes from the first file that defines one.
+//
+// Kept as a thin wrapper for backward compatibility — internal callers should
+// use parseSourceDirectoryFiltered with the desired extension.
 func parseADKGoDirectory(dir string, p application.WorkflowParser) (*domain.WorkflowGraph, error) {
-	return parseADKGoDirectoryFiltered(dir, p, nil)
+	return parseSourceDirectoryFiltered(dir, p, nil, ".go")
 }
 
 // parseADKGoDirectoryFiltered is parseADKGoDirectory with an optional
 // allowlist; when non-nil, only files present in allow are parsed.
 func parseADKGoDirectoryFiltered(dir string, p application.WorkflowParser, allow []string) (*domain.WorkflowGraph, error) {
+	return parseSourceDirectoryFiltered(dir, p, allow, ".go")
+}
+
+// parseSourceDirectoryFiltered walks a directory recursively, parses all
+// files matching extension `ext`, and merges their nodes and edges into a
+// single WorkflowGraph. Used by both adk-go (`.go`) and langgraph (`.py`)
+// inputs to share the same merge / dedup / allowlist logic.
+//
+// `ext` must include the leading dot (e.g. ".go", ".py").
+func parseSourceDirectoryFiltered(dir string, p application.WorkflowParser, allow []string, ext string) (*domain.WorkflowGraph, error) {
 	merged := &domain.WorkflowGraph{
 		Nodes: make(map[string]*domain.Node),
 	}
@@ -234,7 +268,7 @@ func parseADKGoDirectoryFiltered(dir string, p application.WorkflowParser, allow
 		if info.IsDir() {
 			return nil
 		}
-		if filepath.Ext(path) != ".go" {
+		if filepath.Ext(path) != ext {
 			return nil
 		}
 		if allow != nil && !fileInAllowlist(path, allow) {

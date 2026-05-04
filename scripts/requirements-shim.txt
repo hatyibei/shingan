@@ -1,0 +1,13 @@
+# Python dependencies for the Shingan LangGraph shim
+# (scripts/export_langgraph_server.py). Install with:
+#
+#     pip install -r scripts/requirements-shim.txt
+#
+# The shim itself only uses the standard library, so the worker boots on any
+# Python 3.10+ install. The dependencies below are required when actually
+# parsing user files that import `langgraph` — without them, the worker stays
+# alive but `parse_file` / `parse_content` return a "missing_langgraph" error.
+langgraph>=0.2.0
+# Optional but recommended (langgraph itself depends on pydantic 2; pinned here
+# so requirements stay self-contained for CI).
+pydantic>=2.0

@@ -72,6 +72,14 @@ ADK-Go入力の例:
 shingan analyze --format adk-go --input ./agents/ --output markdown
 ```
 
+LangGraph (Python) 入力の例:
+
+```bash
+# 事前: pip install langgraph
+shingan analyze --format langgraph --input agent.py --output markdown
+shingan analyze --format langgraph --input ./agents/ --output sarif --output-file findings.sarif
+```
+
 終了コード: `0` = Info以下のみ、`1` = Warning検出、`2` = Critical検出
 
 CI統合例（GitHub Actions）:
@@ -189,11 +197,11 @@ go test -tags=demo -v -run TestDemo_ .
 
 | Format | 状態 | 備考 |
 |---|---|---|
+| langgraph | **Phase 1 primary** (ADR-011) | Python `langgraph.graph.StateGraph` を long-lived Python subprocess + JSON-RPC で抽出。`pip install langgraph` 別途必要 ([詳細](./docs/langgraph.md)) |
+| adk-go | GA / maintained | Google ADK-Go (`google.golang.org/adk`) のAST解析 |
 | json | GA | Shingan独自のWorkflowGraph JSON |
-| adk-go | GA | Google ADK-Go (`google.golang.org/adk`) のAST解析 |
 | samurai | Alpha | SamuraiAI想定スキーマ（社内実スキーマ差し替え前提） |
 | n8n | Planned (v0.2) | n8n JSON export |
-| langgraph | Planned (v1.0) | Python AST経由 |
 
 ### IDE / Editor 統合
 
