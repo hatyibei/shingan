@@ -248,6 +248,10 @@ go build -o shingan ./cmd/shingan
 - [MCP server (`shingan-mcp`) — Claude Desktop / Cursor / LangGraph Studio setup](./docs/mcp-server.md)
 - [全ADR](./shingan-adr.md)
 
+### Contributing → New rules
+
+新しい builtin rule を実装する内部 contributor は **[docs/rule-authoring.md](./docs/rule-authoring.md)** を参照してください。 Local / Path / Global の 3 層 (ADR-007) のテンプレート、ConfidenceReason 選択ガイド (ADR-008)、`check_confidence_reason.sh` linter、TDD パターン、既存 10 ルールの設計記録を網羅しています。 ADR-010 の方針により Plugin SDK は v1.0 まで internal-only — 外部 contributor は fork → upstream PR の経路で参加してください。
+
 ## ライセンス
 
 MIT

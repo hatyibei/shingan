@@ -5,6 +5,11 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 ## [Unreleased]
 
 ### Added
+- **`docs/rule-authoring.md`** — internal builtin rule writers 向け実装ガイド (#11 解消)
+  - 13 セクション構成: tier フローチャート / Local・Path・Global テンプレート / ConfidenceReason 選択ガイド (ADR-008) / Severity 判断軸 / TDD パターン / 既存 10 ルール設計記録 / `check_confidence_reason.sh` 解説 / 命名規約 / `registerBuiltin` 自動登録 (ADR-010) / v1.0 plugin 移行パス / Phase 2 で追加予定 10 ルールの当てはめ
+  - 全 code template を `go build -tags=authoringguide_verify ./domain/rules/...` でコンパイル検証 (Local / Path / Global × `domain.LocalRule` / `domain.PathRule` / `domain.GlobalRule` / `domain.AnalysisRule` の dual-implementation を interface assertion で確認)
+  - README.md の "ドキュメント" セクションにリンク追加
+  - ADR-010 で確定した「Plugin SDK は v1.0 まで internal-only」方針に沿い、外部公開ではなく **fork → builtin として upstream PR** の経路を案内
 - **ADR-012: multi-file directory analysis を per-file independent graph に変更 (#9 解決)**
   - self-dogfood で `testdata/agents` の `unreachable_node` 偽陽性 7件を発見、原因は merge 戦略
   - `domain.Finding.SourceFile` field 追加 — directory モード時に file 単位 attribution
