@@ -5,6 +5,16 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 ## [Unreleased]
 
 ### Added
+- **`temperature_misuse` Local rule (Phase 2)**
+  - LLM ノードで `temperature > 0` と決定論的タスク (structured_output / extraction / classification / code_generation) が同居しているケースを検出
+  - 優先度付き signal 評価: `structured_output=true` または `response_format="json_object"` → Warning / 0.9 / `exact_static_match` → `task=classification` (temp>0.3) / `code_generation` (temp>0) → Warning / 0.7 / `heuristic_pattern` → `task=extraction` / `structured_output` → Info / 0.5 / `heuristic_pattern`
+  - `Config["task"]` 不在時は `node.Name` のキーワード (extract / classif / codegen) で fallback
+  - `domain/rules/temperature_misuse.go` + 15 テスト (positive 4 / negative 4 / edge 2 / meta 2 / nil guard 1 / 全 finding に ConfidenceReason stamp 1)
+  - `domain/testutil/generate.go`: `GenerateTemperatureMisuseGraph` (structured_output + temp 0.7) + 3 テスト
+  - `cmd/shingan-gen/main.go`: `--pattern temperature-misuse` 追加
+  - `testdata/temperature/{misuse,ok}.json` + README
+  - `cmd/shingan-mcp/explain.go`: `temperature_misuse` 説明追加 (factory parity 維持)
+  - `docs/temperature-misuse.md`: 検出ロジック / Suggestion / 例
 - **ADR-012: multi-file directory analysis を per-file independent graph に変更 (#9 解決)**
   - self-dogfood で `testdata/agents` の `unreachable_node` 偽陽性 7件を発見、原因は merge 戦略
   - `domain.Finding.SourceFile` field 追加 — directory モード時に file 単位 attribution

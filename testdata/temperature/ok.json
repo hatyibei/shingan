@@ -1,0 +1,49 @@
+{
+  "nodes": [
+    {
+      "id": "json_extractor",
+      "name": "json_field_extractor",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "temperature": 0,
+        "structured_output": true,
+        "prompt_template": "extract_invoice_fields"
+      }
+    },
+    {
+      "id": "label_classifier",
+      "name": "intent_classifier",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "temperature": 0,
+        "task": "classification",
+        "prompt_template": "classify_intent"
+      }
+    },
+    {
+      "id": "creative_writer",
+      "name": "story_writer",
+      "type": "llm",
+      "config": {
+        "model": "claude-3-5-sonnet",
+        "temperature": 0.9,
+        "task": "creative_writing",
+        "prompt_template": "expand_outline"
+      }
+    },
+    {
+      "id": "output",
+      "name": "output",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    {"from": "json_extractor", "to": "label_classifier"},
+    {"from": "label_classifier", "to": "creative_writer"},
+    {"from": "creative_writer", "to": "output"}
+  ],
+  "entry_node_id": "json_extractor"
+}

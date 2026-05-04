@@ -96,11 +96,11 @@ func TestCreate_RedundantLLMCall(t *testing.T) {
 	}
 }
 
-func TestCreateAll_ReturnsTenRules(t *testing.T) {
+func TestCreateAll_ReturnsElevenRules(t *testing.T) {
 	f := factory.NewAnalyzerFactory()
 	all := f.CreateAll()
-	if len(all) != 10 {
-		t.Fatalf("expected 10 rules, got %d", len(all))
+	if len(all) != 11 {
+		t.Fatalf("expected 11 rules, got %d", len(all))
 	}
 }
 
@@ -119,6 +119,7 @@ func TestCreateAll_ContainsExpectedNames(t *testing.T) {
 		"secret_exposure_scanner": false,
 		"max_parallel_branches":   false,
 		"deprecated_model":        false,
+		"temperature_misuse":      false,
 	}
 
 	for _, rule := range all {
@@ -201,6 +202,20 @@ func TestCreate_DeprecatedModel(t *testing.T) {
 		t.Errorf("expected *rules.DeprecatedModelChecker, got %T", rule)
 	}
 	if rule.Name() != "deprecated_model" {
+		t.Errorf("unexpected Name(): %s", rule.Name())
+	}
+}
+
+func TestCreate_TemperatureMisuse(t *testing.T) {
+	f := factory.NewAnalyzerFactory()
+	rule, err := f.Create("temperature_misuse")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := rule.(*rules.TemperatureMisuseChecker); !ok {
+		t.Errorf("expected *rules.TemperatureMisuseChecker, got %T", rule)
+	}
+	if rule.Name() != "temperature_misuse" {
 		t.Errorf("unexpected Name(): %s", rule.Name())
 	}
 }

@@ -394,6 +394,50 @@ func TestGenerateDeprecatedModelGraph_OtherRulesClean(t *testing.T) {
 	}
 }
 
+// ---- GenerateTemperatureMisuseGraph ----
+
+func TestGenerateTemperatureMisuseGraph_ReturnsValidGraph(t *testing.T) {
+	g := testutil.GenerateTemperatureMisuseGraph(42)
+	if g == nil {
+		t.Fatal("expected non-nil graph")
+	}
+	if len(g.Nodes) == 0 {
+		t.Error("expected at least one node")
+	}
+	if g.EntryNodeID == "" {
+		t.Error("expected EntryNodeID to be set")
+	}
+	if _, ok := g.Nodes[g.EntryNodeID]; !ok {
+		t.Errorf("entry node %q not found in Nodes map", g.EntryNodeID)
+	}
+}
+
+func TestGenerateTemperatureMisuseGraph_TriggersTemperatureMisuseWarning(t *testing.T) {
+	g := testutil.GenerateTemperatureMisuseGraph(42)
+	findings := rules.NewTemperatureMisuseChecker().Analyze(g)
+	if !hasFinding(findings, "temperature_misuse", domain.Warning) {
+		t.Errorf("expected temperature_misuse Warning finding, got %d findings: %+v", len(findings), findings)
+	}
+}
+
+func TestGenerateTemperatureMisuseGraph_OtherRulesClean(t *testing.T) {
+	g := testutil.GenerateTemperatureMisuseGraph(42)
+	otherRules := []domain.AnalysisRule{
+		rules.NewCycleDetector(),
+		rules.NewLoopGuardChecker(),
+		rules.NewReachabilityChecker(),
+		rules.NewRedundantLLMDetector(),
+		rules.NewPIILeakScanner(),
+		rules.NewSecretExposureScanner(),
+		rules.NewDeprecatedModelChecker(),
+	}
+	for _, r := range otherRules {
+		if fs := r.Analyze(g); len(fs) != 0 {
+			t.Errorf("rule %q: expected 0 findings on temperature-misuse graph, got %d: %+v", r.Name(), len(fs), fs)
+		}
+	}
+}
+
 // ---- GenerateRandomGraph (existing) ----
 
 func TestGenerateRandomGraph_ReturnsValidGraph(t *testing.T) {

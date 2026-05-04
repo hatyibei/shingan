@@ -60,6 +60,11 @@ Example: A ParallelAgent fanning out to 200 sub-agents without max_concurrency.`
 Why it matters: Deprecated models get shut down; your workflow silently starts 400-ing the day it happens.
 Severity: Critical for shutdown models (Confidence 1.0), Warning for deprecated-soon (Confidence 0.9). Covers 20 models across OpenAI / Anthropic / Google.
 Example: A node using gpt-3.5-turbo-0301 (shutdown) or claude-2 (deprecated).`,
+
+	"temperature_misuse": `temperature_misuse — flags LLM nodes that combine temperature > 0 with a deterministic task signature (structured output / extraction / classification / code generation).
+Why it matters: Schema-bound or label-bound tasks need a deterministic decode. High temperature creates output drift between runs, breaks JSON parsing, and inflates eval variance.
+Severity: Warning when structured_output=true or response_format="json_object" alongside temp>0 (Confidence 0.9, exact_static_match). Warning for classification with temp>0.3 or code_generation with temp>0 (Confidence 0.7, heuristic_pattern). Info for extraction tasks with temp>0 (Confidence 0.5, heuristic_pattern). Falls back to node.Name keyword scanning when Config["task"] is absent.
+Example: An LLM node with model="gpt-4o-mini", structured_output=true, temperature=0.7 → Warning.`,
 }
 
 // knownRuleNames returns the sorted list of rule identifiers, used to build

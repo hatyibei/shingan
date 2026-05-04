@@ -627,3 +627,51 @@ func GenerateHighFanOutGraph(seed int64, fanout int) *domain.WorkflowGraph {
 		EntryNodeID: "orchestrator",
 	}
 }
+
+// GenerateTemperatureMisuseGraph generates a WorkflowGraph that triggers the
+// temperature_misuse rule with a Warning finding.
+//
+// Structure:
+//   - entry LLM node configured for structured JSON output but temperature > 0
+//
+// Expected findings:
+//   - temperature_misuse: Warning (structured_output=true alongside temperature=0.7)
+func GenerateTemperatureMisuseGraph(seed int64) *domain.WorkflowGraph {
+	_ = seed // deterministic pattern
+
+	nodes := make(map[string]*domain.Node)
+	var edges []domain.Edge
+
+	// LLM node that asks for structured JSON output but leaves the sampler hot.
+	// Triggers temperature_misuse Warning (signal #1: structured_output=true,
+	// confidence 0.9, ReasonExactStaticMatch).
+	nodes["temp_extractor"] = &domain.Node{
+		ID:   "temp_extractor",
+		Name: "json_field_extractor",
+		Type: domain.NodeTypeLLM,
+		Config: map[string]any{
+			"model":             "gpt-4o-mini",
+			"temperature":       0.7,
+			"structured_output": true,
+			"prompt_template":   "extract_invoice_fields",
+		},
+	}
+
+	// Output node
+	nodes["temp_output"] = &domain.Node{
+		ID:     "temp_output",
+		Name:   "output",
+		Type:   domain.NodeTypeOutput,
+		Config: map[string]any{},
+	}
+
+	edges = append(edges,
+		domain.Edge{From: "temp_extractor", To: "temp_output"},
+	)
+
+	return &domain.WorkflowGraph{
+		Nodes:       nodes,
+		Edges:       edges,
+		EntryNodeID: "temp_extractor",
+	}
+}
