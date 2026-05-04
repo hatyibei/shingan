@@ -21,7 +21,7 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
   - 各ルールが `init()` 内で `registerBuiltin()` を呼び、`AnalyzerFactory.{Create,CreateAll}` は `rules.AllBuiltins()` をスキャンする方式に切り替え (新規ルール追加時にファクトリ編集不要)。
   - `scripts/check_confidence_reason.sh` + Makefile target `check-reason` / `lint` — `domain.Finding{...}` リテラルに `ConfidenceReason` が欠けていないかを CI でチェック (空 sentinel `Finding{}` は除外)。Pure Go では struct field を必須化できないので静的解析で代替 (ADR-008)。
   - 性能: `application/bench_test.go` を 10 ルール builtins セットへ更新。N=1000 ノードで Orchestrator (3-pass + 1walk Local dispatch) **37.9ms** vs 全ルール sequential fallback **85.2ms** (約 55% 削減、目標 25-50% を上回る)。
-  - **Backward compatibility**: 298 既存テストすべて green、`AnalysisOrchestrator.Analyze` シグネチャ不変、`Confidence == 0.0 → 1.0` 正規化ロジック維持、`fakeRule` (`AnalysisRule` のみ実装) も legacy bucket で動作。
+  - **Backward compatibility**: 既存テスト 355 (subtests 込みで 445) すべて green、`AnalysisOrchestrator.Analyze` シグネチャ不変、`Confidence == 0.0 → 1.0` 正規化ロジック維持、`fakeRule` (`AnalysisRule` のみ実装) も legacy bucket で動作。Walker / Registry の直接ユニットテストは追加せず、Orchestrator 経由の既存テストでカバー (改善余地)。
 - `extensions/vscode-shingan` VS Code extension MVP (Phase 2-B) — `shingan-lsp` を spawn して diagnostics を表示する LSP client、status bar widget、3 commands (analyze file / analyze workspace / show rules)。`npx vsce package` で `.vsix` 生成可能
 - `domain.SourcePos{File, Line, Col}` 構造体追加 — `Node` の optional フィールド `Pos` に付与 (Phase 2 基盤、LSP/CodeAction/VS Code 拡張の前提)
   - `SourcePos.IsZero()` ヘルパー — 位置情報の有無判定規則
