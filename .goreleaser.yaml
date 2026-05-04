@@ -65,9 +65,20 @@ builds:
     ldflags:
       - -s -w
 
+  - id: shingan-lsp
+    main: ./cmd/shingan-lsp
+    binary: shingan-lsp
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X main.serverVersion={{.Version}}
+
 archives:
   - id: cli_tools
-    ids: [shingan, shingan-gen]
+    ids: [shingan, shingan-gen, shingan-lsp]
     name_template: "shingan_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats: [tar.gz]
     format_overrides:
@@ -77,6 +88,7 @@ archives:
       - README.md
       - LICENSE
       - CHANGELOG.md
+      - docs/lsp.md
 
   - id: server_tools
     ids: [shingan-api, shingan-runner, shingan-web]

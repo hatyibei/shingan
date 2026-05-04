@@ -5,6 +5,21 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 ## [Unreleased]
 
 ### Added
+- `cmd/shingan-lsp` LSP サーバ本実装 (Phase 0 A-2 / ADR-009)
+  - stdio JSON-RPC LSP サーバ、`go.lsp.dev/protocol` v0.12 ベース
+  - 7 ハンドラ実装: `initialize`, `initialized`, `shutdown`, `didOpen`, `didChange`, `didClose`, `hover`, `codeAction` (残り60+ メソッドは `baseServer` で no-op スタブ化)
+  - **層1**: SHA256 LRU 差分キャッシュ (`infrastructure/cache/sha256_lru.go`) — `(format, sha256(content))` 複合キー、512 entries、TTL 1時間、cache hit ≈ 10–30ms / miss ≈ 80–250ms
+  - **層2**: 長寿命 Python subprocess の health 接続点 (`infrastructure/parser/python_health.go`) — `python3 --version` + 任意の `import langgraph` 確認、30秒キャッシュ + コマンド/時計の DI で hermetic test
+  - **層3**: Degraded mode — Python 不在時に `shingan_degraded_mode` Info diagnostic 自動付与 (現在は通知のみ; Track P で LangGraph 依存ルール導入時に severity 引き上げ)
+  - 診断変換 (`diagnostics.go`): `Node.Pos` (1-based) → LSP `Range` (0-based)、未設定時は `(0,0)-(0,1)` フォールバック、`Source = "shingan"` ラベル、`Code = RuleName`
+  - Hover (`hover.go`): finding ごとに rule/severity/message/suggestion/confidence% を Markdown でレンダリング、複数 finding が同じ位置にあれば co-located として併記
+  - CodeAction (`codeaction.go`): Suggestion を持つ findings を QuickFix として返却 (TextEdit は ADR-008 AutoFix フィールド導入後に追加)
+  - テスト 13 本: ユニット (`recordingPublisher` で publishDiagnostics 検証) + integration 1 本 (`bidiPipe` で in-memory duplex pipe を組み protocol.NewServer/NewClient 経由の handshake → didOpen → publishDiagnostics 全往復)
+  - `cmd/shingan-lsp` を `.goreleaser.yaml` の 6 番目のバイナリとして追加 (linux/darwin/windows × amd64/arm64)
+  - `docs/lsp.md` 新規 — VS Code / Cursor / Neovim / Helix / Zed セットアップ例、診断 shape マッピング表、cache TTL とパフォーマンス特性、degraded mode 解説、ADR-009 への back-link
+  - `infrastructure/cache/` 新規パッケージ + 5テスト (format isolation / hit-miss / nil normalize / LRU eviction / TTL expiration)
+  - `infrastructure/parser/python_health*.go` 新規 + 6テスト (uninitialized state / healthy / no-binary / unexpected-output / cache hit / status reflection)
+  - 新規依存: `go.lsp.dev/protocol` v0.12.0, `go.lsp.dev/jsonrpc2` v0.10.0, `go.lsp.dev/uri` v0.3.0, `go.uber.org/zap` v1.21.0; `github.com/hashicorp/golang-lru/v2` を indirect → direct に昇格
 - `extensions/vscode-shingan` VS Code extension MVP (Phase 2-B) — `shingan-lsp` を spawn して diagnostics を表示する LSP client、status bar widget、3 commands (analyze file / analyze workspace / show rules)。`npx vsce package` で `.vsix` 生成可能
 - `domain.SourcePos{File, Line, Col}` 構造体追加 — `Node` の optional フィールド `Pos` に付与 (Phase 2 基盤、LSP/CodeAction/VS Code 拡張の前提)
   - `SourcePos.IsZero()` ヘルパー — 位置情報の有無判定規則
