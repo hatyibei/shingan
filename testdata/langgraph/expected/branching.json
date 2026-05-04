@@ -1,0 +1,20 @@
+{
+  "nodes": [
+    {"id": "__start__", "name": "__start__", "type": "control", "config": {"role": "entry"}},
+    {"id": "__end__", "name": "__end__", "type": "output", "config": {"role": "exit"}},
+    {"id": "triage", "name": "triage", "type": "llm", "config": {}},
+    {"id": "answer", "name": "answer", "type": "llm", "config": {}},
+    {"id": "escalate", "name": "escalate", "type": "llm", "config": {}},
+    {"id": "refund", "name": "refund", "type": "llm", "config": {}}
+  ],
+  "edges": [
+    {"from": "__start__", "to": "triage"},
+    {"from": "triage", "to": "answer", "condition": "answer"},
+    {"from": "triage", "to": "escalate", "condition": "escalate"},
+    {"from": "triage", "to": "refund", "condition": "refund"},
+    {"from": "answer", "to": "__end__"},
+    {"from": "escalate", "to": "__end__"},
+    {"from": "refund", "to": "__end__"}
+  ],
+  "entry_node_id": "__start__"
+}
