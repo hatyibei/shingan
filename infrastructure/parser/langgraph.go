@@ -157,6 +157,17 @@ func (p *LangGraphParser) Close() error {
 	return p.worker.Close()
 }
 
+// Closed reports whether the underlying Python worker has been shut down
+// or killed (e.g. by a Call() timeout). The LSP server uses this to decide
+// whether the cached parser is still usable; a dead worker must be
+// replaced with a fresh subprocess (Codex iter4 P1).
+func (p *LangGraphParser) Closed() bool {
+	if p == nil || p.worker == nil {
+		return true
+	}
+	return p.worker.Closed()
+}
+
 // ensureHealthy lazily runs a health_check on first use. The check is
 // memoised because failing fast on the same parser is the desired behaviour
 // (the user will see a clear actionable error and either install langgraph or

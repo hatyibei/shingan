@@ -162,14 +162,20 @@ func (s *Server) Shutdown(_ context.Context) error {
 }
 
 // getLangGraphParser returns the session-wide LangGraph parser, lazily
-// constructing it on first use. Must be called from analyzeAndPublish only;
-// the returned parser owns a Python subprocess whose lifetime matches the
-// LSP session.
+// constructing it on first use. If a previous parser's worker died (e.g.
+// Call() timed out and we killed the subprocess, Codex iter4 P1), drop
+// the dead instance and build a fresh one rather than handing out a
+// guaranteed-broken handle.
 func (s *Server) getLangGraphParser() (*parser.LangGraphParser, error) {
 	s.langGraphMu.Lock()
 	defer s.langGraphMu.Unlock()
-	if s.langGraphParser != nil {
+	if s.langGraphParser != nil && !s.langGraphParser.Closed() {
 		return s.langGraphParser, nil
+	}
+	if s.langGraphParser != nil {
+		// Best-effort cleanup of the dead handle before replacing it.
+		_ = s.langGraphParser.Close()
+		s.langGraphParser = nil
 	}
 	p, err := parser.NewLangGraphParser()
 	if err != nil {
@@ -248,7 +254,17 @@ func (s *Server) analyzeAndPublish(ctx context.Context, docURI uri.URI, language
 		return s.publish(ctx, docURI, version, nil, nil)
 	}
 
-	key := cache.MakeKey(format, []byte(content))
+	// LangGraph diagnostics depend on the document's on-disk location
+	// because the shim prepends Path's parent to sys.path. Two identical
+	// files in different folders can resolve different sibling imports
+	// and produce different graphs, so the cache key must include the
+	// path for that format (Codex iter4 P2). Other formats are pure
+	// functions of (format, content) — Path stays empty.
+	keyPath := ""
+	if format == "langgraph" {
+		keyPath = uriToFilename(docURI)
+	}
+	key := cache.MakeKeyWithPath(format, keyPath, []byte(content))
 
 	if findings, ok := s.cache.Get(key); ok {
 		// Fast path: identical content seen earlier. We still need the

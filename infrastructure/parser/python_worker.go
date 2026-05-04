@@ -239,11 +239,27 @@ func (w *PythonWorker) Call(method string, params interface{}) (json.RawMessage,
 	select {
 	case <-ctx.Done():
 		// Force-kill the worker — a hung Python deadlocks the parser otherwise.
+		// Also flip the closed flag so subsequent Call()s short-circuit with
+		// a clear error instead of writing to a broken stdin and getting
+		// EOF/broken-pipe noise (Codex iter4 P1). Callers that want to keep
+		// using LangGraph after a timeout must construct a fresh worker.
 		_ = w.kill()
+		w.closed.Store(true)
 		return nil, fmt.Errorf("python worker: call %q timed out after %s", method, w.timeout)
 	case r := <-ch:
 		return r.raw, r.err
 	}
+}
+
+// Closed reports whether the worker has been shut down or its subprocess
+// has been killed (e.g. by a Call() timeout). The caller (LSP, CLI, MCP)
+// inspects this to decide whether to re-spawn a worker before the next
+// analysis instead of reusing a dead one (Codex iter4 P1).
+func (w *PythonWorker) Closed() bool {
+	if w == nil {
+		return true
+	}
+	return w.closed.Load()
 }
 
 // Close attempts a clean shutdown then kills the process group.

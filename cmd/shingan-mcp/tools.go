@@ -263,6 +263,18 @@ func loadGraph(path, framework string, p application.WorkflowParser) (*domain.Wo
 	}
 
 	if !info.IsDir() {
+		// Prefer ParseFile when the parser implements it: ADK-Go's
+		// ParseFile threads the real path through go/types for the
+		// second-pass type analysis (functiontool.New[TArgs] generic
+		// inference), and LangGraph's ParseFile uses sys.path resolution.
+		// Falling back to ReadFile + Parse silently drops both, making
+		// MCP analysis return different findings from `shingan analyze`
+		// on the same file (Codex iter4 P2).
+		if fp, ok := p.(interface {
+			ParseFile(string) (*domain.WorkflowGraph, error)
+		}); ok {
+			return fp.ParseFile(path)
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, fmt.Errorf("read file %q: %w", path, err)

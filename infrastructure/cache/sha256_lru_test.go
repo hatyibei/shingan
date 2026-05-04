@@ -152,3 +152,29 @@ func TestAnalysisCache_DefaultSize(t *testing.T) {
 		t.Fatalf("default-sized cache failed basic round-trip")
 	}
 }
+
+// TestMakeKeyWithPath_PathIsolation verifies the Codex iter4 P2 fix:
+// LangGraph diagnostics depend on the buffer's on-disk path (sys.path
+// resolution), so two identical contents under different paths must
+// produce DIFFERENT cache keys. Path="" must collapse to MakeKey
+// behaviour for content-addressable parsers (json, adk-go in-memory).
+func TestMakeKeyWithPath_PathIsolation(t *testing.T) {
+	t.Parallel()
+	body := []byte("import langgraph\nfrom langgraph.graph import StateGraph\n")
+
+	a := MakeKeyWithPath("langgraph", "/repo/agents/foo.py", body)
+	b := MakeKeyWithPath("langgraph", "/repo/agents/bar.py", body)
+	if a == b {
+		t.Fatalf("expected distinct keys for different paths; got %+v", a)
+	}
+	if a.Hash != b.Hash {
+		t.Fatalf("expected identical content hash; a=%x b=%x", a.Hash, b.Hash)
+	}
+
+	// Path="" → equivalent to MakeKey
+	plain := MakeKey("langgraph", body)
+	zeroPath := MakeKeyWithPath("langgraph", "", body)
+	if plain != zeroPath {
+		t.Fatalf("MakeKey and MakeKeyWithPath(format,\"\",content) must agree: %+v vs %+v", plain, zeroPath)
+	}
+}

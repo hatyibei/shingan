@@ -44,9 +44,13 @@ const DefaultTTL = time.Hour
 
 // Key uniquely identifies a cache entry. The format is deliberately included
 // alongside the SHA-256 hash so identical bytes interpreted by different
-// parsers (json vs adk-go) cannot alias each other.
+// parsers (json vs adk-go) cannot alias each other. The Path component is
+// only meaningful for parsers whose semantics depend on the file location
+// (langgraph: sys.path resolution); other formats leave Path empty and the
+// key collapses to (format, hash).
 type Key struct {
 	Format string
+	Path   string
 	Hash   [sha256.Size]byte
 }
 
@@ -55,9 +59,22 @@ type Key struct {
 // would silently surface wrong diagnostics, an outright user-visible bug)
 // rather than raw speed. xxhash would be ~5x faster but its 64-bit output is
 // not safe enough for a content-addressable diagnostics cache.
+//
+// Path is empty for content-addressable parsers (json, adk-go in-memory).
+// For path-sensitive parsers (langgraph), callers use MakeKeyWithPath so
+// two identical files in different folders — which can resolve different
+// sibling imports — get distinct cache entries (Codex iter4 P2).
 func MakeKey(format string, content []byte) Key {
+	return MakeKeyWithPath(format, "", content)
+}
+
+// MakeKeyWithPath is MakeKey with an explicit path component. Use this for
+// parsers whose output depends on the file's on-disk location (langgraph
+// sys.path resolution). Pass path="" to collapse to MakeKey behaviour.
+func MakeKeyWithPath(format, path string, content []byte) Key {
 	return Key{
 		Format: format,
+		Path:   path,
 		Hash:   sha256.Sum256(content),
 	}
 }
