@@ -91,6 +91,27 @@ func (t *NodeType) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// SourcePos describes the location of a Node in the original source artifact
+// (e.g. a .go file, JSON document, or exported LangGraph spec).
+// All fields are optional — Parsers that cannot determine the position should
+// leave it zero. Position-aware features (LSP, CodeAction, VS Code extension)
+// consult SourcePos.IsZero to decide whether to surface location information.
+type SourcePos struct {
+	// File is the source file path (parser-defined; may be empty for embedded inputs).
+	File string `json:"file,omitempty"`
+	// Line is the 1-based line number. Zero means "unset".
+	Line int `json:"line,omitempty"`
+	// Col is the 1-based column number. Zero means "unset".
+	Col int `json:"col,omitempty"`
+}
+
+// IsZero reports whether p carries no position information.
+// Parsers and consumers should treat a zero SourcePos as "position unknown"
+// and avoid emitting misleading range data for it.
+func (p SourcePos) IsZero() bool {
+	return p.File == "" && p.Line == 0 && p.Col == 0
+}
+
 // Node is the abstract representation of a single step in a workflow.
 type Node struct {
 	// ID is the unique identifier of the node within a WorkflowGraph.
@@ -101,6 +122,11 @@ type Node struct {
 	Type NodeType `json:"type"`
 	// Config holds framework-specific settings (model name, max_iterations, etc.).
 	Config map[string]any `json:"config,omitempty"`
+	// Pos is an optional source location for the node.
+	// Position-aware parsers (adk-go AST) fill this automatically; JSON-based
+	// parsers preserve the "pos" field from input if present. Consumers should
+	// use SourcePos.IsZero to gate position-aware behavior.
+	Pos SourcePos `json:"pos,omitempty"`
 }
 
 // Edge represents a directed connection between two nodes.

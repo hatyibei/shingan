@@ -688,6 +688,125 @@ func Build() {
 	assertEdge(t, graph, "planner", "browser_search", "")
 }
 
+// ─── SourcePos tests ────────────────────────────────────────────────────────
+
+// TestADKGoParser_SourcePos_BareStructLiteral verifies that AST-based parsing
+// populates Node.Pos with 1-based line/col numbers derived from token.FileSet.
+// The SequentialAgent is declared on line 3 (after the package clause + blank line).
+func TestADKGoParser_SourcePos_BareStructLiteral(t *testing.T) {
+	src := []byte(`package agents
+
+var workflow = &SequentialAgent{
+	Name: "orchestrator",
+	SubAgents: []Agent{
+		&LlmAgent{
+			Name:  "worker",
+			Model: "gpt-4o",
+		},
+	},
+}
+`)
+	p := parser.NewADKGoParser()
+	graph, err := p.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	orch := graph.Nodes["orchestrator"]
+	if orch == nil {
+		t.Fatalf("node 'orchestrator' not found; nodes=%v", nodeKeys(graph))
+	}
+	if orch.Pos.IsZero() {
+		t.Fatalf("orchestrator.Pos is zero; expected AST-based position")
+	}
+	if orch.Pos.File != "input.go" {
+		t.Errorf("orchestrator.Pos.File = %q, want 'input.go'", orch.Pos.File)
+	}
+	// SequentialAgent{ composite literal starts on line 3, at the `&` token column.
+	if orch.Pos.Line != 3 {
+		t.Errorf("orchestrator.Pos.Line = %d, want 3", orch.Pos.Line)
+	}
+	if orch.Pos.Col < 1 {
+		t.Errorf("orchestrator.Pos.Col = %d, want >=1", orch.Pos.Col)
+	}
+
+	worker := graph.Nodes["worker"]
+	if worker == nil {
+		t.Fatalf("node 'worker' not found; nodes=%v", nodeKeys(graph))
+	}
+	if worker.Pos.IsZero() {
+		t.Fatalf("worker.Pos is zero; expected AST-based position")
+	}
+	if worker.Pos.Line != 6 {
+		t.Errorf("worker.Pos.Line = %d, want 6", worker.Pos.Line)
+	}
+	// Nested LlmAgent is strictly after the outer SequentialAgent.
+	if worker.Pos.Line <= orch.Pos.Line {
+		t.Errorf("nested worker line (%d) must be greater than outer orchestrator line (%d)",
+			worker.Pos.Line, orch.Pos.Line)
+	}
+}
+
+// TestADKGoParser_SourcePos_RealAPI verifies that Pos is populated for the
+// real ADK-Go SDK constructor pattern (loopagent.New(loopagent.Config{...})).
+func TestADKGoParser_SourcePos_RealAPI(t *testing.T) {
+	src := []byte(`package real
+
+import (
+	"google.golang.org/adk/agent"
+	"google.golang.org/adk/agent/llmagent"
+	"google.golang.org/adk/agent/workflowagents/loopagent"
+)
+
+func BuildInfiniteLoop() {
+	classifier, _ := llmagent.New(llmagent.Config{
+		Name:        "classifier",
+		Instruction: "Classify.",
+	})
+	_ = classifier
+	_, _ = loopagent.New(loopagent.Config{
+		AgentConfig: agent.Config{
+			Name:      "retry_loop",
+			SubAgents: []agent.Agent{classifier},
+		},
+	})
+}
+`)
+	p := parser.NewADKGoParser()
+	graph, err := p.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse() error: %v", err)
+	}
+
+	loop := graph.Nodes["retry_loop"]
+	if loop == nil {
+		t.Fatalf("node 'retry_loop' not found; nodes=%v", nodeKeys(graph))
+	}
+	if loop.Pos.IsZero() {
+		t.Fatalf("retry_loop.Pos is zero; expected FileSet-derived position")
+	}
+	if loop.Pos.File != "input.go" {
+		t.Errorf("retry_loop.Pos.File = %q, want 'input.go'", loop.Pos.File)
+	}
+	// The loopagent.Config{ composite literal is on line 15.
+	if loop.Pos.Line != 15 {
+		t.Errorf("retry_loop.Pos.Line = %d, want 15", loop.Pos.Line)
+	}
+
+	classifier := graph.Nodes["classifier"]
+	if classifier == nil {
+		t.Fatalf("node 'classifier' not found; nodes=%v", nodeKeys(graph))
+	}
+	if classifier.Pos.IsZero() {
+		t.Fatalf("classifier.Pos is zero; expected FileSet-derived position")
+	}
+	// llmagent.Config{ literal is on line 10 — earlier than the loop.
+	if classifier.Pos.Line >= loop.Pos.Line {
+		t.Errorf("classifier line (%d) must precede retry_loop line (%d)",
+			classifier.Pos.Line, loop.Pos.Line)
+	}
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 func assertEdge(t *testing.T, graph *domain.WorkflowGraph, from, to, condition string) {

@@ -33,10 +33,11 @@ type SamuraiWorkflow struct {
 
 // SamuraiNode は SamuraiAI の単一ノード定義。
 type SamuraiNode struct {
-	ID     string         `json:"id"`
-	Type   string         `json:"type"`   // "llm", "browser", "loop", "condition", etc.
-	Name   string         `json:"name"`
-	Config map[string]any `json:"config"` // フレームワーク固有の設定
+	ID     string            `json:"id"`
+	Type   string            `json:"type"` // "llm", "browser", "loop", "condition", etc.
+	Name   string            `json:"name"`
+	Config map[string]any    `json:"config"`        // フレームワーク固有の設定
+	Pos    *domain.SourcePos `json:"pos,omitempty"` // optional source position (future-schema compat)
 }
 
 // SamuraiEdge は SamuraiAI のエッジ定義。
@@ -105,12 +106,16 @@ func (p *SamuraiParser) Parse(input []byte) (*domain.WorkflowGraph, error) {
 			cfg["category"] = category
 		}
 
-		nodes[sn.ID] = &domain.Node{
+		node := &domain.Node{
 			ID:     sn.ID,
 			Name:   sn.Name,
 			Type:   nodeType,
 			Config: cfg,
 		}
+		if sn.Pos != nil {
+			node.Pos = *sn.Pos
+		}
+		nodes[sn.ID] = node
 	}
 
 	// エッジ変換（memo ノードへの/からのエッジは自動除外）
