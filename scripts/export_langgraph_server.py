@@ -56,9 +56,9 @@ from typing import Any, Dict, Optional, Tuple
 _RESPONSE_STREAM = sys.stdout
 sys.stdout = sys.stderr  # any stray print() now lands on stderr.
 
-# Sentinel used to mark START / END nodes inside Shingan WorkflowGraph JSON.
-START_NODE_ID = "__start__"
-END_NODE_ID = "__end__"
+# Sentinel names used by langgraph itself for START / END.
+LANGGRAPH_START = "__start__"
+LANGGRAPH_END = "__end__"
 
 
 def _emit(payload: Dict[str, Any]) -> None:
@@ -280,14 +280,14 @@ def _node_id(name: str) -> str:
     """Map a langgraph node name to a Shingan node ID.
 
     LangGraph allows arbitrary strings (including spaces). We lower-case and
-    swap whitespace/hyphens for underscores; START / END are reserved.
+    swap whitespace/hyphens for underscores. START / END pass through
+    unchanged so the caller can detect and elide them.
     """
-    if name == "__start__":
-        return START_NODE_ID
-    if name == "__end__":
-        return END_NODE_ID
+    sname = str(name)
+    if sname in (LANGGRAPH_START, LANGGRAPH_END):
+        return sname
     out = []
-    for ch in str(name):
+    for ch in sname:
         if ch.isalnum() or ch == "_":
             out.append(ch.lower())
         elif ch in (" ", "-", "/", "."):
@@ -297,7 +297,18 @@ def _node_id(name: str) -> str:
 
 
 def _build_graph(graph_obj: Any, source_path: str) -> Dict[str, Any]:
-    """Convert a StateGraph into Shingan WorkflowGraph JSON shape."""
+    """Convert a StateGraph into Shingan WorkflowGraph JSON shape.
+
+    START / END are *not* materialised as nodes — LangGraph treats them as
+    pseudo-sentinels rather than first-class nodes, and Shingan's analysis
+    rules misclassify them otherwise (NodeTypeControl in JSON aliases to
+    NodeTypeLoop for backward compat, which would trigger spurious
+    `loop_guard` Critical findings). Instead:
+
+      * the first edge sourced from `__start__` becomes the graph's entry,
+      * any edge targeting `__end__` is dropped (the entry node is the
+        graph's source-of-truth, not a synthetic sink).
+    """
     out_nodes = []
     out_edges = []
 
@@ -322,24 +333,10 @@ def _build_graph(graph_obj: Any, source_path: str) -> Dict[str, Any]:
             }
         )
 
-    # Synthetic START / END so that downstream rules can reason about entry/exit.
-    _ensure_node(
-        START_NODE_ID,
-        "__start__",
-        "control",
-        {"file": source_path, "line": 0, "col": 0},
-        {"role": "entry"},
-    )
-    _ensure_node(
-        END_NODE_ID,
-        "__end__",
-        "output",
-        {"file": source_path, "line": 0, "col": 0},
-        {"role": "exit"},
-    )
-
-    # User-defined nodes.
+    # User-defined nodes only — START / END are sentinels, never materialised.
     for name, spec in raw_nodes.items():
+        if str(name) in (LANGGRAPH_START, LANGGRAPH_END):
+            continue
         handler = _node_handler(spec)
         node_id = _node_id(name)
         ntype = _node_type_for_handler(handler)
@@ -357,6 +354,30 @@ def _build_graph(graph_obj: Any, source_path: str) -> Dict[str, Any]:
         except Exception:  # noqa: BLE001
             pass
         _ensure_node(node_id, str(name), ntype, pos, cfg)
+
+    # Track entry candidates (first edge sourced from START wins).
+    entry_node_id: str = ""
+
+    def _record_entry(target_id: str) -> None:
+        nonlocal entry_node_id
+        if not entry_node_id:
+            entry_node_id = target_id
+
+    def _push_edge(src: str, dst: str, condition: str = "") -> None:
+        # START → user-node: mark entry, drop the edge.
+        if src == LANGGRAPH_START:
+            _record_entry(dst)
+            return
+        # User-node → END: drop the edge entirely (END is implicit).
+        if dst == LANGGRAPH_END:
+            return
+        # Defensive: skip START/END appearing on the wrong side too.
+        if src == LANGGRAPH_END or dst == LANGGRAPH_START:
+            return
+        edge: Dict[str, Any] = {"from": src, "to": dst}
+        if condition:
+            edge["condition"] = condition
+        out_edges.append(edge)
 
     # Static edges.
     edges_iter: Any
@@ -378,12 +399,7 @@ def _build_graph(graph_obj: Any, source_path: str) -> Dict[str, Any]:
         if pair is None:
             continue
         src, dst = pair
-        out_edges.append(
-            {
-                "from": _node_id(src),
-                "to": _node_id(dst),
-            }
-        )
+        _push_edge(_node_id(src), _node_id(dst))
 
     # Conditional branches → over-approximated edges.
     # Each branch maps source → list of (return-value → target-name) entries.
@@ -406,22 +422,21 @@ def _build_graph(graph_obj: Any, source_path: str) -> Dict[str, Any]:
             for cond_key, target in items:
                 if not target:
                     continue
-                out_edges.append(
-                    {
-                        "from": _node_id(src),
-                        "to": _node_id(str(target)),
-                        "condition": str(cond_key),
-                    }
-                )
+                _push_edge(_node_id(src), _node_id(str(target)), str(cond_key))
 
-    # Entry node bridging: connect __start__ to declared entry_point if any.
-    if entry:
-        out_edges.append({"from": START_NODE_ID, "to": _node_id(str(entry))})
+    # Honour an explicit entry_point if `add_edge(START, x)` wasn't recorded.
+    if not entry_node_id and entry:
+        entry_node_id = _node_id(str(entry))
+
+    # Final fallback — pick the first user node so downstream rules have a
+    # well-defined starting point.
+    if not entry_node_id and out_nodes:
+        entry_node_id = out_nodes[0]["id"]
 
     return {
         "nodes": out_nodes,
         "edges": out_edges,
-        "entry_node_id": START_NODE_ID,
+        "entry_node_id": entry_node_id,
         # `metadata` is non-canonical but parsers may surface this for tools
         # downstream; the Go layer ignores unknown keys.
         "metadata": {

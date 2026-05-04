@@ -1,14 +1,10 @@
 {
   "nodes": [
-    {"id": "__start__", "name": "__start__", "type": "control", "config": {"role": "entry"}},
-    {"id": "__end__", "name": "__end__", "type": "output", "config": {"role": "exit"}},
     {"id": "classify", "name": "classify", "type": "llm", "config": {}},
     {"id": "respond", "name": "respond", "type": "llm", "config": {}}
   ],
   "edges": [
-    {"from": "__start__", "to": "classify"},
-    {"from": "classify", "to": "respond"},
-    {"from": "respond", "to": "__end__"}
+    {"from": "classify", "to": "respond"}
   ],
-  "entry_node_id": "__start__"
+  "entry_node_id": "classify"
 }

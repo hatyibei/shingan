@@ -64,8 +64,8 @@ shingan analyze \
 | `add_node(name, fn)` | OK | 関数の `inspect.getsourcefile/getsourcelines` で SourcePos を埋める |
 | `add_edge(from, to)` | OK | 固定 edge |
 | `add_conditional_edges(from, fn, mapping)` | OK (over-approximation) | mapping の各 key を `Edge.Condition` に詰めて全候補を edge として出力 |
-| `START` / `END` sentinel | OK | `__start__` (control) / `__end__` (output) として ノード化 |
-| `set_entry_point(...)` / `entry_point` 属性 | OK | `__start__` → 指定ノードへの edge を補完 |
+| `START` / `END` sentinel | 仮想化 (ノード化しない) | LangGraph と同様に擬似 sentinel として扱い、`add_edge(START, x)` の `x` を `entry_node_id` に昇格、`add_edge(y, END)` は drop。Shingan の `loop_guard`/`reachability` を誤発火させないための重要な調整 (`NodeTypeControl` ⇒ `NodeTypeLoop` backward-compat エイリアス回避) |
+| `set_entry_point(...)` / `entry_point` 属性 | OK | `add_edge(START, ...)` で取れない場合の fallback として graph オブジェクトの `entry_point` 属性も読む |
 | `MessageGraph` / `Graph` 派生 | 部分対応 | クラス名一致で検出 (private 属性 `_nodes` 等にも fallback) |
 | `builder.compile()` 経由のグラフ | OK | コンパイル後オブジェクトの `.builder` / `.graph` 属性経由で StateGraph に到達 |
 

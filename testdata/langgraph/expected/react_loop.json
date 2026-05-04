@@ -1,15 +1,11 @@
 {
   "nodes": [
-    {"id": "__start__", "name": "__start__", "type": "control", "config": {"role": "entry"}},
-    {"id": "__end__", "name": "__end__", "type": "output", "config": {"role": "exit"}},
     {"id": "model", "name": "model", "type": "llm", "config": {}},
     {"id": "tools", "name": "tools", "type": "tool", "config": {}}
   ],
   "edges": [
-    {"from": "__start__", "to": "model"},
     {"from": "model", "to": "tools", "condition": "tools"},
-    {"from": "model", "to": "__end__", "condition": "end"},
     {"from": "tools", "to": "model"}
   ],
-  "entry_node_id": "__start__"
+  "entry_node_id": "model"
 }

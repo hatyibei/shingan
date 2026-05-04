@@ -113,19 +113,26 @@ func TestLangGraphParser_SimpleChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseFile: %v", err)
 	}
-	wantNodes := []string{"__start__", "__end__", "classify", "respond"}
+	// START / END are pseudo-sentinels in LangGraph; we elide them so that
+	// Shingan's `loop_guard` doesn't misclassify the START node as a LoopAgent.
+	wantNodes := []string{"classify", "respond"}
 	for _, id := range wantNodes {
 		if _, ok := graph.Nodes[id]; !ok {
 			t.Errorf("missing expected node %q", id)
 		}
 	}
-	if got := graph.EntryNodeID; got != "__start__" {
-		t.Errorf("EntryNodeID = %q, want \"__start__\"", got)
+	for _, sentinel := range []string{"__start__", "__end__"} {
+		if _, ok := graph.Nodes[sentinel]; ok {
+			t.Errorf("sentinel %q must not appear as a node", sentinel)
+		}
 	}
-	if got, want := len(graph.Edges), 3; got != want {
+	if got := graph.EntryNodeID; got != "classify" {
+		t.Errorf("EntryNodeID = %q, want \"classify\"", got)
+	}
+	// classify -> respond, single inter-node edge (START/END dropped).
+	if got, want := len(graph.Edges), 1; got != want {
 		t.Errorf("len(Edges) = %d, want %d", got, want)
 	}
-	// Both classify and respond should be classified as LLM nodes.
 	for _, id := range []string{"classify", "respond"} {
 		n := graph.Nodes[id]
 		if n.Type != domain.NodeTypeLLM {

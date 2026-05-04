@@ -1,21 +1,17 @@
 {
   "nodes": [
-    {"id": "__start__", "name": "__start__", "type": "control", "config": {"role": "entry"}},
-    {"id": "__end__", "name": "__end__", "type": "output", "config": {"role": "exit"}},
     {"id": "supervisor", "name": "supervisor", "type": "llm", "config": {}},
     {"id": "researcher", "name": "researcher", "type": "llm", "config": {}},
     {"id": "coder", "name": "coder", "type": "llm", "config": {}},
     {"id": "reviewer", "name": "reviewer", "type": "llm", "config": {}}
   ],
   "edges": [
-    {"from": "__start__", "to": "supervisor"},
     {"from": "supervisor", "to": "researcher", "condition": "researcher"},
     {"from": "supervisor", "to": "coder", "condition": "coder"},
     {"from": "supervisor", "to": "reviewer", "condition": "reviewer"},
-    {"from": "supervisor", "to": "__end__", "condition": "finish"},
     {"from": "researcher", "to": "supervisor"},
     {"from": "coder", "to": "supervisor"},
     {"from": "reviewer", "to": "supervisor"}
   ],
-  "entry_node_id": "__start__"
+  "entry_node_id": "supervisor"
 }
