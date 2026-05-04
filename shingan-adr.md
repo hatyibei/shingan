@@ -25,9 +25,10 @@
 9. [ADR-009: LSP 差分実行 + degraded mode](#adr-009)
 10. [ADR-010: Plugin SDK internal-first 戦略](#adr-010)
 11. [ADR-011: 主戦場 LangGraph シフト (ADR-002 補正)](#adr-011)
-12. [Appendix A: 用語集](#appendix-a)
-13. [Appendix B: SamuraiAI ↔ ADK-Go ノードマッピング](#appendix-b)
-14. [Appendix C: 解析ルール詳細仕様](#appendix-c)
+12. [ADR-012: multi-file directory analysis — per-file independent graph](#adr-012)
+13. [Appendix A: 用語集](#appendix-a)
+14. [Appendix B: SamuraiAI ↔ ADK-Go ノードマッピング](#appendix-b)
+15. [Appendix C: 解析ルール詳細仕様](#appendix-c)
 
 ---
 
@@ -1280,8 +1281,87 @@ ADR-002 を **Superseded** にはしない。理由:
 
 ---
 
-<a id="appendix-a"></a>
-# Appendix A: 用語集
+<a id="adr-012"></a>
+# ADR-012: multi-file directory analysis — per-file independent graph
+
+## ステータス
+Proposed (2026-05-05) — Phase 2 着手の前提条件 (#9 解決案)
+
+## コンテキスト
+
+`shingan analyze --format adk-go --input <directory>` は v0.5 以降、directory 配下の全 `.go` ファイルを 1 つの `WorkflowGraph` に merge する (`parseSourceDirectoryFiltered` at `cmd/shingan/analyze.go:259`)。
+
+self-dogfood (2026-05-04 push 後) で、`testdata/agents/` で**偽陽性 7件**を確認:
+
+```bash
+$ /tmp/shingan-bin analyze --format adk-go --input ./testdata/agents
+14 findings: critical 4 / warning 8 / info 2
+- unreachable_node × 7 (偽陽性、各 file の独立 agent)
+```
+
+**testdata/agents/** の 3 file は本来別々の独立 agent definition:
+- `infinite_loop.go` — `LoopAgent retry_loop`
+- `missing_handler.go` — `LlmAgent planner + tools`
+- `unreachable.go` — `SequentialAgent orchestrator`
+
+merge 後の graph は entry を 1 つしか持たないため、最初に encountered された entry (= `retry_loop`) から到達できない他 file の node がすべて `unreachable_node` Warning/Info として誤検出される。これは Phase 2 で `unreachable_node` 派生ルール (例: `dead_branch`) を増やすほど偽陽性が乗算される構造。
+
+別 AI レビュー観点 (Codex iter1 P1) との整合: 「diff-mode は graph semantics を変えるな」と同根の問題で、**file merge も graph semantics に問題がある**。
+
+## 検討対象
+
+| 案 | 内容 | 偽陽性 | cross-file ref | domain変更 | 実装コスト |
+|---|---|---|---|---|---|
+| **A** | Per-file independent graph + multi-graph reporter | ✅ 根絶 | ❌ できない | なし | 中 |
+| **B** | Multi-entry single graph (`EntryNodeIDs []string`) | ✅ 根絶 | ✅ 可能 | あり (大) | 高 |
+| **C** | Opt-in merge flag (`--merge-files`) | △ default改善 | ✅ flag次第 | なし | 中-高 |
+| **D** | Smart cross-file resolution (`go/packages` 横断 var) | ✅ 根絶 | ✅ 自動 | なし | 非常に高 |
+
+## 決定
+
+**A 案を採用する。**
+
+各 `.go` ファイルを個別に parse → 別 `WorkflowGraph` として保持 → Orchestrator を file ごとに走らせ → findings を `SourceFile` 属性付きで集約。
+
+## 根拠
+
+1. **「使えるツール」化の最優先** (2026-05-04 user direction): 偽陽性根絶 > 高度な cross-file 解析。Phase 2 で新ルール 10 個追加する前にここを直さないと偽陽性が乗算される
+2. **domain 不変** = 既存 10 ルール (Local 4 / Path 3 / Global 3) への影響ゼロ。ADR-007 の3層分離 refactor を破壊するリスクなし (B 案最大の懸念回避)
+3. **testdata/agents で偽陽性 7件 → 0件** が確実に達成可能 (regression test で gating)
+4. **cross-file reference の需要は未検証**: 実プロジェクトで「複数 file にまたがる単一 agent definition」のケースが顕在化したら D 案として後年昇格 (新規 issue で track)
+5. **Reporter 拡張は局所**: SARIF / Markdown / JSON すべてに `source_file` メタを足すだけで済む (1 日仕事)
+
+## 影響
+
+### 変更スコープ (見積もり: 6-8 ファイル, ~300 LOC)
+
+- `cmd/shingan/analyze.go`: directory モードを per-file parse + 集約に置換
+- `cmd/shingan-mcp/tools.go` の `loadGraph`: 同様
+- `application/orchestrator.go`: `AnalyzeMulti(graphs []GraphWithSource, rules []AnalysisRule) []Finding` 追加 (既存 `Analyze` は維持)
+- `domain/finding.go`: `SourceFile string` field 追加 (Pos.File と冗長だが directory モードで明示的に file 単位 attribute)
+- `infrastructure/reporter/{json,markdown,sarif}.go`: `source_file` 属性出力
+- 新規テスト: `TestAnalyze_MultiFileDirectory_NoSpuriousUnreachable` (testdata/agents で 0 件 unreachable_node)
+
+### 変更しないもの (重要)
+
+- `domain/graph.go` の `WorkflowGraph` (EntryNodeID は単数のまま)
+- 10 既存ルール (Pos.File ベースで動くまま)
+- LangGraph parser の directory モード (`--format=langgraph` で .py 再帰スキャン): こちらも将来 A 適用すべきだが別 PR / 別 issue
+
+### 後続 (本 ADR 範囲外)
+
+- LangGraph directory parse の per-file 化 → `[Bug] LangGraph directory analysis has same multi-file merge issue as #9` issue 切る
+- D 案 (smart cross-file resolution) は v1.0 以降の拡張として `[Enhancement] cross-file ADK-Go agent reference resolution` 新規 issue
+- Reporter Markdown table に `Source` 列追加 (CLI UX 改善)
+
+### トレードオフ
+
+- **失うもの**: cross-file agent reference (file1 の Sequential が file2 の var を `SubAgents` に持つケース) を統合 graph 上で解析できない。実プロジェクトでこのパターンが顕在化したら D 案へ移行
+- **得るもの**: 偽陽性根絶 / domain 安定性 / 実装コスト最小 / Phase 2 着手の前提条件クリア
+
+---
+
+
 
 | 用語 | 定義 |
 |---|---|
@@ -1423,3 +1503,4 @@ ADR-002 を **Superseded** にはしない。理由:
 | 2026-04-14 | 初版作成。ADR-001〜005、Appendix A〜C | hatyibei |
 | 2026-04-14 | ADR-005スケジュール修正。4/15水で全力ビルド、4/16木は動確・修正に変更。Phase 1-4の依存関係ベース実行順序に再構成 | hatyibei |
 | 2026-05-04 | ADR-006〜011 追加。「使える静的解析ツール」化方針への転換に伴い、ESLint方式 visitor pattern (006) / Local-Path-Global 3層分離 (007) / ConfidenceReason 二次元化 (008) / LSP差分実行+degraded mode (009) / Plugin SDK internal-first (010) / 主戦場 LangGraph シフト (011, ADR-002 補正) を確定。別AI壁打ちレビューの6盲点指摘を反映。Appendix A に新用語追加 | hatyibei |
+| 2026-05-05 | ADR-012 追加。self-dogfood で `testdata/agents` の `unreachable_node` 偽陽性 7件を発見し、multi-file directory analysis の per-file independent graph 化を確定 (#9 解決案、Phase 2 着手の前提条件) | hatyibei |
