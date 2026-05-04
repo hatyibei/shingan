@@ -530,3 +530,60 @@ func TestChooseFormat_Python(t *testing.T) {
 		})
 	}
 }
+
+// TestChooseFormatWithContent_PythonSniff verifies the Codex iter3 P2 fix:
+// in production (analyzeAndPublish) the LSP must NOT treat every .py
+// buffer as a LangGraph workflow; only those that actually import
+// langgraph or reference StateGraph. Plain Python files in mixed-language
+// repos otherwise produce noisy parse-error diagnostics on every keystroke.
+func TestChooseFormatWithContent_PythonSniff(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"import langgraph", "import langgraph\nfrom typing import TypedDict\n", "langgraph"},
+		{"from langgraph.graph", "from langgraph.graph import StateGraph\n", "langgraph"},
+		{"StateGraph reference", "g = StateGraph(MyState)\n", "langgraph"},
+		{"plain hello world", "print('hello')\n", ""},
+		{"FastAPI but no langgraph", "from fastapi import FastAPI\napp = FastAPI()\n", ""},
+		{"empty content optimistic", "", "langgraph"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := chooseFormatWithContent(uri.New("file:///tmp/x.py"), "", tc.content)
+			if got != tc.want {
+				t.Errorf("chooseFormatWithContent(.py, %q) = %q, want %q", tc.content, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestIsLikelyLangGraphSource verifies the content-sniff heuristic.
+// Defensive false-negatives are preferred over false-positives (Codex
+// iter3 P2: false-positive = noisy diagnostics, false-negative = silent skip).
+func TestIsLikelyLangGraphSource(t *testing.T) {
+	cases := map[string]bool{
+		"import langgraph":                       true,
+		"from langgraph.graph import StateGraph": true,
+		"workflow = StateGraph(State)":           true,
+		"print('hello')":                         false,
+		"import os":                              false,
+		"":                                       false,
+	}
+	for content, want := range cases {
+		if got := isLikelyLangGraphSource(content); got != want {
+			t.Errorf("isLikelyLangGraphSource(%q) = %v, want %v", content, got, want)
+		}
+	}
+}
+
+// TestUriToFilename verifies file:// URIs decode to their on-disk path.
+func TestUriToFilename(t *testing.T) {
+	if got := uriToFilename(uri.URI("file:///tmp/agent.py")); got != "/tmp/agent.py" {
+		t.Errorf("uriToFilename(file URI) = %q, want /tmp/agent.py", got)
+	}
+	if got := uriToFilename(uri.URI("")); got != "" {
+		t.Errorf("uriToFilename(empty) = %q, want empty", got)
+	}
+}

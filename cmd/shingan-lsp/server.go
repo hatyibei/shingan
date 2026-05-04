@@ -68,6 +68,13 @@ type Server struct {
 	cache        *cache.AnalysisCache
 	pythonHealth *parser.PythonHealth
 
+	// langGraphParser is created lazily on first .py request and reused
+	// across the LSP session — each LangGraphParser spawns a long-lived
+	// Python subprocess, so creating one per analyzeAndPublish call leaks
+	// workers (Codex iter3 P1).
+	langGraphMu     sync.Mutex
+	langGraphParser *parser.LangGraphParser
+
 	// docMu protects docs. didChange and didOpen are concurrent writers in
 	// principle (the LSP client may interleave them), and Hover / CodeAction
 	// are concurrent readers — so a plain map would race.
@@ -140,11 +147,36 @@ func (s *Server) Initialized(ctx context.Context, _ *protocol.InitializedParams)
 }
 
 // Shutdown is called before Exit. We record intent so Exit can distinguish
-// a graceful from an abrupt termination. The protocol itself does not
-// require freeing resources here; the process exits shortly after.
+// a graceful from an abrupt termination. We also tear down the cached
+// LangGraph Python worker if one was spawned during the session — without
+// this the subprocess would survive past LSP exit (Codex iter3 P1).
 func (s *Server) Shutdown(_ context.Context) error {
 	s.shutdownRequested = true
+	s.langGraphMu.Lock()
+	defer s.langGraphMu.Unlock()
+	if s.langGraphParser != nil {
+		_ = s.langGraphParser.Close()
+		s.langGraphParser = nil
+	}
 	return nil
+}
+
+// getLangGraphParser returns the session-wide LangGraph parser, lazily
+// constructing it on first use. Must be called from analyzeAndPublish only;
+// the returned parser owns a Python subprocess whose lifetime matches the
+// LSP session.
+func (s *Server) getLangGraphParser() (*parser.LangGraphParser, error) {
+	s.langGraphMu.Lock()
+	defer s.langGraphMu.Unlock()
+	if s.langGraphParser != nil {
+		return s.langGraphParser, nil
+	}
+	p, err := parser.NewLangGraphParser()
+	if err != nil {
+		return nil, err
+	}
+	s.langGraphParser = p
+	return p, nil
 }
 
 // --- Document lifecycle ----------------------------------------------------
@@ -204,7 +236,7 @@ func (s *Server) DidClose(ctx context.Context, params *protocol.DidCloseTextDocu
 // because raising LSP errors causes some editors (notably Neovim) to
 // disable the language server entirely on the next request.
 func (s *Server) analyzeAndPublish(ctx context.Context, docURI uri.URI, languageID, content string, version uint32) error {
-	format := chooseFormat(docURI, languageID)
+	format := chooseFormatWithContent(docURI, languageID, content)
 
 	// Documents we cannot meaningfully analyze (e.g. .md, .yaml today)
 	// receive an empty publish so stale diagnostics from a previous file
@@ -224,12 +256,12 @@ func (s *Server) analyzeAndPublish(ctx context.Context, docURI uri.URI, language
 		// JSON / a single Go file). If parsing fails we degrade to the
 		// findings-only render path: diagnostics still appear, just at
 		// (0,0) ranges.
-		graph := tryParse(s.parserFactory, format, content)
+		graph := s.tryParseDoc(format, content, docURI)
 		s.storeDoc(docURI, languageID, format, content, key, graph, findings)
 		return s.publish(ctx, docURI, version, graph, findings)
 	}
 
-	graph, parseErr := parseContent(s.parserFactory, format, content)
+	graph, parseErr := s.parseDoc(format, content, docURI)
 	if parseErr != nil {
 		s.storeDoc(docURI, languageID, format, content, key, nil, nil)
 		return s.publish(ctx, docURI, version, nil, []domain.Finding{
@@ -311,7 +343,9 @@ func (s *Server) snapshot(docURI uri.URI) (*docState, bool) {
 //
 //	*.json or languageId=json   → "json"
 //	*.go                        → "adk-go"
-//	*.py or languageId=python   → "langgraph" (ADR-011 main parser)
+//	*.py or languageId=python   → "langgraph" IFF content imports langgraph
+//	                              (Codex iter3 P2 — content sniff so ordinary
+//	                              Python files don't get parse-error noise)
 //	languageId=samurai          → "samurai" (rare, opt-in via VS Code config)
 //
 // We do not sniff JSON content for samurai vs json today; users must
@@ -323,6 +357,13 @@ func (s *Server) snapshot(docURI uri.URI) (*docState, bool) {
 // ADR-011 makes Shingan's primary target. Without this mapping, opening
 // a *.py LangGraph file via LSP yields an empty diagnostics publish.
 func chooseFormat(u uri.URI, languageID string) string {
+	return chooseFormatWithContent(u, languageID, "")
+}
+
+// chooseFormatWithContent is chooseFormat with optional content for Python
+// sniffing. content == "" disables sniffing and uses extension-only
+// heuristics (preserves the existing test surface).
+func chooseFormatWithContent(u uri.URI, languageID, content string) string {
 	ext := strings.ToLower(filepath.Ext(u.Filename()))
 	switch {
 	case ext == ".json" || strings.EqualFold(languageID, "json"):
@@ -330,7 +371,17 @@ func chooseFormat(u uri.URI, languageID string) string {
 	case ext == ".go" || strings.EqualFold(languageID, "go"):
 		return "adk-go"
 	case ext == ".py" || strings.EqualFold(languageID, "python"):
-		return "langgraph"
+		// Python file: only treat as a LangGraph workflow if the buffer
+		// actually imports langgraph. This avoids producing parse-error
+		// diagnostics on every plain *.py in mixed-language repos
+		// (Codex iter3 P2). When content == "" the sniff is skipped and
+		// we optimistically claim the format — that branch is reserved
+		// for callers like chooseFormat() that have no buffer text yet
+		// (existing test fixtures).
+		if content == "" || isLikelyLangGraphSource(content) {
+			return "langgraph"
+		}
+		return ""
 	case strings.EqualFold(languageID, "samurai"):
 		return "samurai"
 	default:
@@ -338,23 +389,65 @@ func chooseFormat(u uri.URI, languageID string) string {
 	}
 }
 
-// parseContent invokes the appropriate parser. Pulled out as a free
-// function so analyzeAndPublish stays readable.
-func parseContent(f *factory.ParserFactory, format, content string) (*domain.WorkflowGraph, error) {
-	p, err := f.Create(format)
+// isLikelyLangGraphSource returns true when the buffer looks like a
+// LangGraph workflow definition. We use a deliberately permissive but
+// concrete heuristic: an `import langgraph` / `from langgraph` line, or
+// a reference to the `StateGraph` symbol. False negatives just mean the
+// file is not analyzed (silent), which is preferable to false positives
+// (noisy parse-error diagnostics on every Python file in the repo).
+func isLikelyLangGraphSource(content string) bool {
+	if strings.Contains(content, "import langgraph") ||
+		strings.Contains(content, "from langgraph") {
+		return true
+	}
+	if strings.Contains(content, "StateGraph") {
+		return true
+	}
+	return false
+}
+
+// parseDoc dispatches to the right parser. For "langgraph" we reuse a
+// session-wide LangGraphParser (so we don't leak Python subprocesses,
+// Codex iter3 P1) and pass the document's on-disk path as the
+// `parse_content` filename hint, which lets the shim's sys.path
+// resolution find sibling modules instead of failing on relative imports
+// (Codex iter3 P1). For other formats we go through the stateless
+// factory.
+func (s *Server) parseDoc(format, content string, docURI uri.URI) (*domain.WorkflowGraph, error) {
+	if format == "langgraph" {
+		p, err := s.getLangGraphParser()
+		if err != nil {
+			return nil, err
+		}
+		filename := uriToFilename(docURI)
+		return p.ParseWithFilename([]byte(content), filename)
+	}
+	p, err := s.parserFactory.Create(format)
 	if err != nil {
 		return nil, err
 	}
 	return p.Parse([]byte(content))
 }
 
-// tryParse returns the parsed graph or nil on failure. Used on the cache-
-// hit path where we want a graph for Hover ranges but cannot afford to
-// abort if parsing has regressed since the cache entry was stored.
-func tryParse(f *factory.ParserFactory, format, content string) *domain.WorkflowGraph {
-	g, err := parseContent(f, format, content)
+// tryParseDoc returns the parsed graph or nil on failure. Used on the
+// cache-hit path where we want a graph for Hover ranges but cannot afford
+// to abort if parsing has regressed since the cache entry was stored.
+func (s *Server) tryParseDoc(format, content string, docURI uri.URI) *domain.WorkflowGraph {
+	g, err := s.parseDoc(format, content, docURI)
 	if err != nil {
 		return nil
 	}
 	return g
+}
+
+// uriToFilename returns the on-disk path embedded in a file:// URI, or
+// an empty string if the URI is not a file URI (e.g. untitled: schemes).
+// An empty filename causes the LangGraph shim to fall back to its
+// "<inline.py>" placeholder.
+func uriToFilename(u uri.URI) string {
+	if u == "" {
+		return ""
+	}
+	// URI.Filename() returns "" for non-file schemes.
+	return u.Filename()
 }

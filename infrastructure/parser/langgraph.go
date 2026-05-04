@@ -100,15 +100,35 @@ func NewLangGraphParser(opts ...LangGraphOption) (*LangGraphParser, error) {
 func (p *LangGraphParser) SupportedFormat() string { return "langgraph" }
 
 // Parse converts inline Python source into a WorkflowGraph by sending it to
-// the worker via `parse_content`. Use ParseFile for on-disk inputs (which
-// gives the worker proper sys.path resolution for sibling imports).
+// the worker via `parse_content`. The synthetic filename "<inline.py>" is
+// used because callers of this entry point do not have a real path on disk
+// — the worker logs it for diagnostics but cannot resolve sibling imports
+// against it. Use ParseFile when the source is on disk, or
+// ParseWithFilename when you want to pass an LSP buffer's on-disk URI as
+// a filename hint for sys.path resolution.
 func (p *LangGraphParser) Parse(input []byte) (*domain.WorkflowGraph, error) {
+	return p.ParseWithFilename(input, "<inline.py>")
+}
+
+// ParseWithFilename is Parse but with an explicit filename hint passed to
+// the Python worker. The shim sets `module.__file__ = filename` and
+// inserts filename's parent directory at the head of sys.path before
+// executing the code, so workflows split across sibling modules
+// (`from .helpers import ...`) resolve correctly.
+//
+// Per Codex iter3 P1 review: the LSP must thread the editor buffer's
+// on-disk URI here so the same file analyzes identically through CLI
+// (`ParseFile`) and LSP (this method on unsaved-buffer content).
+func (p *LangGraphParser) ParseWithFilename(input []byte, filename string) (*domain.WorkflowGraph, error) {
 	if err := p.ensureHealthy(); err != nil {
 		return nil, err
 	}
+	if filename == "" {
+		filename = "<inline.py>"
+	}
 	raw, err := p.worker.Call("parse_content", map[string]string{
 		"content":  string(input),
-		"filename": "<inline.py>",
+		"filename": filename,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("langgraph parser: parse_content: %w", err)

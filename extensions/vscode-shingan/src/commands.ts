@@ -15,7 +15,9 @@ export function registerCommands(
       await editor.document.save();
     }),
     vscode.commands.registerCommand('shingan.analyzeWorkspace', async () => {
-      const files = await vscode.workspace.findFiles('**/*.{go,json}');
+      // Codex iter3 P2: include .py so LangGraph workflows are picked up
+      // by the workspace-level command (extension activates on python).
+      const files = await vscode.workspace.findFiles('**/*.{go,json,py}');
       for (const f of files) {
         const doc = await vscode.workspace.openTextDocument(f);
         await doc.save();
