@@ -9,6 +9,10 @@ import (
 )
 
 // AnalyzerFactory creates AnalysisRule instances by rule type name.
+//
+// CreateAll delegates to rules.AllBuiltins() so that adding a new builtin
+// rule only requires editing the rule's own init() block — the factory
+// stays out of the way (ADR-010 Plugin SDK internal-first).
 type AnalyzerFactory struct{}
 
 // NewAnalyzerFactory returns a ready-to-use AnalyzerFactory.
@@ -18,45 +22,20 @@ func NewAnalyzerFactory() *AnalyzerFactory {
 
 // Create returns an AnalysisRule for the given ruleType string.
 // Returns an error if ruleType is unknown.
+//
+// The lookup walks AllBuiltins() and matches by Name() so the named-lookup
+// path stays in sync with the registry without an explicit switch statement.
 func (f *AnalyzerFactory) Create(ruleType string) (domain.AnalysisRule, error) {
-	switch ruleType {
-	case "cycle_detection":
-		return rules.NewCycleDetector(), nil
-	case "unreachable_node":
-		return rules.NewReachabilityChecker(), nil
-	case "error_handler_checker":
-		return rules.NewErrorHandlerChecker(), nil
-	case "cost_estimation":
-		return rules.NewCostAnalyzer(), nil
-	case "redundant_llm_call":
-		return rules.NewRedundantLLMDetector(), nil
-	case "loop_guard":
-		return rules.NewLoopGuardChecker(), nil
-	case "pii_leak_scanner":
-		return rules.NewPIILeakScanner(), nil
-	case "secret_exposure_scanner":
-		return rules.NewSecretExposureScanner(), nil
-	case "max_parallel_branches":
-		return rules.NewMaxParallelBranchesChecker(), nil
-	case "deprecated_model":
-		return rules.NewDeprecatedModelChecker(), nil
-	default:
-		return nil, fmt.Errorf("unknown rule type: %q", ruleType)
+	for _, r := range rules.AllBuiltins() {
+		if r.Name() == ruleType {
+			return r, nil
+		}
 	}
+	return nil, fmt.Errorf("unknown rule type: %q", ruleType)
 }
 
-// CreateAll returns all known AnalysisRule instances.
+// CreateAll returns every builtin rule registered via the rules package's
+// init() functions.
 func (f *AnalyzerFactory) CreateAll() []domain.AnalysisRule {
-	return []domain.AnalysisRule{
-		rules.NewCycleDetector(),
-		rules.NewReachabilityChecker(),
-		rules.NewErrorHandlerChecker(),
-		rules.NewCostAnalyzer(),
-		rules.NewRedundantLLMDetector(),
-		rules.NewLoopGuardChecker(),
-		rules.NewPIILeakScanner(),
-		rules.NewSecretExposureScanner(),
-		rules.NewMaxParallelBranchesChecker(),
-		rules.NewDeprecatedModelChecker(),
-	}
+	return rules.AllBuiltins()
 }
