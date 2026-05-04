@@ -68,6 +68,7 @@ type PythonWorker struct {
 	timeout time.Duration
 
 	closed atomic.Bool
+	reaped atomic.Bool
 }
 
 // PythonWorkerOption configures a PythonWorker at construction time.
@@ -243,12 +244,36 @@ func (w *PythonWorker) Call(method string, params interface{}) (json.RawMessage,
 		// a clear error instead of writing to a broken stdin and getting
 		// EOF/broken-pipe noise (Codex iter4 P1). Callers that want to keep
 		// using LangGraph after a timeout must construct a fresh worker.
+		//
+		// Reap the killed process in a detached goroutine so it doesn't
+		// linger as a zombie in long-running LSP/MCP sessions (Codex iter5
+		// P2). Close() short-circuits once closed=true is observed, so
+		// without this every timeout would accumulate one unreaped child
+		// until the Go parent itself exits.
 		_ = w.kill()
 		w.closed.Store(true)
+		go w.reapAfterKill()
 		return nil, fmt.Errorf("python worker: call %q timed out after %s", method, w.timeout)
 	case r := <-ch:
 		return r.raw, r.err
 	}
+}
+
+// reapAfterKill blocks on cmd.Wait() so the kernel can release the
+// killed subprocess's PID. Called from a detached goroutine after the
+// timeout branch in Call(); never returns an error to the caller, but
+// errors are intentionally swallowed because the worker is already
+// known-dead. Idempotent across concurrent invocations: cmd.Wait() can
+// only be called once, so we serialise via the existing mu and a
+// secondary "reaped" flag.
+func (w *PythonWorker) reapAfterKill() {
+	if w == nil || w.cmd == nil {
+		return
+	}
+	if !w.reaped.CompareAndSwap(false, true) {
+		return
+	}
+	_ = w.cmd.Wait()
 }
 
 // Closed reports whether the worker has been shut down or its subprocess
@@ -265,7 +290,12 @@ func (w *PythonWorker) Closed() bool {
 // Close attempts a clean shutdown then kills the process group.
 // Calling Close more than once is safe.
 func (w *PythonWorker) Close() error {
-	if !w.closed.CompareAndSwap(false, true) {
+	alreadyClosed := !w.closed.CompareAndSwap(false, true)
+	if alreadyClosed {
+		// closed=true already (e.g. set by a Call() timeout). Make sure
+		// the killed subprocess is reaped — Codex iter5 P2 — so we don't
+		// leak a zombie when Close() is invoked after a timeout.
+		w.reapAfterKill()
 		return nil
 	}
 	// Best-effort polite shutdown.
@@ -277,7 +307,10 @@ func (w *PythonWorker) Close() error {
 	}
 	w.mu.Unlock()
 
-	// Give the worker a moment to exit gracefully before SIGKILL.
+	// Give the worker a moment to exit gracefully before SIGKILL. Wait()
+	// also reaps the child; mark reaped so any concurrent reapAfterKill
+	// call short-circuits.
+	w.reaped.Store(true)
 	doneCh := make(chan error, 1)
 	go func() {
 		if w.cmd == nil {

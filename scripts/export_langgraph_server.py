@@ -124,12 +124,42 @@ def _import_user_module(path: str) -> types.ModuleType:
 
 
 def _import_user_source(content: str, filename: str) -> types.ModuleType:
-    """Compile and execute in-memory Python source as a fresh module."""
-    module = types.ModuleType(f"_shingan_inline_{abs(hash(filename))}")
-    module.__file__ = filename or "<inline>"
-    code = compile(content, filename or "<inline>", "exec")
-    exec(code, module.__dict__)  # noqa: S102 — intentional
-    return module
+    """Compile and execute in-memory Python source as a fresh module.
+
+    If `filename` looks like an on-disk path (i.e. not the inline sentinel
+    "<inline.py>" / "<inline>"), prepend its parent directory to sys.path
+    so sibling imports (e.g. `from .helpers import ...` or
+    `from helpers import ...`) resolve against the buffer's real location.
+    Without this, the LSP would report `shingan_parse_error` on every
+    multi-module workflow, even though the same file analyses cleanly via
+    parse_file (Codex iter5 P1).
+
+    The sys.path entry is removed on exit to avoid leaking import paths
+    across separate parse_content calls.
+    """
+    src_dir = ""
+    if filename and not filename.startswith("<"):
+        try:
+            abs_path = os.path.abspath(filename)
+            src_dir = os.path.dirname(abs_path)
+        except (TypeError, ValueError):
+            src_dir = ""
+    inserted = False
+    if src_dir and src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
+        inserted = True
+    try:
+        module = types.ModuleType(f"_shingan_inline_{abs(hash(filename))}")
+        module.__file__ = filename or "<inline>"
+        code = compile(content, filename or "<inline>", "exec")
+        exec(code, module.__dict__)  # noqa: S102 — intentional
+        return module
+    finally:
+        if inserted:
+            try:
+                sys.path.remove(src_dir)
+            except ValueError:
+                pass
 
 
 # ----- StateGraph extraction -------------------------------------------------
@@ -279,21 +309,36 @@ def _normalise_branch(branch: Any) -> Dict[str, Any]:
 def _node_id(name: str) -> str:
     """Map a langgraph node name to a Shingan node ID.
 
-    LangGraph allows arbitrary strings (including spaces). We lower-case and
-    swap whitespace/hyphens for underscores. START / END pass through
-    unchanged so the caller can detect and elide them.
+    Per Codex iter5 P2: the previous implementation collapsed
+    "search-web", "search_web", "search/web", "search.web" all onto
+    "search_web", causing distinct nodes to silently merge and edges to
+    rewire onto the wrong target. We now preserve the original characters
+    that LangGraph allows in identifiers — only stripping whitespace at
+    the edges and replacing internal whitespace with a single underscore.
+    Hyphens, slashes and dots are kept verbatim so distinct names yield
+    distinct IDs.
+
+    START / END pass through unchanged so the caller can detect and elide
+    them.
     """
     sname = str(name)
     if sname in (LANGGRAPH_START, LANGGRAPH_END):
         return sname
-    out = []
-    for ch in sname:
-        if ch.isalnum() or ch == "_":
-            out.append(ch.lower())
-        elif ch in (" ", "-", "/", "."):
-            out.append("_")
-    cleaned = "".join(out).strip("_")
-    return cleaned or "node"
+    cleaned = sname.strip()
+    # Replace runs of whitespace with a single underscore; everything else
+    # (alnum, _, -, /, ., :) remains as-is to preserve semantic distinctions.
+    out: list[str] = []
+    in_ws = False
+    for ch in cleaned:
+        if ch.isspace():
+            if not in_ws and out:
+                out.append("_")
+            in_ws = True
+        else:
+            out.append(ch)
+            in_ws = False
+    final = "".join(out).strip("_")
+    return final or "node"
 
 
 def _build_graph(graph_obj: Any, source_path: str) -> Dict[str, Any]:
