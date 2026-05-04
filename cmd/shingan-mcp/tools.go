@@ -95,7 +95,7 @@ type RuleExplanation struct {
 func registerTools(server *mcp.Server, deps *toolDeps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "shingan_analyze_graph",
-		Description: "Run all 10 Shingan analysis rules against an in-memory " +
+		Description: "Run all 11 Shingan analysis rules against an in-memory " +
 			"WorkflowGraph JSON. Returns findings sorted by severity desc, " +
 			"confidence desc, rule name asc.",
 	}, deps.analyzeGraph)
@@ -103,13 +103,13 @@ func registerTools(server *mcp.Server, deps *toolDeps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "shingan_analyze_file",
 		Description: "Parse a workflow file (or adk-go directory) from disk " +
-			"and run all 10 Shingan analysis rules. Supported frameworks: " +
+			"and run all 11 Shingan analysis rules. Supported frameworks: " +
 			"json, adk-go, samurai.",
 	}, deps.analyzeFile)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "shingan_explain_rule",
-		Description: "Return a detailed explanation of one of the 10 built-in Shingan rules.",
+		Description: "Return a detailed explanation of one of the 11 built-in Shingan rules.",
 	}, deps.explainRule)
 
 	mcp.AddTool(server, &mcp.Tool{
