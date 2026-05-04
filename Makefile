@@ -2,7 +2,7 @@ GOA     ?= $(HOME)/go/bin/goa
 DESIGN  := github.com/hatyibei/shingan/design
 BIN_DIR := /tmp
 
-.PHONY: gen test build-all bench bench-rules gen-cli sample-%
+.PHONY: gen test build-all bench bench-rules gen-cli sample-% check-reason lint
 
 ## gen: regenerate goa HTTP handlers and OpenAPI spec from design/design.go
 gen:
@@ -11,6 +11,14 @@ gen:
 ## test: run all tests with race detector
 test:
 	go test -race ./...
+
+## check-reason: fail when a domain.Finding literal in domain/rules omits ConfidenceReason (ADR-008)
+check-reason:
+	@./scripts/check_confidence_reason.sh
+
+## lint: run go vet and the ConfidenceReason check together
+lint: check-reason
+	go vet ./...
 
 ## build-all: build CLI and API binaries
 build-all:

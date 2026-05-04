@@ -53,10 +53,10 @@ func (r *ReachabilityChecker) Analyze(graph *domain.WorkflowGraph) []domain.Find
 	if graph.EntryNodeID == "" {
 		return []domain.Finding{
 			{
-				RuleName:   r.Name(),
-				Severity:   domain.Critical,
-				NodeID:     "",
-				Message:    "entry node is not set: reachability analysis cannot be performed",
+				RuleName:         r.Name(),
+				Severity:         domain.Critical,
+				NodeID:           "",
+				Message:          "entry node is not set: reachability analysis cannot be performed",
 				Suggestion:       "Set EntryNodeID to the ID of the node where workflow execution begins.",
 				Confidence:       1.0,
 				ConfidenceReason: domain.ReasonExactStaticMatch,
