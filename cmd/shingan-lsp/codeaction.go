@@ -80,8 +80,14 @@ func positionLess(a, b protocol.Position) bool {
 	return a.Character < b.Character
 }
 
-// truncate shortens s to at most n runes, appending an ellipsis if it had
-// to be cut. Keeps CodeAction titles compact in the editor's menu.
+// truncate shortens s to at most n bytes, appending an ellipsis if it
+// had to be cut. Keeps CodeAction titles compact in the editor's menu.
+//
+// We deliberately operate on bytes rather than runes: today every
+// Suggestion is ASCII (the rule authors are all on this codebase) and a
+// byte-based slice is allocation-free. If a multibyte Suggestion ever
+// lands, swap the implementation to a []rune walk so we never sever a
+// UTF-8 sequence mid-codepoint.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s

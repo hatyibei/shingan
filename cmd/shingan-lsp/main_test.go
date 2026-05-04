@@ -7,10 +7,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
+
+	"github.com/hatyibei/shingan/infrastructure/parser"
 )
 
 // recordingPublisher captures every PublishDiagnostics call so tests can
@@ -362,6 +363,78 @@ func TestServer_CodeAction_ReturnsSuggestionWhenAvailable(t *testing.T) {
 	}
 }
 
+func TestServer_DidOpen_EmitsDegradedModeWhenPythonUnhealthy(t *testing.T) {
+	t.Parallel()
+
+	pub := &recordingPublisher{}
+	srv := NewServer(pub)
+
+	// Replace the embedded probe with one pointed at a non-existent
+	// binary so it deterministically reports unhealthy. We force a
+	// synchronous probe BEFORE didOpen — mirroring what the real
+	// Initialized handler does — to guarantee Status() is non-zero by
+	// the time analyzeAndPublish inspects it.
+	srv.pythonHealth = parser.NewPythonHealth(parser.WithExecutable("/nonexistent/python-binary-xyz"))
+	if _, err := srv.pythonHealth.RunCheck(context.Background()); err == nil {
+		t.Fatal("expected the bogus python health probe to fail")
+	}
+
+	docURI := docURI(t, "buggy_degraded.json")
+	if err := srv.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:        docURI,
+			LanguageID: protocol.JSONLanguage,
+			Version:    1,
+			Text:       readBuggyFixture(t),
+		},
+	}); err != nil {
+		t.Fatalf("DidOpen: %v", err)
+	}
+
+	calls := pub.snapshot()
+	if len(calls) != 1 {
+		t.Fatalf("expected exactly 1 publish, got %d", len(calls))
+	}
+	codes := ruleNamesFromDiagnostics(calls[0].Diagnostics)
+	if !codes["shingan_degraded_mode"] {
+		t.Errorf("expected shingan_degraded_mode diagnostic when python is unhealthy; got rules=%v",
+			ruleNames(codes))
+	}
+	// Functional rules MUST still fire — degraded mode is additive, not
+	// a replacement. buggy.json reliably trips loop_guard.
+	if !codes["loop_guard"] {
+		t.Errorf("expected loop_guard to still fire in degraded mode; got rules=%v",
+			ruleNames(codes))
+	}
+}
+
+func TestServer_DidOpen_NoDegradedDiagnosticWhenProbeNotRun(t *testing.T) {
+	t.Parallel()
+
+	pub := &recordingPublisher{}
+	srv := NewServer(pub)
+
+	// Do NOT call srv.Initialized / RunCheck. The probe's CheckedAt
+	// remains zero, which the server treats as "we don't yet know" and
+	// therefore omits the degraded-mode diagnostic. This pins the
+	// "first-analysis silence" invariant — see Initialized's comment in
+	// server.go for the rationale (the LSP entry point ALWAYS calls
+	// RunCheck synchronously before any didOpen lands).
+	docURI := docURI(t, "buggy_unprobed.json")
+	if err := srv.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI: docURI, LanguageID: protocol.JSONLanguage, Version: 1, Text: readBuggyFixture(t),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	codes := ruleNamesFromDiagnostics(pub.snapshot()[0].Diagnostics)
+	if codes["shingan_degraded_mode"] {
+		t.Errorf("did not expect degraded-mode diagnostic before probe ran; got rules=%v",
+			ruleNames(codes))
+	}
+}
+
 func TestServer_LifecycleSequence(t *testing.T) {
 	t.Parallel()
 
@@ -373,12 +446,12 @@ func TestServer_LifecycleSequence(t *testing.T) {
 	if _, err := srv.Initialize(context.Background(), &protocol.InitializeParams{}); err != nil {
 		t.Fatal(err)
 	}
+	// Initialized runs the python health probe synchronously; no sleep
+	// needed for determinism, but keep the call to exercise the full
+	// startup sequence.
 	if err := srv.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
 		t.Fatal(err)
 	}
-	// Initialized launches the python health probe in a goroutine; give
-	// it a moment to settle so the test is deterministic.
-	time.Sleep(50 * time.Millisecond)
 	if err := srv.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
 	}

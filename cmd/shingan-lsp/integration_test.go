@@ -10,8 +10,6 @@ import (
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 	"go.uber.org/zap"
-
-	"github.com/hatyibei/shingan/domain"
 )
 
 // pipeStream pairs an io.Reader and io.Writer into a jsonrpc2.Stream-compatible
@@ -247,8 +245,6 @@ func TestIntegration_Handshake(t *testing.T) {
 	// the goroutines wind down quickly. test-cleanup purpose only.
 	_ = serverEnd.Close()
 	_ = clientEnd.Close()
-
-	_ = domain.WorkflowGraph{} // anchor the import (used elsewhere indirectly)
 }
 
 // syncKindIs returns true when v decodes back to the requested

@@ -118,6 +118,13 @@ If your project uses a non-`.json` extension for SamuraiAI workflows
 (e.g. `.workflow`), associate the file pattern with `languageId: samurai`
 in your editor.
 
+> **Heads-up:** every `.go` file is currently routed to the ADK-Go parser.
+> If your repository mixes ADK agent code with regular Go, opening a non-
+> ADK file will surface a single `shingan_parse_error` Warning until
+> heuristic detection (matching on `google.golang.org/adk` imports) lands
+> in a follow-up. To silence the noise, scope the LSP to specific paths
+> via your editor's `root_pattern` / workspace folder configuration.
+
 ---
 
 ## Diagnostic shape

@@ -127,15 +127,15 @@ func (s *Server) Initialize(_ context.Context, _ *protocol.InitializeParams) (*p
 }
 
 // Initialized fires once the client has finished its half of the handshake.
-// We use this hook to perform the (cheap) initial Python probe; we do not
-// gate document analysis on its result, because Go-native parsers stay
-// usable regardless. The probe runs in the background so a slow Python
-// startup does not delay the client's first didOpen.
+// We use this hook to perform the initial Python probe synchronously so the
+// very first didOpen / didChange already sees the right Status — otherwise
+// the probe would race the first analysis and silently swallow the
+// degraded-mode diagnostic on cold start. The probe is inexpensive (a
+// single `python3 --version` call with a 3 s timeout); blocking the
+// Initialized handler for that duration is well within LSP latency
+// expectations.
 func (s *Server) Initialized(ctx context.Context, _ *protocol.InitializedParams) error {
-	go func() {
-		_, _ = s.pythonHealth.RunCheck(context.Background())
-	}()
-	_ = ctx
+	_, _ = s.pythonHealth.RunCheck(ctx)
 	return nil
 }
 
