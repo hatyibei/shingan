@@ -16,6 +16,14 @@ var externalCategories = map[string]bool{
 
 // PIILeakScanner detects potential PII leakage paths in a workflow graph.
 //
+// Tier: Path (ADR-007). Sources are RAG/PII tools, Sinks are external Tool
+// nodes; Propagate runs reverse-BFS from each sink stopping at Human gates
+// and emits Findings for any Source it encounters along the way.
+//
+// ConfidenceReason: ReasonHeuristicPattern. RAG/has_pii sources are strong
+// signals (Confidence 0.6) but the path traversal still relies on naming and
+// category hints rather than semantic taint analysis.
+//
 // A leakage path is any route from a PII-source node (RAG node or node with
 // has_pii=true) to an external-sink node (Tool with category in
 // {api, mcp, browser}) that does not pass through a Human approval node.
@@ -23,14 +31,6 @@ var externalCategories = map[string]bool{
 // Severity rules:
 //   - RAG node (category=="rag") or has_pii==true → external sink, no Human gate → Warning
 //   - Node whose name contains a PII hint keyword → external sink, no Human gate → Info
-//
-// Algorithm (v0.2 — O(V+E) reverse-BFS from sinks):
-//
-//  1. Build forward + reverse adjacency lists in O(E).
-//  2. Classify every node into sinks / ragSources / hintSources / humanSet in O(V).
-//  3. For each sink, run reverse-BFS stopping at Human nodes.
-//     Record all PII sources reachable from the sink in the reverse direction.
-//  4. Emit one Finding per (sink, source) pair, preserving the original Severity.
 type PIILeakScanner struct{}
 
 // NewPIILeakScanner returns a ready-to-use PIILeakScanner.
@@ -43,6 +43,15 @@ func (p *PIILeakScanner) Name() string {
 	return "pii_leak_scanner"
 }
 
+// Meta returns the rule metadata used by the tier-aware orchestrator.
+func (p *PIILeakScanner) Meta() domain.RuleMeta {
+	return domain.RuleMeta{
+		Name:     p.Name(),
+		Severity: domain.Warning,
+		Fixable:  false,
+	}
+}
+
 // piiHintKeywords is a list of name substrings that suggest PII content (case-insensitive).
 var piiHintKeywords = []string{"pii", "user", "personal", "private"}
 
@@ -52,7 +61,6 @@ func isRAGSource(node *domain.Node) bool {
 	if node.Type != domain.NodeTypeTool {
 		return false
 	}
-	// Explicit has_pii flag (JSON bool).
 	if node.Config != nil {
 		if v, ok := node.Config["has_pii"]; ok {
 			if b, ok := v.(bool); ok && b {
@@ -60,7 +68,6 @@ func isRAGSource(node *domain.Node) bool {
 			}
 		}
 	}
-	// RAG category implies potential PII.
 	return toolCategory(node) == "rag"
 }
 
@@ -85,70 +92,92 @@ func isExternalSink(node *domain.Node) bool {
 	return externalCategories[toolCategory(node)]
 }
 
-// Analyze scans the workflow graph for PII leakage paths and returns findings.
-//
-// v0.2: O(V+E) via reverse-BFS from each sink node.
-// Building the reverse adjacency list is O(E); classifying nodes is O(V);
-// each reverse-BFS is O(V+E) across all sinks combined (each edge traversed at most once
-// per sink that reaches it). In typical workflows with few sinks the algorithm is effectively
-// O(V+E) overall.
+// Sources implements domain.PathRule. It returns every node classified as a
+// RAG source or matching a PII-hint keyword. The kind is preserved on the
+// node itself; Propagate distinguishes RAG vs hint via isRAGSource/
+// isPIIHintSource so we do not duplicate that logic in Sources.
+func (p *PIILeakScanner) Sources(g *domain.WorkflowGraph) []*domain.Node {
+	if g == nil {
+		return nil
+	}
+	var out []*domain.Node
+	for _, n := range g.Nodes {
+		if isRAGSource(n) || isPIIHintSource(n) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// Sinks implements domain.PathRule. It returns every node that classifies as
+// an external Tool sink (api/mcp/browser).
+func (p *PIILeakScanner) Sinks(g *domain.WorkflowGraph) []*domain.Node {
+	if g == nil {
+		return nil
+	}
+	var out []*domain.Node
+	for _, n := range g.Nodes {
+		if isExternalSink(n) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// Propagate implements domain.PathRule. It runs reverse-BFS from each sink in
+// ctx.Sinks, stopping at Human gates, and reports a Finding for each Source
+// it discovers along the way.
+func (p *PIILeakScanner) Propagate(ctx *domain.PathContext) []domain.Finding {
+	if ctx == nil || ctx.Graph == nil || len(ctx.Sources) == 0 || len(ctx.Sinks) == 0 {
+		return nil
+	}
+	return runPIIReverseBFS(ctx.Graph, ctx.Reverse, ctx.Sources, ctx.Sinks)
+}
+
+// Analyze keeps the legacy AnalysisRule contract alive.
 func (p *PIILeakScanner) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
 	if graph == nil || len(graph.Nodes) == 0 {
 		return nil
 	}
-
-	// ── Step 1: Build reverse adjacency list in O(E) ──────────────────────────
-	// reverse[to] = list of edges pointing INTO "to"
 	reverse := make(map[string][]domain.Edge, len(graph.Nodes))
 	for _, e := range graph.Edges {
 		reverse[e.To] = append(reverse[e.To], e)
 	}
+	sources := p.Sources(graph)
+	sinks := p.Sinks(graph)
+	if len(sources) == 0 || len(sinks) == 0 {
+		return nil
+	}
+	return runPIIReverseBFS(graph, reverse, sources, sinks)
+}
 
-	// ── Step 2: Classify nodes in O(V) ────────────────────────────────────────
+// runPIIReverseBFS is the path traversal shared by Propagate and the legacy
+// Analyze fallback. It performs reverse-BFS from each sink, stopping at
+// Human gates, and emits a Finding for each PII source it visits.
+func runPIIReverseBFS(graph *domain.WorkflowGraph, reverse map[string][]domain.Edge, sources []*domain.Node, sinks []*domain.Node) []domain.Finding {
 	type sourceKind uint8
 	const (
-		kindRAG  sourceKind = iota // Warning
-		kindHint                   // Info
+		kindRAG sourceKind = iota
+		kindHint
 	)
-
 	type sourceInfo struct {
 		kind sourceKind
 		node *domain.Node
 	}
 
-	humanSet := make(map[string]bool, len(graph.Nodes)/10)
-	ragSources := make(map[string]sourceInfo, len(graph.Nodes)/5)
-	var sinks []string
-
-	for id, n := range graph.Nodes {
-		switch {
-		case n.Type == domain.NodeTypeHuman:
-			humanSet[id] = true
-		case isExternalSink(n):
-			sinks = append(sinks, id)
-		}
-		// A node can be both a source and something else (e.g., a Tool with rag category).
-		// We check sources regardless of sink/human classification because the original
-		// implementation did node-centric classification.
+	sourceIndex := make(map[string]sourceInfo, len(sources))
+	for _, n := range sources {
 		if isRAGSource(n) {
-			ragSources[id] = sourceInfo{kind: kindRAG, node: n}
+			sourceIndex[n.ID] = sourceInfo{kind: kindRAG, node: n}
 		} else if isPIIHintSource(n) {
-			ragSources[id] = sourceInfo{kind: kindHint, node: n}
+			sourceIndex[n.ID] = sourceInfo{kind: kindHint, node: n}
 		}
 	}
 
-	if len(sinks) == 0 || len(ragSources) == 0 {
-		return nil
-	}
-
-	// ── Step 3: Reverse-BFS from each sink ────────────────────────────────────
-	// For each sink, traverse the graph backwards (following reverse edges).
-	// Stop at Human nodes — they are safe boundaries.
-	// Collect all PII source nodes reachable in the reverse direction.
 	var findings []domain.Finding
 
-	for _, sinkID := range sinks {
-		sinkNode := graph.Nodes[sinkID]
+	for _, sinkNode := range sinks {
+		sinkID := sinkNode.ID
 
 		visited := make(map[string]bool, len(graph.Nodes))
 		visited[sinkID] = true
@@ -177,16 +206,15 @@ func (p *PIILeakScanner) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
 
 				visited[pred] = true
 
-				// If this predecessor is a PII source, emit a Finding.
-				if src, ok := ragSources[pred]; ok {
+				if src, ok := sourceIndex[pred]; ok {
 					severity := domain.Warning
-					confidence := 0.6 // RAG source: strong signal
+					confidence := 0.6
 					if src.kind == kindHint {
 						severity = domain.Info
-						confidence = 0.3 // name hint: heuristic, weak signal
+						confidence = 0.3
 					}
 					findings = append(findings, domain.Finding{
-						RuleName: p.Name(),
+						RuleName: "pii_leak_scanner",
 						Severity: severity,
 						NodeID:   sinkID,
 						Message: fmt.Sprintf(
@@ -197,9 +225,9 @@ func (p *PIILeakScanner) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
 							"ノード %q と %q の間にHuman承認ノードを挿入するか、PIIフィールドをサニタイズしてください (GDPR/CCPA/個人情報保護法対応)",
 							pred, sinkID,
 						),
-						Confidence: confidence,
+						Confidence:       confidence,
+						ConfidenceReason: domain.ReasonHeuristicPattern,
 					})
-					// Continue expanding backwards from the source to find more upstream sources.
 				}
 
 				queue = append(queue, pred)
@@ -208,4 +236,8 @@ func (p *PIILeakScanner) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
 	}
 
 	return findings
+}
+
+func init() {
+	registerBuiltin(NewPIILeakScanner())
 }
