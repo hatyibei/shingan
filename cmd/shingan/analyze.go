@@ -3,10 +3,13 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/hatyibei/shingan/application"
 	"github.com/hatyibei/shingan/domain"
+	baselineio "github.com/hatyibei/shingan/infrastructure/baseline"
 	"github.com/hatyibei/shingan/infrastructure/factory"
 	"github.com/spf13/cobra"
 )
@@ -18,6 +21,11 @@ type analyzeFlags struct {
 	output        string  // output format: "json" or "markdown"
 	outputFile    string  // output file path (empty = stdout)
 	minConfidence float64 // minimum confidence threshold (0.0 = include all)
+
+	// Phase 2-E — progressive adoption & diff mode.
+	since        string // --since=<git-ref>: analyze only files changed since this ref
+	baseline     string // --baseline=<path>: suppress findings already in this baseline
+	saveBaseline string // --save-baseline=<path>: write current findings as a new baseline
 }
 
 // newAnalyzeCmd builds and returns the cobra.Command for "shingan analyze".
@@ -49,6 +57,9 @@ Exit codes:
 	cmd.Flags().StringVar(&flags.output, "output", "json", "Output format: json, markdown, or sarif")
 	cmd.Flags().StringVar(&flags.outputFile, "output-file", "", "Output file path (default: stdout)")
 	cmd.Flags().Float64Var(&flags.minConfidence, "min-confidence", 0.0, "Exclude findings with confidence below this threshold (0.0–1.0)")
+	cmd.Flags().StringVar(&flags.since, "since", "", "Git ref (e.g. main, v0.4.0); analyze only files changed since this ref")
+	cmd.Flags().StringVar(&flags.baseline, "baseline", "", "Path to baseline JSON; findings already present are suppressed")
+	cmd.Flags().StringVar(&flags.saveBaseline, "save-baseline", "", "Path to write current findings as a new baseline JSON")
 
 	_ = cmd.MarkFlagRequired("input")
 
@@ -75,25 +86,68 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 		return 1, fmt.Errorf("create parser: %w", err)
 	}
 
-	// 2. Load and parse graph.
-	graph, err := loadGraphWithParser(flags.input, inputFormat, workflowParser)
+	// 2. Resolve --since: if the current input has no changed files since <ref>,
+	//    short-circuit to 0 findings (progressive adoption: unchanged code stays
+	//    silent). Otherwise fall through to the normal load path. Parsers work
+	//    at the graph level, so file-level filtering for adk-go directories is
+	//    handled by parseADKGoDirectoryFiltered below.
+	var changed []string
+	if flags.since != "" {
+		changed, err = changedFiles(flags.since, flags.input)
+		if err != nil {
+			return 1, fmt.Errorf("resolve --since: %w", err)
+		}
+		if len(changed) == 0 {
+			// Nothing changed — emit an empty report through the normal
+			// reporter path so CI still gets a valid artefact.
+			return emitFindings(flags, outputFormat, nil)
+		}
+	}
+
+	// 3. Load and parse graph (optionally restricted to changed files).
+	graph, err := loadGraphFiltered(flags.input, inputFormat, workflowParser, changed)
 	if err != nil {
 		return 1, fmt.Errorf("load graph: %w", err)
 	}
 
-	// 3. Run all analysis rules.
+	// 4. Run all analysis rules.
 	analyzerFactory := factory.NewAnalyzerFactory()
 	rules := analyzerFactory.CreateAll()
 
 	orchestrator := application.NewAnalysisOrchestrator()
 	findings := orchestrator.Analyze(graph, rules)
 
-	// 3b. Filter by minimum confidence threshold if specified.
+	// 4b. Filter by minimum confidence threshold if specified.
 	if flags.minConfidence > 0.0 {
 		findings = filterByConfidence(findings, flags.minConfidence)
 	}
 
-	// 4. Format the output.
+	// 4c. Apply baseline suppression BEFORE save-baseline so a combined
+	//     --baseline + --save-baseline run saves only the newly-introduced
+	//     findings (matches the phase2plan pseudocode exactly).
+	if flags.baseline != "" {
+		b, err := baselineio.Load(flags.baseline)
+		if err != nil {
+			return 1, fmt.Errorf("load baseline: %w", err)
+		}
+		findings = filterNew(findings, b)
+	}
+
+	// 4d. Persist the (possibly filtered) findings as a new baseline.
+	if flags.saveBaseline != "" {
+		if err := baselineio.Save(flags.saveBaseline, domain.NewBaselineFromFindings(findings)); err != nil {
+			return 1, fmt.Errorf("save baseline: %w", err)
+		}
+	}
+
+	return emitFindings(flags, outputFormat, findings)
+}
+
+// emitFindings renders findings with the configured reporter, writes them to
+// stdout/file, and returns the exit code. Factored out so that the --since
+// short-circuit and the normal path share identical report formatting and
+// exit-code semantics.
+func emitFindings(flags *analyzeFlags, outputFormat string, findings []domain.Finding) (int, error) {
 	reporterFactory := factory.NewReporterFactory()
 	formatter, err := reporterFactory.Create(outputFormat)
 	if err != nil {
@@ -105,12 +159,10 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 		return 1, fmt.Errorf("format findings: %w", err)
 	}
 
-	// 5. Write output to stdout or a file.
 	if err := writeOutput(flags.outputFile, output); err != nil {
 		return 1, fmt.Errorf("write output: %w", err)
 	}
 
-	// 6. Determine exit code based on highest severity found.
 	return exitCode(findings), nil
 }
 
@@ -118,13 +170,25 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 // For adk-go format with a directory input, all *.go files are walked and their
 // nodes and edges are merged into a single graph.
 func loadGraphWithParser(path, inputFormat string, p application.WorkflowParser) (*domain.WorkflowGraph, error) {
+	return loadGraphFiltered(path, inputFormat, p, nil)
+}
+
+// loadGraphFiltered is loadGraphWithParser with an optional allowlist of file
+// paths. When allow is non-nil, only files whose paths match one of the
+// entries are parsed — used by --since to restrict analysis to changed files.
+// When allow is nil, all files are parsed (original behaviour).
+func loadGraphFiltered(path, inputFormat string, p application.WorkflowParser, allow []string) (*domain.WorkflowGraph, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("stat %q: %w", path, err)
 	}
 
 	if !info.IsDir() {
-		// Single file.
+		// Single file: honour allowlist if provided.
+		if allow != nil && !fileInAllowlist(path, allow) {
+			// File is out of scope — return an empty graph.
+			return &domain.WorkflowGraph{Nodes: make(map[string]*domain.Node)}, nil
+		}
 		return parseFile(path, p)
 	}
 
@@ -133,7 +197,7 @@ func loadGraphWithParser(path, inputFormat string, p application.WorkflowParser)
 		return nil, fmt.Errorf("directory input is only supported for adk-go format; use a single JSON file for json format")
 	}
 
-	return parseADKGoDirectory(path, p)
+	return parseADKGoDirectoryFiltered(path, p, allow)
 }
 
 // parseFile reads a single file and parses it with the given parser.
@@ -153,6 +217,12 @@ func parseFile(path string, p application.WorkflowParser) (*domain.WorkflowGraph
 // and merges their nodes and edges into a single WorkflowGraph.
 // The entry node comes from the first file that defines one.
 func parseADKGoDirectory(dir string, p application.WorkflowParser) (*domain.WorkflowGraph, error) {
+	return parseADKGoDirectoryFiltered(dir, p, nil)
+}
+
+// parseADKGoDirectoryFiltered is parseADKGoDirectory with an optional
+// allowlist; when non-nil, only files present in allow are parsed.
+func parseADKGoDirectoryFiltered(dir string, p application.WorkflowParser, allow []string) (*domain.WorkflowGraph, error) {
 	merged := &domain.WorkflowGraph{
 		Nodes: make(map[string]*domain.Node),
 	}
@@ -165,6 +235,9 @@ func parseADKGoDirectory(dir string, p application.WorkflowParser) (*domain.Work
 			return nil
 		}
 		if filepath.Ext(path) != ".go" {
+			return nil
+		}
+		if allow != nil && !fileInAllowlist(path, allow) {
 			return nil
 		}
 
@@ -269,4 +342,74 @@ func exitCode(findings []domain.Finding) int {
 		}
 	}
 	return code
+}
+
+// filterNew returns only findings whose fingerprint is NOT already present in
+// the baseline. Used to suppress pre-existing issues during progressive adoption.
+func filterNew(findings []domain.Finding, b *domain.Baseline) []domain.Finding {
+	if b == nil {
+		return findings
+	}
+	out := make([]domain.Finding, 0, len(findings))
+	for _, f := range findings {
+		if !b.Contains(f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// changedFiles runs `git diff --name-only <since>..HEAD` from the current
+// working directory and returns paths that fall under inputPrefix.
+//
+// Paths are normalised with filepath.Clean so comparisons against
+// filepath.Walk outputs succeed regardless of trailing slashes or `./` prefixes.
+// If git is unavailable or the diff fails, an error is returned: silently
+// treating --since as a no-op would defeat the purpose of progressive adoption.
+//
+// since is rejected if it starts with "-" so that values like "--exec=evil"
+// can never be smuggled in as a git CLI option (defense-in-depth: exec.Command
+// already avoids shell interpretation, but git itself would still parse a
+// leading "-" as an option flag).
+func changedFiles(since, inputPrefix string) ([]string, error) {
+	if strings.HasPrefix(since, "-") {
+		return nil, fmt.Errorf("--since value must not start with '-': %q", since)
+	}
+	cmd := exec.Command("git", "diff", "--name-only", fmt.Sprintf("%s..HEAD", since))
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git diff --name-only %s..HEAD: %w", since, err)
+	}
+	raw := strings.TrimSpace(string(out))
+	if raw == "" {
+		return []string{}, nil
+	}
+
+	prefix := filepath.Clean(inputPrefix)
+	lines := strings.Split(raw, "\n")
+	result := make([]string, 0, len(lines))
+	for _, f := range lines {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		clean := filepath.Clean(f)
+		// Exact match (single-file input) or descendant of a directory input.
+		if clean == prefix || strings.HasPrefix(clean, prefix+string(filepath.Separator)) {
+			result = append(result, clean)
+		}
+	}
+	return result, nil
+}
+
+// fileInAllowlist reports whether path matches any entry in allow, using
+// cleaned-path comparison.
+func fileInAllowlist(path string, allow []string) bool {
+	clean := filepath.Clean(path)
+	for _, a := range allow {
+		if a == clean {
+			return true
+		}
+	}
+	return false
 }

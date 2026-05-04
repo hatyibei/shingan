@@ -25,6 +25,14 @@ inputs:
     description: "Exit non-zero on this Severity or higher (critical / warning / info / never)"
     required: false
     default: "critical"
+  baseline-file:
+    description: "Optional path to a baseline JSON produced by --save-baseline. When set, findings already present in the baseline are suppressed (progressive adoption)."
+    required: false
+    default: ""
+  since:
+    description: "Optional git ref (e.g. main). When set, only files changed since this ref are analyzed."
+    required: false
+    default: ""
 
 outputs:
   exit-code:
@@ -60,6 +68,12 @@ runs:
         FLAGS=(--format "${{ inputs.format }}" --input "${{ inputs.input }}" --output "${{ inputs.output }}")
         if [ -n "$OUT" ]; then
           FLAGS+=(--output-file "$OUT")
+        fi
+        if [ -n "${{ inputs.baseline-file }}" ]; then
+          FLAGS+=(--baseline "${{ inputs.baseline-file }}")
+        fi
+        if [ -n "${{ inputs.since }}" ]; then
+          FLAGS+=(--since "${{ inputs.since }}")
         fi
 
         set +e
