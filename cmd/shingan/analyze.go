@@ -79,20 +79,14 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 		outputFormat = "json"
 	}
 
-	// 1. Create parser via ParserFactory.
-	parserFactory := factory.NewParserFactory()
-	workflowParser, err := parserFactory.Create(inputFormat)
-	if err != nil {
-		return 1, fmt.Errorf("create parser: %w", err)
-	}
-
-	// 2. Resolve --since: if the current input has no changed files since <ref>,
-	//    short-circuit to 0 findings (progressive adoption: unchanged code stays
-	//    silent). Otherwise fall through to the normal load path. Parsers work
-	//    at the graph level, so file-level filtering for adk-go directories is
-	//    handled by parseADKGoDirectoryFiltered below.
+	// 1. Resolve --since FIRST so we can short-circuit before spawning any
+	//    parser (in particular: --format=langgraph eagerly forks a Python
+	//    worker, which must not happen for unchanged --since runs).
+	//    Per code review (Codex P2-2): defer parser creation until we know
+	//    we actually have work to do.
 	var changed []string
 	if flags.since != "" {
+		var err error
 		changed, err = changedFiles(flags.since, flags.input)
 		if err != nil {
 			return 1, fmt.Errorf("resolve --since: %w", err)
@@ -100,12 +94,27 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 		if len(changed) == 0 {
 			// Nothing changed — emit an empty report through the normal
 			// reporter path so CI still gets a valid artefact.
+			// Parser was never created, so unchanged --since runs work
+			// even on machines without python3/langgraph installed.
 			return emitFindings(flags, outputFormat, nil)
 		}
 	}
 
-	// 3. Load and parse graph (optionally restricted to changed files).
-	graph, err := loadGraphFiltered(flags.input, inputFormat, workflowParser, changed)
+	// 2. Create parser via ParserFactory (now that we know we have work).
+	parserFactory := factory.NewParserFactory()
+	workflowParser, err := parserFactory.Create(inputFormat)
+	if err != nil {
+		return 1, fmt.Errorf("create parser: %w", err)
+	}
+
+	// 3. Load and parse the FULL graph regardless of --since.
+	//    Per code review (Codex P1): --since must suppress pre-existing
+	//    findings, NOT alter graph semantics. Restricting the parse to
+	//    changed files yields incomplete graphs (missing entry node /
+	//    edges) and produces spurious findings such as bogus
+	//    `unreachable_node` errors. Filtering happens at the finding
+	//    level below.
+	graph, err := loadGraphWithParser(flags.input, inputFormat, workflowParser)
 	if err != nil {
 		return 1, fmt.Errorf("load graph: %w", err)
 	}
@@ -116,6 +125,14 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 
 	orchestrator := application.NewAnalysisOrchestrator()
 	findings := orchestrator.Analyze(graph, rules)
+
+	// 4a. Apply --since at the FINDING level: keep only findings whose
+	//     associated node lives in a changed file. Findings on nodes
+	//     without source position information are kept (defensive: better
+	//     surface a finding than hide it). Per Codex P1 review.
+	if flags.since != "" {
+		findings = filterByChangedFiles(findings, graph, changed)
+	}
 
 	// 4b. Filter by minimum confidence threshold if specified.
 	if flags.minConfidence > 0.0 {
@@ -393,11 +410,15 @@ func filterNew(findings []domain.Finding, b *domain.Baseline) []domain.Finding {
 	return out
 }
 
-// changedFiles runs `git diff --name-only <since>..HEAD` from the current
-// working directory and returns paths that fall under inputPrefix.
+// changedFiles runs `git diff --name-only <since>..HEAD` and returns paths
+// (repo-root relative, filepath.Clean'd) that fall under inputPrefix.
 //
-// Paths are normalised with filepath.Clean so comparisons against
-// filepath.Walk outputs succeed regardless of trailing slashes or `./` prefixes.
+// Per Codex P2-1 review: git always emits repo-root relative paths, but
+// inputPrefix may be absolute, or the user may invoke shingan from a
+// subdirectory of the repo. We resolve inputPrefix against `git rev-parse
+// --show-toplevel` and then compare in repo-root coordinates so absolute
+// and subdirectory invocations both match correctly.
+//
 // If git is unavailable or the diff fails, an error is returned: silently
 // treating --since as a no-op would defeat the purpose of progressive adoption.
 //
@@ -409,7 +430,20 @@ func changedFiles(since, inputPrefix string) ([]string, error) {
 	if strings.HasPrefix(since, "-") {
 		return nil, fmt.Errorf("--since value must not start with '-': %q", since)
 	}
+
+	// Discover repo root so we can normalise inputPrefix to repo-relative form.
+	repoRoot, err := gitRepoRoot()
+	if err != nil {
+		return nil, fmt.Errorf("locate git repo root: %w", err)
+	}
+
+	prefix, err := repoRelativePrefix(inputPrefix, repoRoot)
+	if err != nil {
+		return nil, fmt.Errorf("normalise --input %q against repo root: %w", inputPrefix, err)
+	}
+
 	cmd := exec.Command("git", "diff", "--name-only", fmt.Sprintf("%s..HEAD", since))
+	cmd.Dir = repoRoot // run diff from repo root so paths come out repo-relative regardless of CWD
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git diff --name-only %s..HEAD: %w", since, err)
@@ -419,7 +453,6 @@ func changedFiles(since, inputPrefix string) ([]string, error) {
 		return []string{}, nil
 	}
 
-	prefix := filepath.Clean(inputPrefix)
 	lines := strings.Split(raw, "\n")
 	result := make([]string, 0, len(lines))
 	for _, f := range lines {
@@ -437,13 +470,95 @@ func changedFiles(since, inputPrefix string) ([]string, error) {
 }
 
 // fileInAllowlist reports whether path matches any entry in allow, using
-// cleaned-path comparison.
+// cleaned-path comparison. Both `path` (often absolute, from filepath.Walk)
+// and allow entries (repo-root relative, from git diff) are compared by
+// suffix to support cross-CWD invocations.
 func fileInAllowlist(path string, allow []string) bool {
 	clean := filepath.Clean(path)
 	for _, a := range allow {
 		if a == clean {
 			return true
 		}
+		// Also match when path is absolute and allow entry is repo-relative:
+		// if path ends with "/<allow>" we count it as a match. Avoids false
+		// negatives when shingan is invoked with --input=/abs/path.
+		sep := string(filepath.Separator)
+		if strings.HasSuffix(clean, sep+a) {
+			return true
+		}
 	}
 	return false
+}
+
+// gitRepoRoot returns the absolute path of the current repository root, as
+// reported by `git rev-parse --show-toplevel`. Used to normalise --input
+// against repo-relative paths emitted by `git diff --name-only`.
+func gitRepoRoot() (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse --show-toplevel: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// repoRelativePrefix turns inputPrefix (which may be absolute, relative to
+// CWD, or already relative to repoRoot) into a repo-root-relative cleaned
+// path suitable for prefix-matching against `git diff --name-only` output.
+//
+// The returned prefix is filepath.Clean'd and uses forward-or-OS separators
+// consistent with git's output. Returns an error if inputPrefix lies outside
+// repoRoot.
+func repoRelativePrefix(inputPrefix, repoRoot string) (string, error) {
+	abs, err := filepath.Abs(inputPrefix)
+	if err != nil {
+		return "", fmt.Errorf("resolve absolute path: %w", err)
+	}
+	rel, err := filepath.Rel(repoRoot, abs)
+	if err != nil {
+		return "", fmt.Errorf("compute relative path: %w", err)
+	}
+	if strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		return "", fmt.Errorf("input %q is outside repo root %q", inputPrefix, repoRoot)
+	}
+	return filepath.Clean(rel), nil
+}
+
+// filterByChangedFiles keeps only findings whose associated node lives in a
+// file in the changed set. Findings without source-position information
+// (Node.Pos.IsZero() or node not found in graph) are kept defensively —
+// better to surface a finding than to hide it silently.
+//
+// Per Codex P1 review: --since must operate at the finding level, not at
+// the graph-construction level, so the analyzer can reason about the full
+// workflow topology before suppressing pre-existing findings.
+func filterByChangedFiles(findings []domain.Finding, graph *domain.WorkflowGraph, changed []string) []domain.Finding {
+	if len(changed) == 0 {
+		return nil
+	}
+	changedSet := make(map[string]struct{}, len(changed))
+	for _, c := range changed {
+		changedSet[filepath.Clean(c)] = struct{}{}
+	}
+
+	out := make([]domain.Finding, 0, len(findings))
+	for _, f := range findings {
+		node, ok := graph.Nodes[f.NodeID]
+		if !ok || node == nil {
+			// Finding doesn't reference a graph node — keep defensively.
+			out = append(out, f)
+			continue
+		}
+		if node.Pos.IsZero() {
+			// No source position — keep defensively (single-file inputs and
+			// older parsers don't always populate Pos).
+			out = append(out, f)
+			continue
+		}
+		if _, hit := changedSet[filepath.Clean(node.Pos.File)]; hit {
+			out = append(out, f)
+		}
+		// else: finding lives in an unchanged file — suppress.
+	}
+	return out
 }

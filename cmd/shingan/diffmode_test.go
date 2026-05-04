@@ -313,3 +313,146 @@ func TestExistingBehaviour_Unchanged(t *testing.T) {
 		t.Error("expected critical findings in baseline-less run, got 0")
 	}
 }
+
+// --- Codex P1 / P2-1 / P2-2 regression tests ---
+
+// TestFilterByChangedFiles_KeepsOnlyChangedFileFindings verifies the post-
+// analysis filter installed in response to Codex P1: --since must operate
+// at the finding level, not at graph construction.
+func TestFilterByChangedFiles_KeepsOnlyChangedFileFindings(t *testing.T) {
+	graph := &domain.WorkflowGraph{
+		Nodes: map[string]*domain.Node{
+			"a": {ID: "a", Pos: domain.SourcePos{File: "file_a.go", Line: 1}},
+			"b": {ID: "b", Pos: domain.SourcePos{File: "file_b.go", Line: 1}},
+		},
+	}
+	findings := []domain.Finding{
+		{RuleName: "r", NodeID: "a", Message: "issue in a"},
+		{RuleName: "r", NodeID: "b", Message: "issue in b"},
+	}
+	out := filterByChangedFiles(findings, graph, []string{"file_b.go"})
+	if len(out) != 1 || out[0].NodeID != "b" {
+		t.Errorf("expected only finding for node b, got %+v", out)
+	}
+}
+
+// TestFilterByChangedFiles_KeepsZeroPos verifies that findings on nodes
+// without source-position info are kept defensively (Codex P1: do not
+// silently drop findings that diff-mode cannot localise).
+func TestFilterByChangedFiles_KeepsZeroPos(t *testing.T) {
+	graph := &domain.WorkflowGraph{
+		Nodes: map[string]*domain.Node{
+			"a": {ID: "a"}, // Pos unset
+		},
+	}
+	findings := []domain.Finding{
+		{RuleName: "r", NodeID: "a", Message: "issue"},
+	}
+	out := filterByChangedFiles(findings, graph, []string{"file_other.go"})
+	if len(out) != 1 {
+		t.Errorf("expected finding kept defensively when Pos is zero, got %d", len(out))
+	}
+}
+
+// TestFilterByChangedFiles_KeepsUnknownNode verifies findings whose NodeID
+// is not in the graph map are kept defensively (Codex P1).
+func TestFilterByChangedFiles_KeepsUnknownNode(t *testing.T) {
+	graph := &domain.WorkflowGraph{Nodes: map[string]*domain.Node{}}
+	findings := []domain.Finding{
+		{RuleName: "r", NodeID: "ghost", Message: "issue"},
+	}
+	out := filterByChangedFiles(findings, graph, []string{"file_a.go"})
+	if len(out) != 1 {
+		t.Errorf("expected finding kept when node missing, got %d", len(out))
+	}
+}
+
+// TestFilterByChangedFiles_EmptyChangedSet verifies an empty changed set
+// suppresses all findings (matches the executeAnalyze short-circuit path).
+func TestFilterByChangedFiles_EmptyChangedSet(t *testing.T) {
+	graph := &domain.WorkflowGraph{
+		Nodes: map[string]*domain.Node{
+			"a": {ID: "a", Pos: domain.SourcePos{File: "file_a.go"}},
+		},
+	}
+	findings := []domain.Finding{{RuleName: "r", NodeID: "a", Message: "issue"}}
+	out := filterByChangedFiles(findings, graph, nil)
+	if len(out) != 0 {
+		t.Errorf("expected empty result for nil changed set, got %d", len(out))
+	}
+}
+
+// TestRepoRelativePrefix_AbsolutePath verifies the path normalisation
+// installed for Codex P2-1: absolute --input paths must be made
+// repo-relative before comparing against `git diff --name-only` output.
+func TestRepoRelativePrefix_AbsolutePath(t *testing.T) {
+	repoRoot := t.TempDir()
+	abs := filepath.Join(repoRoot, "cmd", "shingan", "analyze.go")
+	rel, err := repoRelativePrefix(abs, repoRoot)
+	if err != nil {
+		t.Fatalf("repoRelativePrefix: %v", err)
+	}
+	want := filepath.Clean("cmd/shingan/analyze.go")
+	if rel != want {
+		t.Errorf("got %q, want %q", rel, want)
+	}
+}
+
+// TestRepoRelativePrefix_RelativeToCWD verifies relative paths are resolved
+// against the current working directory before being made repo-relative
+// (so subdirectory invocations work).
+func TestRepoRelativePrefix_RelativeToCWD(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	rel, err := repoRelativePrefix("testdata/buggy.json", cwd)
+	if err != nil {
+		t.Fatalf("repoRelativePrefix: %v", err)
+	}
+	if rel != filepath.Clean("testdata/buggy.json") {
+		t.Errorf("got %q, want testdata/buggy.json", rel)
+	}
+}
+
+// TestRepoRelativePrefix_OutsideRepo verifies that paths outside the repo
+// root are rejected (defense against accidental cross-project diff-mode).
+func TestRepoRelativePrefix_OutsideRepo(t *testing.T) {
+	repoRoot := t.TempDir()
+	outside := t.TempDir() // separate temp dir, definitely outside repoRoot
+	if _, err := repoRelativePrefix(filepath.Join(outside, "x.go"), repoRoot); err == nil {
+		t.Error("expected error for path outside repo, got nil")
+	}
+}
+
+// TestSince_HEAD_DoesNotCreateLangGraphParser verifies the Codex P2-2 fix:
+// when --since=HEAD short-circuits to zero changed files, executeAnalyze
+// must NOT spawn the LangGraph Python worker. We trigger the failure case
+// by setting --format=langgraph and asserting the call still succeeds with
+// exit 0 — if the parser were created eagerly, the test would fail with
+// "create parser: ..." on machines without python3/langgraph.
+//
+// Skipped if not in a git repo (changedFiles requires git).
+func TestSince_HEAD_DoesNotCreateLangGraphParser(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	if _, err := exec.Command("git", "rev-parse", "--git-dir").Output(); err != nil {
+		t.Skip("not in a git repo")
+	}
+
+	outPath := filepath.Join(t.TempDir(), "out.json")
+	code, err := executeAnalyze(&analyzeFlags{
+		input:      testdataPath("buggy.json"),
+		format:     "langgraph", // would normally spawn Python worker
+		output:     "json",
+		outputFile: outPath,
+		since:      "HEAD", // forces zero-changed short-circuit
+	})
+	if err != nil {
+		t.Fatalf("executeAnalyze: %v (parser was created despite zero changed files?)", err)
+	}
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0 (no changed files since HEAD)", code)
+	}
+}
