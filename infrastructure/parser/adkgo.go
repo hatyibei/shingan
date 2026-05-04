@@ -48,9 +48,25 @@ func (p *ADKGoParser) SupportedFormat() string {
 
 // Parse analyzes ADK-Go source bytes and constructs a WorkflowGraph.
 // It recognises SequentialAgent, LoopAgent, ParallelAgent, and LlmAgent composite literals.
+//
+// The synthetic filename "input.go" is used in token positions because no
+// real path is available at this entry point. Callers that have a real
+// path on disk should use ParseFile, which preserves it in Pos.File so
+// downstream features (--since, LSP, code actions) can attribute findings
+// back to the originating source file.
 func (p *ADKGoParser) Parse(input []byte) (*domain.WorkflowGraph, error) {
+	return p.parseWithFilename(input, "input.go")
+}
+
+// parseWithFilename is the internal entry point used by both Parse and
+// ParseFile. It threads the source filename through to the FileSet so
+// each Node.Pos.File reflects the actual file rather than the literal
+// "input.go" placeholder. Per Codex iter2 P1: ParseFile previously fell
+// through to Parse and lost the real path, breaking --since/LSP path
+// matching for multi-file ADK-Go inputs.
+func (p *ADKGoParser) parseWithFilename(input []byte, filename string) (*domain.WorkflowGraph, error) {
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "input.go", input, parser.ParseComments)
+	file, err := parser.ParseFile(fset, filename, input, parser.ParseComments)
 	if err != nil {
 		return nil, fmt.Errorf("adk-go parser: parse Go source: %w", err)
 	}
@@ -1139,7 +1155,10 @@ func (p *ADKGoParser) ParseFile(path string) (*domain.WorkflowGraph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("adk-go parser: read %q: %w", path, err)
 	}
-	return p.Parse(data)
+	// Thread the real path through to the FileSet so Pos.File matches the
+	// caller's input. Codex iter2 P1: hardcoding "input.go" here broke
+	// --since path matching and LSP file attribution for multi-file inputs.
+	return p.parseWithFilename(data, path)
 }
 
 // readFileBytes reads a file's contents; separated so it can be swapped in tests.

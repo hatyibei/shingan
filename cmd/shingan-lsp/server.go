@@ -311,11 +311,17 @@ func (s *Server) snapshot(docURI uri.URI) (*docState, bool) {
 //
 //	*.json or languageId=json   → "json"
 //	*.go                        → "adk-go"
+//	*.py or languageId=python   → "langgraph" (ADR-011 main parser)
 //	languageId=samurai          → "samurai" (rare, opt-in via VS Code config)
 //
 // We do not sniff JSON content for samurai vs json today; users must
 // configure the file association explicitly. Tighten when SamuraiAI
 // adoption justifies it.
+//
+// Per Codex iter2 P1 review: routing Python documents to LangGraph is
+// required so hover/code-action/diagnostics work for the framework that
+// ADR-011 makes Shingan's primary target. Without this mapping, opening
+// a *.py LangGraph file via LSP yields an empty diagnostics publish.
 func chooseFormat(u uri.URI, languageID string) string {
 	ext := strings.ToLower(filepath.Ext(u.Filename()))
 	switch {
@@ -323,6 +329,8 @@ func chooseFormat(u uri.URI, languageID string) string {
 		return "json"
 	case ext == ".go" || strings.EqualFold(languageID, "go"):
 		return "adk-go"
+	case ext == ".py" || strings.EqualFold(languageID, "python"):
+		return "langgraph"
 	case strings.EqualFold(languageID, "samurai"):
 		return "samurai"
 	default:

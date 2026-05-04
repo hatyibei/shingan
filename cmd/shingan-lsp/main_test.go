@@ -502,3 +502,31 @@ func ruleNamesFromDiagnostics(diags []protocol.Diagnostic) map[string]bool {
 	}
 	return out
 }
+
+// TestChooseFormat_Python verifies the Codex iter2 P1 fix: *.py files and
+// languageId=python must route to the LangGraph parser, otherwise the LSP
+// produces empty diagnostics for the framework that ADR-011 makes
+// Shingan's primary target.
+func TestChooseFormat_Python(t *testing.T) {
+	cases := []struct {
+		name       string
+		uri        string
+		languageID string
+		want       string
+	}{
+		{"py extension", "file:///tmp/agent.py", "", "langgraph"},
+		{"python languageID", "file:///tmp/no-ext", "python", "langgraph"},
+		{"PYTHON case-insensitive", "file:///tmp/no-ext", "PYTHON", "langgraph"},
+		{"json still json", "file:///tmp/x.json", "", "json"},
+		{"go still adk-go", "file:///tmp/x.go", "", "adk-go"},
+		{"unknown extension", "file:///tmp/x.txt", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := chooseFormat(uri.New(tc.uri), tc.languageID)
+			if got != tc.want {
+				t.Errorf("chooseFormat(%q, %q) = %q, want %q", tc.uri, tc.languageID, got, tc.want)
+			}
+		})
+	}
+}

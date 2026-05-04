@@ -2,6 +2,7 @@ package parser_test
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/hatyibei/shingan/domain"
@@ -804,6 +805,46 @@ func BuildInfiniteLoop() {
 	if classifier.Pos.Line >= loop.Pos.Line {
 		t.Errorf("classifier line (%d) must precede retry_loop line (%d)",
 			classifier.Pos.Line, loop.Pos.Line)
+	}
+}
+
+// TestADKGoParser_ParseFile_PreservesPath verifies the Codex iter2 P1 fix:
+// ParseFile must thread the real source path into Node.Pos.File so the
+// --since flow and LSP code-actions can attribute findings back to the
+// originating file. Previously ParseFile fell through to Parse which
+// hardcoded "input.go", masking the real path for multi-file inputs.
+func TestADKGoParser_ParseFile_PreservesPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agents.go")
+	src := `package agents
+
+var pipeline = &SequentialAgent{
+	Name: "pipeline",
+	SubAgents: []Agent{
+		&LlmAgent{Name: "classifier", Model: "gpt-4o"},
+	},
+}
+`
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	// Use WithoutTypes() option to skip go/types fallback for hermeticity (no go.sum lookup).
+	p := parser.NewADKGoParser(parser.WithoutTypes())
+	graph, err := p.ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	if len(graph.Nodes) == 0 {
+		t.Fatal("expected at least one node")
+	}
+	for id, node := range graph.Nodes {
+		if node.Pos.IsZero() {
+			t.Errorf("node %q has zero Pos", id)
+			continue
+		}
+		if node.Pos.File != path {
+			t.Errorf("node %q: Pos.File = %q, want %q (real path must propagate)", id, node.Pos.File, path)
+		}
 	}
 }
 

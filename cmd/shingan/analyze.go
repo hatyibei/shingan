@@ -84,18 +84,36 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 	//    worker, which must not happen for unchanged --since runs).
 	//    Per code review (Codex P2-2): defer parser creation until we know
 	//    we actually have work to do.
-	var changed []string
+	var (
+		changed  []string
+		repoRoot string
+	)
 	if flags.since != "" {
 		var err error
 		changed, err = changedFiles(flags.since, flags.input)
 		if err != nil {
 			return 1, fmt.Errorf("resolve --since: %w", err)
 		}
+		// Resolve repo root once, so filterByChangedFiles can normalise
+		// absolute Pos.File entries (e.g. LangGraph shim output) into
+		// repo-relative coordinates for comparison.
+		if root, err := gitRepoRoot(); err == nil {
+			repoRoot = root
+		}
 		if len(changed) == 0 {
 			// Nothing changed — emit an empty report through the normal
 			// reporter path so CI still gets a valid artefact.
 			// Parser was never created, so unchanged --since runs work
 			// even on machines without python3/langgraph installed.
+			//
+			// Per Codex iter2 P2: if --save-baseline is also set, still
+			// persist an empty baseline so progressive-adoption automation
+			// can rely on the file existing on every run.
+			if flags.saveBaseline != "" {
+				if err := baselineio.Save(flags.saveBaseline, domain.NewBaselineFromFindings(nil)); err != nil {
+					return 1, fmt.Errorf("save empty baseline: %w", err)
+				}
+			}
 			return emitFindings(flags, outputFormat, nil)
 		}
 	}
@@ -130,8 +148,11 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 	//     associated node lives in a changed file. Findings on nodes
 	//     without source position information are kept (defensive: better
 	//     surface a finding than hide it). Per Codex P1 review.
+	//     repoRoot is threaded through so absolute Pos.File entries (e.g.
+	//     LangGraph shim) are normalised to repo-relative before lookup
+	//     (Codex iter2 P1).
 	if flags.since != "" {
-		findings = filterByChangedFiles(findings, graph, changed)
+		findings = filterByChangedFiles(findings, graph, changed, repoRoot)
 	}
 
 	// 4b. Filter by minimum confidence threshold if specified.
@@ -532,7 +553,15 @@ func repoRelativePrefix(inputPrefix, repoRoot string) (string, error) {
 // Per Codex P1 review: --since must operate at the finding level, not at
 // the graph-construction level, so the analyzer can reason about the full
 // workflow topology before suppressing pre-existing findings.
-func filterByChangedFiles(findings []domain.Finding, graph *domain.WorkflowGraph, changed []string) []domain.Finding {
+//
+// Per Codex iter2 P1 review: changed paths are repo-relative (from
+// `git diff --name-only` run at repo root), but Node.Pos.File can be
+// absolute (LangGraph shim) or repo-relative (ADK-Go ParseFile). Both
+// sides are normalised to repo-relative coordinates before comparison so
+// the LangGraph + --since combination doesn't silently drop findings.
+// repoRoot is the absolute repo-root path; if empty, paths are compared
+// as-is (for unit tests and degraded environments).
+func filterByChangedFiles(findings []domain.Finding, graph *domain.WorkflowGraph, changed []string, repoRoot string) []domain.Finding {
 	if len(changed) == 0 {
 		return nil
 	}
@@ -555,10 +584,32 @@ func filterByChangedFiles(findings []domain.Finding, graph *domain.WorkflowGraph
 			out = append(out, f)
 			continue
 		}
-		if _, hit := changedSet[filepath.Clean(node.Pos.File)]; hit {
+		key := normaliseToRepoRelative(node.Pos.File, repoRoot)
+		if _, hit := changedSet[key]; hit {
 			out = append(out, f)
 		}
 		// else: finding lives in an unchanged file — suppress.
 	}
 	return out
+}
+
+// normaliseToRepoRelative converts a (possibly absolute) source path to a
+// repo-relative cleaned form for comparison against `git diff --name-only`
+// output. Absolute paths under repoRoot are made relative; paths outside
+// repoRoot or already-relative paths are cleaned and returned as-is.
+// repoRoot may be empty (test mode) — in that case path is just cleaned.
+func normaliseToRepoRelative(path, repoRoot string) string {
+	clean := filepath.Clean(path)
+	if repoRoot == "" || !filepath.IsAbs(clean) {
+		return clean
+	}
+	rel, err := filepath.Rel(repoRoot, clean)
+	if err != nil {
+		return clean
+	}
+	if strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		// Outside the repo — leave as-is so it never matches the changed set.
+		return clean
+	}
+	return filepath.Clean(rel)
 }

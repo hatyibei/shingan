@@ -21,10 +21,11 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   const clientOptions: LanguageClientOptions = {
     documentSelector: [
       { scheme: 'file', language: 'go' },
-      { scheme: 'file', language: 'json' }
+      { scheme: 'file', language: 'json' },
+      { scheme: 'file', language: 'python' }
     ],
     synchronize: {
-      fileEvents: vscode.workspace.createFileSystemWatcher('**/*.{go,json}')
+      fileEvents: vscode.workspace.createFileSystemWatcher('**/*.{go,json,py}')
     }
   };
 

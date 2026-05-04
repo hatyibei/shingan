@@ -330,7 +330,7 @@ func TestFilterByChangedFiles_KeepsOnlyChangedFileFindings(t *testing.T) {
 		{RuleName: "r", NodeID: "a", Message: "issue in a"},
 		{RuleName: "r", NodeID: "b", Message: "issue in b"},
 	}
-	out := filterByChangedFiles(findings, graph, []string{"file_b.go"})
+	out := filterByChangedFiles(findings, graph, []string{"file_b.go"}, "")
 	if len(out) != 1 || out[0].NodeID != "b" {
 		t.Errorf("expected only finding for node b, got %+v", out)
 	}
@@ -348,7 +348,7 @@ func TestFilterByChangedFiles_KeepsZeroPos(t *testing.T) {
 	findings := []domain.Finding{
 		{RuleName: "r", NodeID: "a", Message: "issue"},
 	}
-	out := filterByChangedFiles(findings, graph, []string{"file_other.go"})
+	out := filterByChangedFiles(findings, graph, []string{"file_other.go"}, "")
 	if len(out) != 1 {
 		t.Errorf("expected finding kept defensively when Pos is zero, got %d", len(out))
 	}
@@ -361,7 +361,7 @@ func TestFilterByChangedFiles_KeepsUnknownNode(t *testing.T) {
 	findings := []domain.Finding{
 		{RuleName: "r", NodeID: "ghost", Message: "issue"},
 	}
-	out := filterByChangedFiles(findings, graph, []string{"file_a.go"})
+	out := filterByChangedFiles(findings, graph, []string{"file_a.go"}, "")
 	if len(out) != 1 {
 		t.Errorf("expected finding kept when node missing, got %d", len(out))
 	}
@@ -376,7 +376,7 @@ func TestFilterByChangedFiles_EmptyChangedSet(t *testing.T) {
 		},
 	}
 	findings := []domain.Finding{{RuleName: "r", NodeID: "a", Message: "issue"}}
-	out := filterByChangedFiles(findings, graph, nil)
+	out := filterByChangedFiles(findings, graph, nil, "")
 	if len(out) != 0 {
 		t.Errorf("expected empty result for nil changed set, got %d", len(out))
 	}
@@ -422,6 +422,99 @@ func TestRepoRelativePrefix_OutsideRepo(t *testing.T) {
 	outside := t.TempDir() // separate temp dir, definitely outside repoRoot
 	if _, err := repoRelativePrefix(filepath.Join(outside, "x.go"), repoRoot); err == nil {
 		t.Error("expected error for path outside repo, got nil")
+	}
+}
+
+// TestNormaliseToRepoRelative_AbsoluteUnderRoot verifies Codex iter2 P1 fix:
+// LangGraph shim emits absolute Pos.File paths; they must be made repo-
+// relative before being looked up in the changed-set, otherwise --since
+// silently drops findings on changed Python files.
+func TestNormaliseToRepoRelative_AbsoluteUnderRoot(t *testing.T) {
+	repoRoot := t.TempDir()
+	abs := filepath.Join(repoRoot, "agents", "react.py")
+	got := normaliseToRepoRelative(abs, repoRoot)
+	want := filepath.Clean("agents/react.py")
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// TestNormaliseToRepoRelative_RelativePassthrough verifies relative paths
+// are kept as-is (already in the comparison coordinate system).
+func TestNormaliseToRepoRelative_RelativePassthrough(t *testing.T) {
+	repoRoot := t.TempDir()
+	got := normaliseToRepoRelative("agents/react.py", repoRoot)
+	if got != filepath.Clean("agents/react.py") {
+		t.Errorf("got %q", got)
+	}
+}
+
+// TestNormaliseToRepoRelative_OutsideRoot verifies absolute paths outside
+// repoRoot are returned cleaned (so they never match the changed set).
+func TestNormaliseToRepoRelative_OutsideRoot(t *testing.T) {
+	repoRoot := t.TempDir()
+	outside := t.TempDir() // unrelated dir
+	got := normaliseToRepoRelative(filepath.Join(outside, "x.py"), repoRoot)
+	if !filepath.IsAbs(got) {
+		t.Errorf("expected absolute path returned for outside-of-repo, got %q", got)
+	}
+}
+
+// TestFilterByChangedFiles_AbsolutePosFile verifies the Codex iter2 P1 fix:
+// when a parser (e.g. LangGraph shim) emits absolute Pos.File and changed
+// is repo-relative, the filter still matches them via repoRoot
+// normalisation.
+func TestFilterByChangedFiles_AbsolutePosFile(t *testing.T) {
+	repoRoot := t.TempDir()
+	abs := filepath.Join(repoRoot, "agents", "react.py")
+	graph := &domain.WorkflowGraph{
+		Nodes: map[string]*domain.Node{
+			"a": {ID: "a", Pos: domain.SourcePos{File: abs, Line: 1}},
+		},
+	}
+	findings := []domain.Finding{{RuleName: "r", NodeID: "a", Message: "issue"}}
+	out := filterByChangedFiles(findings, graph, []string{"agents/react.py"}, repoRoot)
+	if len(out) != 1 {
+		t.Errorf("expected absolute Pos.File to match repo-relative changed entry via repoRoot, got %d", len(out))
+	}
+}
+
+// TestSince_SaveBaselineOnEmptyChangedSet verifies the Codex iter2 P2 fix:
+// `shingan analyze --since HEAD --save-baseline path` must create the
+// baseline file (empty) even when nothing changed, so progressive-adoption
+// automation can rely on the file existing on every run.
+func TestSince_SaveBaselineOnEmptyChangedSet(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	if _, err := exec.Command("git", "rev-parse", "--git-dir").Output(); err != nil {
+		t.Skip("not in a git repo")
+	}
+
+	dir := t.TempDir()
+	baselinePath := filepath.Join(dir, "baseline.json")
+	code, err := executeAnalyze(&analyzeFlags{
+		input:        testdataPath("buggy.json"),
+		output:       "json",
+		outputFile:   filepath.Join(dir, "out.json"),
+		since:        "HEAD",
+		saveBaseline: baselinePath,
+	})
+	if err != nil {
+		t.Fatalf("executeAnalyze: %v", err)
+	}
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0", code)
+	}
+	if _, err := os.Stat(baselinePath); err != nil {
+		t.Errorf("expected baseline file to exist after --since=HEAD --save-baseline run: %v", err)
+	}
+	b, err := baselineio.Load(baselinePath)
+	if err != nil {
+		t.Fatalf("load baseline: %v", err)
+	}
+	if len(b.Findings) != 0 {
+		t.Errorf("expected empty baseline, got %d fingerprints", len(b.Findings))
 	}
 }
 

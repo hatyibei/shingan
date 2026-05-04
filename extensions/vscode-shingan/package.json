@@ -28,7 +28,8 @@
   "icon": "icons/shingan.png",
   "activationEvents": [
     "onLanguage:go",
-    "onLanguage:json"
+    "onLanguage:json",
+    "onLanguage:python"
   ],
   "main": "./out/extension.js",
   "contributes": {
