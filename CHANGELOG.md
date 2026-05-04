@@ -25,6 +25,15 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
   - `infrastructure/baseline/baseline_io.go` — `Save` / `Load` を Onion 原則で infrastructure 層に分離。
   - `action.yml` — `baseline-file` と `since` 入力を追加。既存フローは完全後方互換。
   - `docs/diff-mode.md` — 典型ロールアウトフロー、baseline JSON スキーマ、progressive adoption cookbook。
+- `cmd/shingan-mcp` — Model Context Protocol サーバ実装 (Phase 2-C)
+  - 公式 SDK `github.com/modelcontextprotocol/go-sdk` v1.5.x を使用、stdio transport
+  - Claude Desktop / Cursor / LangGraph Studio / Claude Code / 他 MCP クライアントから呼び出し可能
+  - 4 tools 公開:
+    - `shingan_analyze_graph(graph_json)` — in-memory JSON graph → `FindingList`
+    - `shingan_analyze_file(path, framework)` — ファイル/ディレクトリ (json/adk-go/samurai) → `FindingList`
+    - `shingan_explain_rule(rule_name)` — 10ルールの詳細説明 (Severity根拠・例)
+    - `shingan_suggest_model(node_description, input_token_estimate)` — ヒューリスティック LLM モデル推奨
+  - `docs/mcp-server.md` — 設定方法 (Claude Desktop / Cursor / Studio / Claude Code) と JSON 応答例
 
 ### Backward Compatibility
 - 既存 testdata (`testdata/**.json`) は `pos` フィールドを持たないまま動作 (`TestJSONParser_NoPosField_BackwardCompat` で gating)
