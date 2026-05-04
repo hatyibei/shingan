@@ -195,6 +195,16 @@ go test -tags=demo -v -run TestDemo_ .
 | n8n | Planned (v0.2) | n8n JSON export |
 | langgraph | Planned (v1.0) | Python AST経由 |
 
+### IDE / Editor 統合
+
+| 統合 | 状態 | 備考 |
+|---|---|---|
+| CLI (`shingan analyze`) | GA | コア体験、`--since`/`--baseline` 対応 |
+| GitHub Action | GA | `action.yml`、SARIF出力で Code Scanning 連携 |
+| MCP Server (`shingan-mcp`) | GA | Claude Desktop / Cursor / LangGraph Studio から呼出 |
+| **LSP Server (`shingan-lsp`)** | **Beta** | VS Code / Cursor / Neovim / Helix / Zed / JetBrains。SHA256 LRU 差分キャッシュ + degraded mode (ADR-009)。詳細: [docs/lsp.md](./docs/lsp.md) |
+| VS Code 拡張 (`vscode-shingan`) | Beta | `extensions/vscode-shingan/`、`shingan-lsp` を spawn |
+
 ### 出力
 
 | Format | ContentType | 用途 |
@@ -226,6 +236,8 @@ go build -o shingan ./cmd/shingan
 - [SARIF出力とGitHub Code Scanning統合](./docs/sarif-output.md)
 - [SamuraiAIアダプター設計](./docs/samurai-adapter.md)
 - [cycle_detectionの技術ノート](./docs/cycle-detection-note.md)
+- [LSP server (`shingan-lsp`) — VS Code / Neovim / Helix / Zed setup](./docs/lsp.md)
+- [MCP server (`shingan-mcp`) — Claude Desktop / Cursor / LangGraph Studio setup](./docs/mcp-server.md)
 - [全ADR](./shingan-adr.md)
 
 ## ライセンス
