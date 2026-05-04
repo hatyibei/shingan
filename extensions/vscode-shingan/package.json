@@ -1,0 +1,98 @@
+{
+  "name": "vscode-shingan",
+  "displayName": "Shingan",
+  "description": "AI Agent Workflow Static Analyzer — detect infinite loops, cost explosions, PII leaks before execution",
+  "version": "0.1.0",
+  "publisher": "hatyibei",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hatyibei/shingan.git",
+    "directory": "extensions/vscode-shingan"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "ai-agent",
+    "langgraph",
+    "adk",
+    "static-analysis",
+    "lint"
+  ],
+  "icon": "icons/shingan.png",
+  "activationEvents": [
+    "onLanguage:go",
+    "onLanguage:json"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "type": "object",
+      "title": "Shingan",
+      "properties": {
+        "shingan.lspPath": {
+          "type": "string",
+          "default": "shingan-lsp",
+          "description": "Path to shingan-lsp binary"
+        },
+        "shingan.enabledRules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "If empty, all rules enabled. Otherwise only these rule IDs."
+        },
+        "shingan.analyzeOnSave": {
+          "type": "boolean",
+          "default": true
+        },
+        "shingan.severityThreshold": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warning",
+            "critical"
+          ],
+          "default": "info"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "shingan.analyzeCurrentFile",
+        "title": "Shingan: Analyze Current File"
+      },
+      {
+        "command": "shingan.analyzeWorkspace",
+        "title": "Shingan: Analyze Workspace"
+      },
+      {
+        "command": "shingan.showRules",
+        "title": "Shingan: Show Rules Documentation"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.2.0",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

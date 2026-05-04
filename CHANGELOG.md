@@ -5,6 +5,7 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 ## [Unreleased]
 
 ### Added
+- `extensions/vscode-shingan` VS Code extension MVP (Phase 2-B) — `shingan-lsp` を spawn して diagnostics を表示する LSP client、status bar widget、3 commands (analyze file / analyze workspace / show rules)。`npx vsce package` で `.vsix` 生成可能
 - `domain.SourcePos{File, Line, Col}` 構造体追加 — `Node` の optional フィールド `Pos` に付与 (Phase 2 基盤、LSP/CodeAction/VS Code 拡張の前提)
   - `SourcePos.IsZero()` ヘルパー — 位置情報の有無判定規則
   - `domain/graph_test.go`: `TestSourcePos_IsZero` 追加 (6ケース table-driven)
