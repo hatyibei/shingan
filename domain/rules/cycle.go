@@ -22,6 +22,9 @@ const (
 // cycle is guarded by a Loop node (LoopAgent equivalent) with a safe
 // max_iterations bound.
 //
+// Tier: Global (ADR-007) — DFS over the entire graph, single pass.
+// ConfidenceReason: ReasonExactStaticMatch (deterministic back-edge detection).
+//
 // Severity rules:
 //   - Loop/Control node in cycle, max_iterations not set → Critical
 //   - Loop/Control node in cycle, max_iterations >= 100 → Warning
@@ -41,6 +44,21 @@ func NewCycleDetector() *CycleDetector {
 // Name returns the unique rule identifier.
 func (c *CycleDetector) Name() string {
 	return "cycle_detection"
+}
+
+// Meta returns the rule metadata used by the tier-aware orchestrator.
+func (c *CycleDetector) Meta() domain.RuleMeta {
+	return domain.RuleMeta{
+		Name:     c.Name(),
+		Severity: domain.Critical,
+		Fixable:  false,
+	}
+}
+
+// AnalyzeGlobal implements domain.GlobalRule. It is a thin alias around
+// Analyze so the orchestrator can route this rule through the GlobalWalker.
+func (c *CycleDetector) AnalyzeGlobal(graph *domain.WorkflowGraph) []domain.Finding {
+	return c.Analyze(graph)
 }
 
 // Analyze performs DFS from the entry node and reports cycle findings.
@@ -126,12 +144,13 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 	if !ok {
 		// Defensive: node missing from map.
 		return domain.Finding{
-			RuleName:   c.Name(),
-			Severity:   domain.Critical,
-			NodeID:     cycleNodeID,
-			Message:    fmt.Sprintf("cycle detected at unknown node %q", cycleNodeID),
-			Suggestion: "Remove the cycle or add a Control node with max_iterations < 100.",
-			Confidence: 1.0,
+			RuleName:         c.Name(),
+			Severity:         domain.Critical,
+			NodeID:           cycleNodeID,
+			Message:          fmt.Sprintf("cycle detected at unknown node %q", cycleNodeID),
+			Suggestion:       "Remove the cycle or add a Control node with max_iterations < 100.",
+			Confidence:       1.0,
+			ConfidenceReason: domain.ReasonExactStaticMatch,
 		}
 	}
 
@@ -153,8 +172,9 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 						"cycle detected inside Loop node %q via sub-agent %q — MaxIterations not set: risk of infinite loop",
 						parentControl.ID, cycleNodeID,
 					),
-					Suggestion:  "Set MaxIterations on the Loop (LoopAgent) node to prevent infinite loops.",
-					Confidence: 1.0,
+					Suggestion:       "Set MaxIterations on the Loop (LoopAgent) node to prevent infinite loops.",
+					Confidence:       1.0,
+					ConfidenceReason: domain.ReasonExactStaticMatch,
 				}
 			}
 			maxIter, err := toInt(raw)
@@ -167,8 +187,9 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 						"cycle detected inside Loop node %q via sub-agent %q (max_iterations >= 100)",
 						parentControl.ID, cycleNodeID,
 					),
-					Suggestion: "Consider reducing max_iterations below 100 to limit long-running workflows.",
-					Confidence: 1.0,
+					Suggestion:       "Consider reducing max_iterations below 100 to limit long-running workflows.",
+					Confidence:       1.0,
+					ConfidenceReason: domain.ReasonExactStaticMatch,
 				}
 			}
 			// max_iterations is set and < 100 — safe loop, no finding.
@@ -185,7 +206,8 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 			),
 			Suggestion: "Cycles must be managed by a Loop (LoopAgent) node. " +
 				"Review the graph edges or add a Loop node to guard the cycle.",
-			Confidence: 1.0,
+			Confidence:       1.0,
+			ConfidenceReason: domain.ReasonExactStaticMatch,
 		}
 	}
 
@@ -200,8 +222,9 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 				"Loop node %q has a cycle but max_iterations is not set: risk of infinite loop",
 				cycleNodeID,
 			),
-			Suggestion: "Set max_iterations to a value less than 100 on the Loop node.",
-			Confidence: 1.0,
+			Suggestion:       "Set max_iterations to a value less than 100 on the Loop node.",
+			Confidence:       1.0,
+			ConfidenceReason: domain.ReasonExactStaticMatch,
 		}
 	}
 
@@ -216,8 +239,9 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 				"Loop node %q has max_iterations set to an unparseable value %q: risk of infinite loop",
 				cycleNodeID, fmt.Sprint(raw),
 			),
-			Suggestion: "Set max_iterations to a valid integer less than 100.",
-			Confidence: 1.0,
+			Suggestion:       "Set max_iterations to a valid integer less than 100.",
+			Confidence:       1.0,
+			ConfidenceReason: domain.ReasonExactStaticMatch,
 		}
 	}
 
@@ -230,8 +254,9 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 				"Loop node %q has max_iterations=%d (>= 100): high iteration count may cause long-running or expensive workflows",
 				cycleNodeID, maxIter,
 			),
-			Suggestion: "Consider reducing max_iterations below 100 or adding an early-exit condition.",
-			Confidence: 1.0,
+			Suggestion:       "Consider reducing max_iterations below 100 or adding an early-exit condition.",
+			Confidence:       1.0,
+			ConfidenceReason: domain.ReasonExactStaticMatch,
 		}
 	}
 
@@ -257,4 +282,8 @@ func toInt(v any) (int, error) {
 	default:
 		return 0, fmt.Errorf("unsupported type %T for max_iterations", v)
 	}
+}
+
+func init() {
+	registerBuiltin(NewCycleDetector())
 }

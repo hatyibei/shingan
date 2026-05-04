@@ -29,6 +29,41 @@ func (s Severity) String() string {
 	}
 }
 
+// ConfidenceReason categorises why a Finding carries the Confidence value it
+// does. It accompanies the numeric Confidence so that downstream consumers
+// (LSP hover, SARIF properties, Markdown reporter) can show actionable
+// explanations rather than a bare number (ADR-008).
+type ConfidenceReason string
+
+const (
+	// ReasonExactStaticMatch is used for findings produced by deterministic
+	// static checks (e.g. DFS back-edge cycle detection, exact string match
+	// against a deprecated model list). Recommended Confidence: 1.0.
+	ReasonExactStaticMatch ConfidenceReason = "exact_static_match"
+
+	// ReasonOverApproximatedDynamic is used when the analyser had to make a
+	// conservative assumption to handle dynamic constructs (e.g. LangGraph
+	// conditional_edges where the return type is untyped str). Recommended
+	// Confidence: 0.5.
+	ReasonOverApproximatedDynamic ConfidenceReason = "over_approximated_dynamic"
+
+	// ReasonParserFallback is used when the parser could not fully resolve
+	// a node's metadata and the rule had to operate on partial data.
+	// Recommended Confidence: 0.4.
+	ReasonParserFallback ConfidenceReason = "parser_fallback"
+
+	// ReasonExperimentalRule is used by experimental rules whose detection
+	// logic is not yet validated against a wide corpus. Recommended
+	// Confidence: 0.6.
+	ReasonExperimentalRule ConfidenceReason = "experimental_rule"
+
+	// ReasonHeuristicPattern is used when the rule relies on naming or
+	// shape heuristics rather than precise semantics (e.g. PII-hint name
+	// matching, prompt-template duplicate detection). Recommended
+	// Confidence: 0.3-0.7.
+	ReasonHeuristicPattern ConfidenceReason = "heuristic_pattern"
+)
+
 // Finding represents a single issue detected by an AnalysisRule.
 type Finding struct {
 	// RuleName is the identifier of the rule that produced this finding.
@@ -46,4 +81,10 @@ type Finding struct {
 	// 1.0 = deterministic detection (e.g. DFS back-edge), <0.5 = heuristic.
 	// The orchestrator normalises 0.0 to 1.0 for backward compatibility.
 	Confidence float64
+	// ConfidenceReason categorises why Confidence has the value it does.
+	// Refactored rules MUST populate this to make filter decisions
+	// (`--min-confidence`) interpretable. Pre-refactor rules that have not
+	// been migrated yet may leave it empty; the JSON/SARIF reporters omit
+	// the field via `omitempty` semantics on the producing layer.
+	ConfidenceReason ConfidenceReason
 }

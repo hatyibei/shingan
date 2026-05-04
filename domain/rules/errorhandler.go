@@ -9,6 +9,18 @@ import (
 // ErrorHandlerChecker detects Tool nodes whose outgoing edges are all unconditional,
 // meaning there is no conditional branch to handle failure cases.
 //
+// Tier: Path (ADR-007). The check needs adjacency information beyond a single
+// node — for the Tool branch we look 1-2 hops downstream for a Condition
+// node, and for the LLM branch we look at the LLM's tool targets and inspect
+// their outgoing edges. Putting both inside a Path rule keeps the helper
+// graph traversal in one place; the GraphWalker's per-node handler would
+// otherwise need access to outgoing edges, which violates the Local rule
+// contract that handlers operate on a single node.
+//
+// ConfidenceReason: ReasonHeuristicPattern. The presence of a conditional
+// outgoing edge is a heuristic for "error handling exists"; missing edges
+// can also mean the workflow author models retries elsewhere.
+//
 // Severity by Tool category (Node.Config["category"]):
 //   - "browser"        → Critical  (GUI operations are the most failure-prone)
 //   - "api" or "mcp"   → Warning
@@ -24,6 +36,137 @@ func NewErrorHandlerChecker() *ErrorHandlerChecker {
 // Name returns the unique rule identifier.
 func (e *ErrorHandlerChecker) Name() string {
 	return "error_handler_checker"
+}
+
+// Meta returns the rule metadata used by the tier-aware orchestrator.
+func (e *ErrorHandlerChecker) Meta() domain.RuleMeta {
+	return domain.RuleMeta{
+		Name:     e.Name(),
+		Severity: domain.Warning,
+		Fixable:  false,
+	}
+}
+
+// Sources implements domain.PathRule. It returns every Tool node — the
+// classic "tool is unreliable, must be guarded" check fires on these.
+func (e *ErrorHandlerChecker) Sources(g *domain.WorkflowGraph) []*domain.Node {
+	if g == nil {
+		return nil
+	}
+	var out []*domain.Node
+	for _, n := range g.Nodes {
+		if n.Type == domain.NodeTypeTool {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// Sinks implements domain.PathRule. It returns every LLM node — the second
+// branch of the rule fires on LLMs that reach a Tool with no error handling.
+func (e *ErrorHandlerChecker) Sinks(g *domain.WorkflowGraph) []*domain.Node {
+	if g == nil {
+		return nil
+	}
+	var out []*domain.Node
+	for _, n := range g.Nodes {
+		if n.Type == domain.NodeTypeLLM {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// Propagate implements domain.PathRule. ctx.Sources holds the Tool nodes and
+// ctx.Sinks holds the LLM nodes; runErrorHandlerChecks runs both branches.
+func (e *ErrorHandlerChecker) Propagate(ctx *domain.PathContext) []domain.Finding {
+	if ctx == nil || ctx.Graph == nil {
+		return nil
+	}
+	return runErrorHandlerChecks(ctx.Graph, ctx.Sources, ctx.Sinks)
+}
+
+// Analyze keeps the legacy AnalysisRule contract alive.
+func (e *ErrorHandlerChecker) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
+	if graph == nil || len(graph.Nodes) == 0 {
+		return nil
+	}
+	return runErrorHandlerChecks(graph, e.Sources(graph), e.Sinks(graph))
+}
+
+// runErrorHandlerChecks contains the original two-branch detection logic,
+// extracted so Analyze and Propagate share one implementation.
+func runErrorHandlerChecks(graph *domain.WorkflowGraph, tools []*domain.Node, llms []*domain.Node) []domain.Finding {
+	var findings []domain.Finding
+
+	for _, node := range tools {
+		// Skip reliable (deterministic) tools — they are not expected to fail.
+		if isReliable(node) {
+			continue
+		}
+		outgoing := graph.OutgoingEdges(node.ID)
+		if len(outgoing) == 0 {
+			continue
+		}
+		if toolHasErrorHandling(graph, node) {
+			continue
+		}
+		category := toolCategory(node)
+		findings = append(findings, domain.Finding{
+			RuleName:         "error_handler_checker",
+			Severity:         severityForCategory(category),
+			NodeID:           node.ID,
+			Message:          fmt.Sprintf("Tool node %q (category=%q) has no conditional outgoing edges: error handling is missing", node.ID, category),
+			Suggestion:       "このノード後に条件分岐ノードを配置して、失敗時フローを定義してください",
+			Confidence:       0.8,
+			ConfidenceReason: domain.ReasonHeuristicPattern,
+		})
+	}
+
+	for _, node := range llms {
+		outgoing := graph.OutgoingEdges(node.ID)
+		if len(outgoing) == 0 {
+			continue
+		}
+		var toolTargets []*domain.Node
+		for _, edge := range outgoing {
+			if target, ok := graph.Nodes[edge.To]; ok && target.Type == domain.NodeTypeTool {
+				toolTargets = append(toolTargets, target)
+			}
+		}
+		if len(toolTargets) == 0 {
+			continue
+		}
+		anyToolHasHandler := false
+		for _, toolNode := range toolTargets {
+			toolOut := graph.OutgoingEdges(toolNode.ID)
+			for _, edge := range toolOut {
+				if edge.Condition != "" {
+					anyToolHasHandler = true
+					break
+				}
+			}
+			if anyToolHasHandler {
+				break
+			}
+		}
+		if !anyToolHasHandler && !allUnconditional(outgoing) {
+			anyToolHasHandler = true
+		}
+		if !anyToolHasHandler {
+			findings = append(findings, domain.Finding{
+				RuleName:         "error_handler_checker",
+				Severity:         domain.Warning,
+				NodeID:           node.ID,
+				Message:          fmt.Sprintf("LLM node %q uses tool(s) but has no conditional outgoing edges: error handling for tool failures is missing", node.ID),
+				Suggestion:       "ツール呼び出し後に条件分岐ノードを配置して、失敗時フローを定義してください",
+				Confidence:       0.8,
+				ConfidenceReason: domain.ReasonHeuristicPattern,
+			})
+		}
+	}
+
+	return findings
 }
 
 // hasConditionBranch returns true if the given node has at least one outgoing
@@ -51,10 +194,8 @@ func isConditionNode(t domain.NodeType) bool {
 func toolHasErrorHandling(graph *domain.WorkflowGraph, toolNode *domain.Node) bool {
 	outgoing := graph.OutgoingEdges(toolNode.ID)
 	if !allUnconditional(outgoing) {
-		// Tool has conditional edges directly — error handling present.
 		return true
 	}
-	// 2-hop check: if the next node is a Condition node with conditional edges, count as handled.
 	for _, edge := range outgoing {
 		next, ok := graph.Nodes[edge.To]
 		if !ok {
@@ -80,105 +221,6 @@ func isReliable(node *domain.Node) bool {
 	}
 	b, _ := v.(bool)
 	return b
-}
-
-// Analyze checks for missing error-handling in two complementary ways:
-//
-//  1. Tool nodes (NodeTypeTool) with outgoing edges that are all unconditional —
-//     the traditional check used when tool nodes have explicit outgoing edges.
-//     Exception: if the next hop is a Condition node with conditional edges,
-//     it counts as error handling (2-hop tracking).
-//     Exception: nodes with Config["reliable"]==true are skipped.
-//
-//  2. LLM nodes (NodeTypeLLM) that have at least one outgoing edge to a Tool node
-//     but whose outgoing edges are all unconditional — this covers the common ADK-Go
-//     pattern where the parser emits LLM→Tool edges (not Tool→next edges), meaning
-//     the Tool nodes themselves are always terminal and the LLM node is the right
-//     place to require a conditional error-handling branch.
-func (e *ErrorHandlerChecker) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
-	if graph == nil || len(graph.Nodes) == 0 {
-		return nil
-	}
-
-	var findings []domain.Finding
-
-	for _, node := range graph.Nodes {
-		switch node.Type {
-		case domain.NodeTypeTool:
-			// Skip reliable (deterministic) tools — they are not expected to fail.
-			if isReliable(node) {
-				continue
-			}
-			// Check 1: Tool node with non-empty outgoing edges, no error handling detected.
-			outgoing := graph.OutgoingEdges(node.ID)
-			if len(outgoing) == 0 {
-				continue
-			}
-			if toolHasErrorHandling(graph, node) {
-				continue
-			}
-			category := toolCategory(node)
-			findings = append(findings, domain.Finding{
-				RuleName:   e.Name(),
-				Severity:   severityForCategory(category),
-				NodeID:     node.ID,
-				Message:    fmt.Sprintf("Tool node %q (category=%q) has no conditional outgoing edges: error handling is missing", node.ID, category),
-				Suggestion: "このノード後に条件分岐ノードを配置して、失敗時フローを定義してください",
-				Confidence: 0.8,
-			})
-
-		case domain.NodeTypeLLM:
-			// Check 2: LLM node connects to one or more Tool nodes that are all terminal
-			// (no outgoing edges), meaning no error-handling path exists for tool failures.
-			// This covers the ADK-Go pattern where LLM→Tool edges are emitted by the parser
-			// and Tool nodes are always terminal (the LLM is responsible for branching).
-			outgoing := graph.OutgoingEdges(node.ID)
-			if len(outgoing) == 0 {
-				continue
-			}
-			// Collect tool targets.
-			var toolTargets []*domain.Node
-			for _, edge := range outgoing {
-				if target, ok := graph.Nodes[edge.To]; ok && target.Type == domain.NodeTypeTool {
-					toolTargets = append(toolTargets, target)
-				}
-			}
-			if len(toolTargets) == 0 {
-				continue
-			}
-			// Check if any tool target has conditional outgoing edges (error handling present).
-			anyToolHasHandler := false
-			for _, toolNode := range toolTargets {
-				toolOut := graph.OutgoingEdges(toolNode.ID)
-				for _, e := range toolOut {
-					if e.Condition != "" {
-						anyToolHasHandler = true
-						break
-					}
-				}
-				if anyToolHasHandler {
-					break
-				}
-			}
-			// Also check if the LLM node itself has conditional outgoing edges
-			// (conditional routing away from tool on error).
-			if !anyToolHasHandler && !allUnconditional(outgoing) {
-				anyToolHasHandler = true
-			}
-			if !anyToolHasHandler {
-				findings = append(findings, domain.Finding{
-					RuleName:   e.Name(),
-					Severity:   domain.Warning,
-					NodeID:     node.ID,
-					Message:    fmt.Sprintf("LLM node %q uses tool(s) but has no conditional outgoing edges: error handling for tool failures is missing", node.ID),
-					Suggestion: "ツール呼び出し後に条件分岐ノードを配置して、失敗時フローを定義してください",
-					Confidence: 0.8,
-				})
-			}
-		}
-	}
-
-	return findings
 }
 
 // allUnconditional returns true when every edge in the slice has an empty Condition.
@@ -218,7 +260,10 @@ func severityForCategory(category string) domain.Severity {
 	case "code":
 		return domain.Info
 	default:
-		// Unknown category is treated like "api".
 		return domain.Warning
 	}
+}
+
+func init() {
+	registerBuiltin(NewErrorHandlerChecker())
 }

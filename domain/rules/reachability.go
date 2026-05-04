@@ -9,6 +9,9 @@ import (
 // ReachabilityChecker detects nodes that are unreachable from the entry node
 // of a WorkflowGraph using BFS traversal.
 //
+// Tier: Global (ADR-007) — single BFS over the entire graph.
+// ConfidenceReason: ReasonExactStaticMatch (deterministic BFS reachability).
+//
 // Severity rules:
 //   - EntryNodeID is empty or does not exist in the graph → single Critical finding
 //   - Unreachable LLM or Tool node → Warning (wasted implementation)
@@ -25,6 +28,20 @@ func (r *ReachabilityChecker) Name() string {
 	return "unreachable_node"
 }
 
+// Meta returns the rule metadata used by the tier-aware orchestrator.
+func (r *ReachabilityChecker) Meta() domain.RuleMeta {
+	return domain.RuleMeta{
+		Name:     r.Name(),
+		Severity: domain.Warning,
+		Fixable:  false,
+	}
+}
+
+// AnalyzeGlobal implements domain.GlobalRule by delegating to Analyze.
+func (r *ReachabilityChecker) AnalyzeGlobal(graph *domain.WorkflowGraph) []domain.Finding {
+	return r.Analyze(graph)
+}
+
 // Analyze performs BFS from EntryNodeID and reports unreachable nodes.
 // If EntryNodeID is unset or not found in the graph, a single Critical finding is returned.
 func (r *ReachabilityChecker) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
@@ -36,12 +53,13 @@ func (r *ReachabilityChecker) Analyze(graph *domain.WorkflowGraph) []domain.Find
 	if graph.EntryNodeID == "" {
 		return []domain.Finding{
 			{
-				RuleName:   r.Name(),
-				Severity:   domain.Critical,
-				NodeID:     "",
-				Message:    "entry node is not set: reachability analysis cannot be performed",
-				Suggestion: "Set EntryNodeID to the ID of the node where workflow execution begins.",
-				Confidence: 1.0,
+				RuleName:         r.Name(),
+				Severity:         domain.Critical,
+				NodeID:           "",
+				Message:          "entry node is not set: reachability analysis cannot be performed",
+				Suggestion:       "Set EntryNodeID to the ID of the node where workflow execution begins.",
+				Confidence:       1.0,
+				ConfidenceReason: domain.ReasonExactStaticMatch,
 			},
 		}
 	}
@@ -56,8 +74,9 @@ func (r *ReachabilityChecker) Analyze(graph *domain.WorkflowGraph) []domain.Find
 					"entry node %q does not exist in the graph: reachability analysis cannot be performed",
 					graph.EntryNodeID,
 				),
-				Suggestion: "Ensure EntryNodeID matches a registered node ID.",
-				Confidence: 1.0,
+				Suggestion:       "Ensure EntryNodeID matches a registered node ID.",
+				Confidence:       1.0,
+				ConfidenceReason: domain.ReasonExactStaticMatch,
 			},
 		}
 	}
@@ -99,8 +118,9 @@ func (r *ReachabilityChecker) Analyze(graph *domain.WorkflowGraph) []domain.Find
 				"node %q (type=%s) is unreachable from entry node %q",
 				id, nodeTypeName(node.Type), graph.EntryNodeID,
 			),
-			Suggestion: "Connect the node to the main workflow or remove it if it is unused.",
-			Confidence: 1.0,
+			Suggestion:       "Connect the node to the main workflow or remove it if it is unused.",
+			Confidence:       1.0,
+			ConfidenceReason: domain.ReasonExactStaticMatch,
 		})
 	}
 
@@ -138,4 +158,8 @@ func nodeTypeName(t domain.NodeType) string {
 	default:
 		return fmt.Sprintf("NodeType(%d)", int(t))
 	}
+}
+
+func init() {
+	registerBuiltin(NewReachabilityChecker())
 }

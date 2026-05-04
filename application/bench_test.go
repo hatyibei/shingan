@@ -11,17 +11,16 @@ import (
 
 const appBenchSeed = 42
 
-// allRules returns the full set of 7 analysis rules used in production.
+// allRules returns the full set of analysis rules used in production.
+//
+// Now that every rule registers itself via init(), AllBuiltins() returns
+// all 10 builtins (cycle, reachability, max_parallel_branches, deprecated_model,
+// loop_guard, redundant_llm_call, secret_exposure_scanner, error_handler_checker,
+// cost_estimation, pii_leak_scanner) — three more than the pre-refactor bench
+// covered. The 1-walk dispatcher amortises the extra rules so the benchmark
+// stays comparable even with the larger rule set.
 func allRules() []domain.AnalysisRule {
-	return []domain.AnalysisRule{
-		rules.NewCycleDetector(),
-		rules.NewLoopGuardChecker(),
-		rules.NewReachabilityChecker(),
-		rules.NewErrorHandlerChecker(),
-		rules.NewCostAnalyzer(),
-		rules.NewRedundantLLMDetector(),
-		rules.NewPIILeakScanner(),
-	}
+	return rules.AllBuiltins()
 }
 
 // BenchmarkOrchestratorAll benchmarks the concurrent Orchestrator with all 7 rules.

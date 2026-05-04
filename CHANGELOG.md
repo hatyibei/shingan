@@ -5,6 +5,23 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 ## [Unreleased]
 
 ### Added
+- ESLint方式 visitor pattern + 3層ルール分離 (ADR-006/007/008/010) — refactor/visitor-pattern ブランチ
+  - `domain/visitor.go` — `Listener`/`Selector`/`RuleContext` を新規追加。Listener は `OnNode[NodeType]` / `OnAny` / `OnEdge` / `OnGraph` の 4 ハンドラ束で、走査と判定を分離する。
+  - `domain/rule.go` — `LocalRule` / `PathRule` / `GlobalRule` の 3 interface を追加。`AnalysisRule` は **Deprecated** 注記付きで残し、テスト double / 旧 caller は無改修で動く。
+  - `domain/finding.go` — `ConfidenceReason` enum (`exact_static_match` / `over_approximated_dynamic` / `parser_fallback` / `experimental_rule` / `heuristic_pattern`) と Finding フィールドを追加 (ADR-008)。
+  - `domain/rules/registry.go` — internal-only builtin registry (`registerBuiltin` 小文字、ADR-010 の Plugin SDK internal-first 戦略を反映)。
+  - `application/walker.go` — 1walk dispatcher。`graph.Nodes` map を 1 周し、登録された全 LocalRule の listener にディスパッチする。BFS-from-entry ではなく map 走査を採用 (孤立ノードに対するルール検出を維持するため、reachability は別 GlobalRule で担当 — ADR-007 と整合)。
+  - `application/path_walker.go` — Path tier 用。reverse adjacency を 1 度だけ構築し、各 PathRule に goroutine で配ってシェアする。
+  - `application/global_walker.go` — Global tier 用。各 GlobalRule を goroutine 並列実行する。
+  - `application/orchestrator.go` — 3-pass 構成 (Global → Local → Path → legacy fallback) に書き換え。型 assertion で Global > Path > Local > AnalysisRule の優先順に振り分けるので、refactor 済みルールは新パイプラインへ、未対応ルール (テスト double 等) は従来 goroutine fan-out へと自動的に流れる。`Analyze(graph, []AnalysisRule)` の public シグネチャは維持 (CLI / MCP / web / HTTP API 互換)。
+  - 10 ルール全部を 3 層へ振り分け & ConfidenceReason 付与
+    - **Local (4)**: `deprecated_model` `loop_guard` `redundant_llm_call` `secret_exposure_scanner` (`OnNode[NodeTypeLLM]` / `OnNode[NodeTypeLoop+Control]` / `OnAny` を使い分け)
+    - **Path (3)**: `pii_leak_scanner` (Sources=RAG/PII tools, Sinks=external Tool, reverse-BFS) / `error_handler_checker` (Sources=Tool, Sinks=LLM, 2-hop) / `cost_estimation` (Sources=LLM, loop subgraph DFS)
+    - **Global (3)**: `cycle_detection` `unreachable_node` `max_parallel_branches`
+  - 各ルールが `init()` 内で `registerBuiltin()` を呼び、`AnalyzerFactory.{Create,CreateAll}` は `rules.AllBuiltins()` をスキャンする方式に切り替え (新規ルール追加時にファクトリ編集不要)。
+  - `scripts/check_confidence_reason.sh` + Makefile target `check-reason` / `lint` — `domain.Finding{...}` リテラルに `ConfidenceReason` が欠けていないかを CI でチェック (空 sentinel `Finding{}` は除外)。Pure Go では struct field を必須化できないので静的解析で代替 (ADR-008)。
+  - 性能: `application/bench_test.go` を 10 ルール builtins セットへ更新。N=1000 ノードで Orchestrator (3-pass + 1walk Local dispatch) **37.9ms** vs 全ルール sequential fallback **85.2ms** (約 55% 削減、目標 25-50% を上回る)。
+  - **Backward compatibility**: 既存テスト 355 (subtests 込みで 445) すべて green、`AnalysisOrchestrator.Analyze` シグネチャ不変、`Confidence == 0.0 → 1.0` 正規化ロジック維持、`fakeRule` (`AnalysisRule` のみ実装) も legacy bucket で動作。Walker / Registry の直接ユニットテストは追加せず、Orchestrator 経由の既存テストでカバー (改善余地)。
 - `extensions/vscode-shingan` VS Code extension MVP (Phase 2-B) — `shingan-lsp` を spawn して diagnostics を表示する LSP client、status bar widget、3 commands (analyze file / analyze workspace / show rules)。`npx vsce package` で `.vsix` 生成可能
 - `domain.SourcePos{File, Line, Col}` 構造体追加 — `Node` の optional フィールド `Pos` に付与 (Phase 2 基盤、LSP/CodeAction/VS Code 拡張の前提)
   - `SourcePos.IsZero()` ヘルパー — 位置情報の有無判定規則
