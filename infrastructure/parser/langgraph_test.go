@@ -242,3 +242,111 @@ func TestLangGraphParser_WorkerCrashRecovery(t *testing.T) {
 		t.Fatal("expected error on parse after Close()")
 	}
 }
+
+// TestLangGraphParser_SiblingImports verifies the iter5 P1 fix: when
+// an LSP buffer has an on-disk path, the shim adds dirname(filename) to
+// sys.path so a sibling-package import (`from helpers import ...`)
+// resolves the same way it does in the CLI's ParseFile path.
+//
+// Issue #10 regression test: skipped when langgraph is not installed.
+func TestLangGraphParser_SiblingImports(t *testing.T) {
+	requirePythonLangGraph(t)
+
+	dir := t.TempDir()
+	helpersPath := filepath.Join(dir, "helpers.py")
+	agentPath := filepath.Join(dir, "agent.py")
+
+	if err := os.WriteFile(helpersPath, []byte(`# helpers.py — sibling module
+def make_state():
+    return {"key": "value"}
+`), 0o644); err != nil {
+		t.Fatalf("write helpers.py: %v", err)
+	}
+
+	// agent.py imports the sibling module by bare name — this only
+	// resolves when the parent directory is on sys.path.
+	if err := os.WriteFile(agentPath, []byte(`# agent.py — uses sibling helpers
+from helpers import make_state
+from langgraph.graph import StateGraph
+import operator
+
+def step(state):
+    return state
+
+g = StateGraph(dict)
+g.add_node("step", step)
+g.set_entry_point("step")
+g.add_edge("step", "__end__")
+graph = g.compile()
+`), 0o644); err != nil {
+		t.Fatalf("write agent.py: %v", err)
+	}
+
+	p, err := parser.NewLangGraphParser()
+	if err != nil {
+		t.Fatalf("NewLangGraphParser: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	graph, err := p.ParseFile(agentPath)
+	if err != nil {
+		t.Fatalf("ParseFile with sibling import failed (sys.path not propagated?): %v", err)
+	}
+	if len(graph.Nodes) == 0 {
+		t.Error("expected at least one node from a successfully parsed sibling-import workflow")
+	}
+}
+
+// TestLangGraphParser_NodeIDPunctuationPreserved verifies the iter5 P2
+// fix: punctuation-bearing node names ("search-web" vs "search_web")
+// must yield distinct node IDs so the shim doesn't silently merge them.
+//
+// Issue #10 regression test.
+func TestLangGraphParser_NodeIDPunctuationPreserved(t *testing.T) {
+	requirePythonLangGraph(t)
+
+	src := `from langgraph.graph import StateGraph
+
+def fn1(state): return state
+def fn2(state): return state
+
+g = StateGraph(dict)
+g.add_node("search-web", fn1)
+g.add_node("search_web", fn2)
+g.set_entry_point("search-web")
+g.add_edge("search-web", "search_web")
+g.add_edge("search_web", "__end__")
+graph = g.compile()
+`
+
+	p, err := parser.NewLangGraphParser()
+	if err != nil {
+		t.Fatalf("NewLangGraphParser: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	wfg, err := p.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	// The two punctuation variants must remain distinct.
+	if _, ok := wfg.Nodes["search-web"]; !ok {
+		t.Errorf("expected node ID 'search-web' in graph; got nodes: %v", nodeIDList(wfg))
+	}
+	if _, ok := wfg.Nodes["search_web"]; !ok {
+		t.Errorf("expected node ID 'search_web' (distinct from search-web); got nodes: %v", nodeIDList(wfg))
+	}
+	if len(wfg.Nodes) < 2 {
+		t.Errorf("expected at least 2 nodes (no merge), got %d: %v", len(wfg.Nodes), nodeIDList(wfg))
+	}
+}
+
+// nodeIDList returns the sorted node ID slice for diagnostic messages.
+func nodeIDList(g *domain.WorkflowGraph) []string {
+	out := make([]string, 0, len(g.Nodes))
+	for id := range g.Nodes {
+		out = append(out, id)
+	}
+	return out
+}
