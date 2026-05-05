@@ -171,8 +171,12 @@ func walkSchema(n *domain.Node, path string, schema map[string]any, findings *[]
 	}
 
 	// Recurse into items (array schema).
+	// Per Codex iter12 P1: use walkSchemaRoot so a primitive `items`
+	// schema (e.g. {"type":"array","items":{"type":"string"}}) gets
+	// classified for missing maxLength. walkSchema alone would only
+	// recurse into items.properties/items, dropping leaf-type findings.
 	if items, ok := schema["items"].(map[string]any); ok {
-		walkSchema(n, path+".items", items, findings)
+		walkSchemaRoot(n, path+".items", items, findings)
 	}
 }
 
