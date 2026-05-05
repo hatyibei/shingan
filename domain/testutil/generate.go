@@ -798,6 +798,55 @@ func GenerateEvalMissingGraph(seed int64) *domain.WorkflowGraph {
 	}
 }
 
+// GenerateDynamicNodeConstructionGraph generates a WorkflowGraph that
+// triggers the dynamic_node_construction rule with a Critical finding.
+//
+// Structure:
+//   - entry Tool node whose Config["body"] contains a literal `eval(...)`
+//     call — this is the LangGraph anti-pattern
+//     `add_node(name, lambda x: eval(x))`.
+//
+// Expected findings:
+//   - dynamic_node_construction: Critical (Confidence 0.95,
+//     ConfidenceReason exact_static_match). The body field literally
+//     contains "eval(" so the strongest pattern fires.
+func GenerateDynamicNodeConstructionGraph(seed int64) *domain.WorkflowGraph {
+	_ = seed // deterministic pattern
+
+	nodes := make(map[string]*domain.Node)
+	var edges []domain.Edge
+
+	// Tool node with a lambda that calls eval() on its argument.
+	nodes["dynamic_dispatcher"] = &domain.Node{
+		ID:   "dynamic_dispatcher",
+		Name: "dynamic_dispatcher",
+		Type: domain.NodeTypeTool,
+		Config: map[string]any{
+			"category": "transform",
+			// Triggers dynamic_node_construction Critical (eval_call pattern).
+			"body": "lambda payload: eval(payload['code'])",
+		},
+	}
+
+	// Output node
+	nodes["dyn_output"] = &domain.Node{
+		ID:     "dyn_output",
+		Name:   "output",
+		Type:   domain.NodeTypeOutput,
+		Config: map[string]any{},
+	}
+
+	edges = append(edges,
+		domain.Edge{From: "dynamic_dispatcher", To: "dyn_output"},
+	)
+
+	return &domain.WorkflowGraph{
+		Nodes:       nodes,
+		Edges:       edges,
+		EntryNodeID: "dynamic_dispatcher",
+	}
+}
+
 // GenerateModelCardMismatchGraph generates a WorkflowGraph that triggers the
 // model_card_mismatch rule with a Critical finding.
 //

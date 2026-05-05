@@ -1,0 +1,24 @@
+{
+  "entry_node_id": "dynamic_dispatcher",
+  "nodes": [
+    {
+      "id": "dynamic_dispatcher",
+      "name": "dynamic_dispatcher",
+      "type": "tool",
+      "config": {
+        "category": "transform",
+        "body": "lambda payload: eval(payload['code'])",
+        "description": "Dispatch handler — runs code generated upstream"
+      }
+    },
+    {
+      "id": "result",
+      "name": "final_response",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    { "from": "dynamic_dispatcher", "to": "result" }
+  ]
+}

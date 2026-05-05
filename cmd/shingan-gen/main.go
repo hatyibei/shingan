@@ -21,6 +21,7 @@
 //	model-mismatch         — LLM node with model/provider disagreement (model_card_mismatch Critical)
 //	prompt-injection-sink  — User input → LLM system_prompt with substitution (prompt_injection_sink Critical)
 //	eval-missing           — LLM output → code_execution Tool with no validation (eval_missing Critical)
+//	dynamic-construction   — Tool with Config["body"] containing eval(...) (dynamic_node_construction Critical)
 package main
 
 import (
@@ -92,8 +93,10 @@ func generate(pattern string, size int, seed int64) (*domain.WorkflowGraph, erro
 		return testutil.GeneratePromptInjectionSinkGraph(seed), nil
 	case "eval-missing":
 		return testutil.GenerateEvalMissingGraph(seed), nil
+	case "dynamic-construction":
+		return testutil.GenerateDynamicNodeConstructionGraph(seed), nil
 	default:
-		return nil, fmt.Errorf("unknown pattern %q: must be one of random, clean, buggy, infinite-loop, unreachable, pii-leak, cycle, secret-exposure, deprecated-model, high-fanout, temperature-misuse, model-mismatch, prompt-injection-sink, eval-missing", pattern)
+		return nil, fmt.Errorf("unknown pattern %q: must be one of random, clean, buggy, infinite-loop, unreachable, pii-leak, cycle, secret-exposure, deprecated-model, high-fanout, temperature-misuse, model-mismatch, prompt-injection-sink, eval-missing, dynamic-construction", pattern)
 	}
 }
 
@@ -124,6 +127,7 @@ Patterns:
   model-mismatch        LLM node with model/provider disagreement — triggers model_card_mismatch (Critical)
   prompt-injection-sink User-input tool → LLM system_prompt with {{var}} substitution — triggers prompt_injection_sink (Critical)
   eval-missing          LLM output → code_execution Tool without validation gate — triggers eval_missing (Critical)
+  dynamic-construction  Tool with Config["body"] = "lambda x: eval(x)" — triggers dynamic_node_construction (Critical)
 
 The output is valid JSON compatible with: shingan analyze --format json --input <path>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -149,7 +153,7 @@ The output is valid JSON compatible with: shingan analyze --format json --input 
 		},
 	}
 
-	rootCmd.Flags().StringVar(&pattern, "pattern", "random", "Pattern: random|clean|buggy|infinite-loop|unreachable|pii-leak|cycle|secret-exposure|deprecated-model|high-fanout|temperature-misuse|model-mismatch|prompt-injection-sink|eval-missing")
+	rootCmd.Flags().StringVar(&pattern, "pattern", "random", "Pattern: random|clean|buggy|infinite-loop|unreachable|pii-leak|cycle|secret-exposure|deprecated-model|high-fanout|temperature-misuse|model-mismatch|prompt-injection-sink|eval-missing|dynamic-construction")
 	rootCmd.Flags().IntVar(&size, "size", 10, "Number of nodes (for random/clean/unreachable/cycle patterns)")
 	rootCmd.Flags().Int64Var(&seed, "seed", 42, "Random seed for reproducible output")
 	rootCmd.Flags().StringVar(&output, "output", "", "Output file path (default: stdout; use '-' for stdout)")

@@ -14,16 +14,17 @@ const appBenchSeed = 42
 // allRules returns the full set of analysis rules used in production.
 //
 // Now that every rule registers itself via init(), AllBuiltins() returns
-// all 11 builtins (cycle, reachability, max_parallel_branches, deprecated_model,
+// all 15 builtins (cycle, reachability, max_parallel_branches, deprecated_model,
 // loop_guard, redundant_llm_call, secret_exposure_scanner, error_handler_checker,
-// cost_estimation, pii_leak_scanner, prompt_injection_sink) — four more than
-// the pre-refactor bench covered. The 1-walk dispatcher amortises the extra
-// rules so the benchmark stays comparable even with the larger rule set.
+// cost_estimation, pii_leak_scanner, temperature_misuse, model_card_mismatch,
+// prompt_injection_sink, eval_missing, dynamic_node_construction) — eight
+// more than the pre-refactor bench covered. The 1-walk dispatcher amortises
+// the extra rules so the benchmark stays comparable even with the larger rule set.
 func allRules() []domain.AnalysisRule {
 	return rules.AllBuiltins()
 }
 
-// BenchmarkOrchestratorAll benchmarks the concurrent Orchestrator with all 7 rules.
+// BenchmarkOrchestratorAll benchmarks the concurrent Orchestrator with all 15 rules.
 func BenchmarkOrchestratorAll_N10(b *testing.B) {
 	runOrchestratorBench(b, 10)
 }
@@ -48,7 +49,7 @@ func runOrchestratorBench(b *testing.B, n int) {
 }
 
 // BenchmarkOrchestratorSequential benchmarks sequential (non-goroutine) execution
-// of all 7 rules for direct comparison with the concurrent version.
+// of all 15 rules for direct comparison with the concurrent version.
 func BenchmarkOrchestratorSequential_N10(b *testing.B) {
 	runSequentialBench(b, 10)
 }

@@ -5,6 +5,16 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 ## [Unreleased]
 
 ### Added
+- **`dynamic_node_construction` rule (Phase 2 #3)** — Local tier (ADR-007)、15 番目の builtin。
+  - **走査対象**: Node.Config の curated subset (`body` / `fn` / `handler` / `callback` / `code` / `factory` / `builder`) の文字列値を再帰的に scan
+  - **検出パターン**: `eval(` / `exec(` / `Function(` / `compile(` / `__import__(` / `getattr(` / `setattr(` (regex `\bX\s*\(`)
+  - **Severity マトリクス**: eval/exec/Function → Critical (0.95, exact_static_match) / compile/__import__ → Warning (0.85, exact_static_match) / getattr/setattr → Info (0.6, heuristic_pattern)
+  - **Per-key collapsing**: 1 つの Config 値に複数パターンマッチ時は最高 Severity 1 件に集約 (例: `getattr(...)(eval(...))` → Critical 1件)
+  - **Placeholder 抑制**: `${VAR}` / `{{var}}` のみの文字列は skip。Mixed (`eval(${PAYLOAD})`) は strip-then-recheck で eval( が残るため発火 — `secret_exposure_scanner.placeholderPattern` を共有
+  - **新規ファイル**: `domain/rules/dynamic_node_construction.go` / `domain/rules/dynamic_node_construction_test.go` (16 ケース) / `testdata/dynamic_construction/{eval,safe}.json` + `README.md` / `docs/rules/dynamic-node-construction.md`
+  - **生成 CLI**: `shingan-gen --pattern dynamic-construction` を追加 (`testutil.GenerateDynamicNodeConstructionGraph`)
+  - **Factory 自動登録**: `init()` 内で `registerBuiltin()`、`AnalyzerFactory.Create("dynamic_node_construction")` で取得可能
+  - **位置付け**: 兄弟ルール `eval_missing` (構造的攻撃面 = LLM → code_execution Tool reachability) と補完関係。文字列レベルの攻撃面を本ルールが、構造レベルを eval_missing が担当
 - **`eval_missing` rule (Phase 2 #2)** — Path tier (ADR-007)、14 番目の builtin。
   - **Sources**: `NodeType.LLM` の任意のノード (Severity は path 上の gate に依存するため source 側絞り込みは行わない)
   - **Sinks**: `NodeType.Tool` のうち以下のいずれか — Config["category"] ∈ {code_execution, code_eval} / Config["tool"] ∈ {eval, exec, code_interpreter, python_runner, shell} / Name または ID が `(?i)(eval|exec|code[_]?runner|python[_]?runner|shell|bash)` に部分一致

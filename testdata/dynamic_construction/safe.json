@@ -1,0 +1,25 @@
+{
+  "entry_node_id": "dispatcher",
+  "nodes": [
+    {
+      "id": "dispatcher",
+      "name": "dispatcher",
+      "type": "tool",
+      "config": {
+        "category": "transform",
+        "body": "lambda payload: HANDLERS[payload['op']](payload['args'])",
+        "handler": "${HANDLER_FACTORY_PATH}",
+        "description": "Allow-list dispatch — HANDLERS is a static dict mapping op names to handlers"
+      }
+    },
+    {
+      "id": "result",
+      "name": "final_response",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    { "from": "dispatcher", "to": "result" }
+  ]
+}
