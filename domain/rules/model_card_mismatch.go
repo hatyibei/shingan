@@ -2,6 +2,7 @@ package rules
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/hatyibei/shingan/domain"
@@ -140,6 +141,18 @@ func (m *ModelCardMismatchChecker) Analyze(graph *domain.WorkflowGraph) []domain
 }
 
 // evaluateModelCardMismatch encodes the severity table.
+//
+// Codex iter7 P1: when both `provider` and `base_url` are present we now
+// validate them independently. Previously a matching `provider` short-
+// circuited the check, so a config with `provider="openai"` and
+// `base_url="https://api.anthropic.com/v1"` slipped through silently —
+// exactly the runtime miswire this rule is supposed to catch.
+//
+// Codex iter7 P2: `base_url` host classification now uses url.Parse +
+// host equality / suffix matching instead of strings.Contains across the
+// whole URL. This rejects spoofed lookalikes like
+// `https://api.openai.com.proxy.corp/v1` that previously slipped past
+// the substring matcher.
 func evaluateModelCardMismatch(node *domain.Node) (domain.Finding, bool) {
 	model := stringConfig(node, "model")
 	if model == "" {
@@ -150,11 +163,13 @@ func evaluateModelCardMismatch(node *domain.Node) (domain.Finding, bool) {
 	providerStr := stringConfig(node, "provider")
 	baseURL := stringConfig(node, "base_url")
 
-	// Determine what the configured endpoint claims about the provider.
-	configuredProvider, providerSource := classifyConfiguredProvider(providerStr, baseURL)
+	// Sources are evaluated independently so neither hides the other
+	// when both are set (Codex iter7 P1).
+	providerKey, providerHasSignal := providerFromExplicit(providerStr)
+	urlKey, urlHasSignal := providerFromBaseURL(baseURL)
 
 	// No endpoint clue at all — cannot judge.
-	if providerSource == "" {
+	if !providerHasSignal && !urlHasSignal {
 		return domain.Finding{}, false
 	}
 
@@ -182,21 +197,39 @@ func evaluateModelCardMismatch(node *domain.Node) (domain.Finding, bool) {
 		return domain.Finding{}, false
 	}
 
-	// Known prefix: provider takes precedence over base_url. If `provider`
-	// matches the expected one we accept the config even if base_url points
-	// to a custom proxy (legitimate self-host scenario).
-	if configuredProvider == expected {
+	// Known prefix: each present signal must agree with `expected`.
+	// `provider` takes the lead description when both are set, but a
+	// matching provider no longer hides a contradicting *recognised*
+	// base_url (Codex iter7 P1).
+	//
+	// An unknown base_url host (urlKey == "") is treated as benign:
+	// custom proxies, Azure OpenAI deployments, Vertex AI endpoints
+	// and self-hosted gateways all surface as unknown hosts and would
+	// otherwise produce false positives whenever they're used with the
+	// canonical provider value.
+	providerOK := !providerHasSignal || providerKey == expected
+	urlOK := !urlHasSignal || urlKey == "" || urlKey == expected
+
+	if providerOK && urlOK {
 		return domain.Finding{}, false
 	}
 
-	// Mismatch: build a Critical finding. Phrase the message based on which
-	// signal disagreed so the operator knows what to fix.
-	actual := string(configuredProvider)
-	if providerStr != "" && providerSource == "provider" {
-		// Provider explicit — quote the user's exact value.
+	// Mismatch: build a Critical finding. Phrase the message based on
+	// which signal disagreed so the operator knows what to fix.
+	var (
+		actual string
+		source string
+	)
+	switch {
+	case !providerOK && !urlOK:
+		actual = fmt.Sprintf("%s (provider) / %s (base_url)", providerStr, baseURL)
+		source = "provider+base_url"
+	case !providerOK:
 		actual = providerStr
-	} else if baseURL != "" {
+		source = "provider"
+	default: // !urlOK
 		actual = baseURL
+		source = "base_url"
 	}
 
 	return domain.Finding{
@@ -205,15 +238,109 @@ func evaluateModelCardMismatch(node *domain.Node) (domain.Finding, bool) {
 		NodeID:   node.ID,
 		Message: fmt.Sprintf(
 			"model %q belongs to provider %q but %s is set to %q; the runtime call will fail.",
-			model, expected, providerSource, actual,
+			model, expected, source, actual,
 		),
 		Suggestion: fmt.Sprintf(
-			"Model %q belongs to provider %q but base_url/provider is set to %q. Either update the model name or the endpoint to match.",
-			model, expected, actual,
+			"Model %q belongs to provider %q but %s is set to %q. Either update the model name or the endpoint to match.",
+			model, expected, source, actual,
 		),
 		Confidence:       1.0,
 		ConfidenceReason: domain.ReasonExactStaticMatch,
 	}, true
+}
+
+// providerFromExplicit returns the provider key implied by an explicit
+// Config["provider"] value. Returns false on the second value when the
+// field is empty (no signal).
+func providerFromExplicit(providerStr string) (providerKey, bool) {
+	if providerStr == "" {
+		return "", false
+	}
+	key := strings.ToLower(strings.TrimSpace(providerStr))
+	if p, ok := providerAliases[key]; ok {
+		return p, true
+	}
+	// Unrecognised alias surfaces as itself so downstream comparison
+	// against `expected` fails (and the user sees the offending value).
+	return providerKey(key), true
+}
+
+// providerFromBaseURL parses Config["base_url"] and matches its host
+// against the provider table. Codex iter7 P2: parses with net/url and
+// checks the host (exact match or suffix on a label boundary) rather
+// than substring-matching the raw URL string, which rejects lookalikes
+// like `https://api.openai.com.proxy.corp/v1` that previously matched.
+//
+// Returns (key, true) when the URL is recognised; (key, true) with an
+// empty key when the URL is well-formed but its host is unknown (so the
+// caller knows a base_url was supplied); (empty, false) when no URL
+// was set.
+func providerFromBaseURL(baseURL string) (providerKey, bool) {
+	if baseURL == "" {
+		return "", false
+	}
+	host := extractHost(baseURL)
+	if host == "" {
+		return "", true // ill-formed URL — treat as "user supplied an endpoint" with no provider match
+	}
+	host = strings.ToLower(host)
+	for p, hosts := range providerHosts {
+		for _, h := range hosts {
+			h = strings.ToLower(h)
+			if hostMatches(host, h) {
+				return p, true
+			}
+		}
+	}
+	return "", true
+}
+
+// hostMatches returns true when host equals candidate or host ends with
+// "." + candidate (label-boundary suffix). This rejects spoofed
+// lookalikes such as "api.openai.com.proxy.corp" matching "api.openai.com"
+// (Codex iter7 P2).
+func hostMatches(host, candidate string) bool {
+	if host == candidate {
+		return true
+	}
+	// Allow legitimate sub-domains (e.g. `*.openai.azure.com` matches
+	// `westus.api.cognitive.microsoft.com.openai.azure.com`'s suffix
+	// rules) while rejecting non-label-boundary substring noise.
+	if strings.HasSuffix(host, "."+candidate) {
+		return true
+	}
+	// Wildcard candidate of the form "*.example.com" matches any host
+	// ending in ".example.com" (and the bare suffix).
+	if strings.HasPrefix(candidate, "*.") {
+		bare := candidate[2:]
+		return host == bare || strings.HasSuffix(host, "."+bare)
+	}
+	return false
+}
+
+// extractHost returns the host of the given URL, or "" if parsing
+// fails. Accepts inputs without a scheme (treated as opaque host) since
+// some users write `Config["base_url"] = "api.openai.com"` without
+// `https://`.
+func extractHost(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	if strings.Contains(raw, "://") {
+		u, err := url.Parse(raw)
+		if err != nil {
+			return ""
+		}
+		return u.Host
+	}
+	// No scheme — strip any path / port and return the leading authority.
+	if i := strings.IndexAny(raw, "/?#"); i >= 0 {
+		raw = raw[:i]
+	}
+	if i := strings.LastIndex(raw, ":"); i >= 0 {
+		raw = raw[:i]
+	}
+	return raw
 }
 
 // lookupProvider returns the canonical provider for a model name. The bool
@@ -228,35 +355,10 @@ func lookupProvider(model string) (providerKey, bool) {
 	return "", false
 }
 
-// classifyConfiguredProvider returns the provider implied by Config["provider"]
-// or Config["base_url"] (in that priority order) plus a label naming the
-// signal source ("provider" or "base_url"). When neither is set the second
-// return value is empty.
-func classifyConfiguredProvider(providerStr, baseURL string) (providerKey, string) {
-	if providerStr != "" {
-		key := strings.ToLower(strings.TrimSpace(providerStr))
-		if p, ok := providerAliases[key]; ok {
-			return p, "provider"
-		}
-		// Provider value present but unrecognised — surface it as itself so
-		// downstream comparison fails for known model prefixes.
-		return providerKey(key), "provider"
-	}
-	if baseURL != "" {
-		host := strings.ToLower(baseURL)
-		for p, hosts := range providerHosts {
-			for _, h := range hosts {
-				if strings.Contains(host, h) {
-					return p, "base_url"
-				}
-			}
-		}
-		// URL present but no known host substring — return empty key with
-		// source so the caller knows the user supplied an endpoint.
-		return "", "base_url"
-	}
-	return "", ""
-}
+// (classifyConfiguredProvider removed in iter7 — replaced by the
+// independently-evaluated providerFromExplicit + providerFromBaseURL
+// pair so a matching `provider` no longer hides a contradicting
+// `base_url`.)
 
 func init() {
 	registerBuiltin(NewModelCardMismatchChecker())
