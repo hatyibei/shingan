@@ -1,4 +1,4 @@
-> 🌐 Language: **English** | [日本語](./lsp.ja.md)
+> 🌐 Language: **English** (Japanese translation welcome — see [issue tracker](https://github.com/hatyibei/shingan/issues))
 
 # Shingan LSP Server (`shingan-lsp`)
 
