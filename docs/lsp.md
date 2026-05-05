@@ -1,4 +1,4 @@
-> 🌐 Language: [English](./lsp.md) | **日本語**
+> 🌐 Language: **English** | [日本語](./lsp.ja.md)
 
 # Shingan LSP Server (`shingan-lsp`)
 
@@ -243,6 +243,6 @@ on the offending parser (track via the SourcePos coverage matrix in
 
 ## Related ADRs
 
-- [ADR-009: LSP 差分実行 + degraded mode](../shingan-adr.md#adr-009) — design rationale
+- [ADR-009: LSP diff execution + degraded mode](../shingan-adr.md#adr-009) — design rationale
 - [ADR-006: ESLint visitor pattern](../shingan-adr.md#adr-006) — future codeAction integration point
 - [ADR-008: ConfidenceReason](../shingan-adr.md#adr-008) — richer hover content roadmap

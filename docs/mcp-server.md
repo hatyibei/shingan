@@ -1,4 +1,4 @@
-> 🌐 Language: [English](./mcp-server.md) | **日本語**
+> 🌐 Language: **English** | [日本語](./mcp-server.ja.md)
 
 # Shingan MCP Server (`shingan-mcp`)
 

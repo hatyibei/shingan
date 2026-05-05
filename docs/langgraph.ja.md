@@ -1,3 +1,5 @@
+> 🌐 Language: [English](./langgraph.md) | **日本語**
+
 # LangGraph 対応
 
 > Phase 1 / 主戦場 (ADR-011) ― Python AI agent 向け、LangGraph `StateGraph` を解析する Shingan parser。
