@@ -110,7 +110,7 @@ func evaluateUnboundedToolArg(n *domain.Node) []domain.Finding {
 		if !ok {
 			continue
 		}
-		walkSchema(n, key, schema, &findings)
+		walkSchemaRoot(n, key, schema, &findings)
 		if len(findings) >= maxFindingsPerNode {
 			findings = findings[:maxFindingsPerNode]
 			return findings
@@ -119,28 +119,38 @@ func evaluateUnboundedToolArg(n *domain.Node) []domain.Finding {
 	return findings
 }
 
-// walkSchema descends into a JSON-schema-shaped map and emits findings for
-// each unbounded primitive field. The path argument records the dotted
-// JSON-pointer-ish path used in messages.
-//
-// Per Codex iter11 P2: tools that take a single primitive or top-level
-// array argument (`args_schema: {"type":"string"}` /
-// `{"type":"array","items":...}`) used to be silently missed because we
-// only classified entries under `properties`. We now classify the root
-// schema as well so primitive / array roots fire.
-func walkSchema(n *domain.Node, path string, schema map[string]any, findings *[]domain.Finding) {
+// walkSchemaRoot is the entry-point: it classifies a top-level
+// primitive / array schema, then descends into properties / items.
+// Per Codex iter11 P2: previously walkSchema only classified entries
+// under `properties`, so single-primitive `args_schema: {"type":
+// "string"}` was silently missed. Splitting root-classification into
+// this entry-point avoids double-classifying nested fields when the
+// recursion re-enters walkSchema.
+func walkSchemaRoot(n *domain.Node, path string, schema map[string]any, findings *[]domain.Finding) {
 	if schema == nil {
 		return
 	}
-
-	// Classify the root schema itself when it's a primitive (string /
-	// number) or an array. Object roots are handled via the per-property
-	// loop below; classifying the object root would double-count.
+	// Classify only when the root itself is a leaf type (string /
+	// number / array). Object roots are handled exclusively via the
+	// properties loop inside walkSchema below.
 	if t, _ := schema["type"].(string); t != "" && t != "object" {
 		classifyField(n, path, schema, findings)
 		if len(*findings) >= maxFindingsPerNode {
 			return
 		}
+	}
+	walkSchema(n, path, schema, findings)
+}
+
+// walkSchema descends into a JSON-schema-shaped map and emits findings
+// for each unbounded primitive field. Called both as the recursion body
+// of walkSchemaRoot and directly when re-entering through a property
+// reference; never classifies the schema passed in (its caller already
+// did, or the schema is an object whose interesting fields live under
+// `properties`).
+func walkSchema(n *domain.Node, path string, schema map[string]any, findings *[]domain.Finding) {
+	if schema == nil {
+		return
 	}
 
 	// Recurse into properties (object schema).
