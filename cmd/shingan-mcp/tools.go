@@ -39,7 +39,7 @@ type AnalyzeFileArgs struct {
 
 // ExplainRuleArgs is the input schema of shingan_explain_rule.
 type ExplainRuleArgs struct {
-	RuleName string `json:"rule_name" jsonschema:"one of the 14 built-in rule names (e.g. loop_guard, cycle_detection)"`
+	RuleName string `json:"rule_name" jsonschema:"one of the 15 built-in rule names (e.g. loop_guard, cycle_detection)"`
 }
 
 // SuggestModelArgs is the input schema of shingan_suggest_model.
@@ -95,7 +95,7 @@ type RuleExplanation struct {
 func registerTools(server *mcp.Server, deps *toolDeps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "shingan_analyze_graph",
-		Description: "Run all 14 Shingan analysis rules against an in-memory " +
+		Description: "Run all 15 Shingan analysis rules against an in-memory " +
 			"WorkflowGraph JSON. Returns findings sorted by severity desc, " +
 			"confidence desc, rule name asc.",
 	}, deps.analyzeGraph)
@@ -103,13 +103,13 @@ func registerTools(server *mcp.Server, deps *toolDeps) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "shingan_analyze_file",
 		Description: "Parse a workflow file (or adk-go directory) from disk " +
-			"and run all 14 Shingan analysis rules. Supported frameworks: " +
+			"and run all 15 Shingan analysis rules. Supported frameworks: " +
 			"json, adk-go, samurai.",
 	}, deps.analyzeFile)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "shingan_explain_rule",
-		Description: "Return a detailed explanation of one of the 14 built-in Shingan rules.",
+		Description: "Return a detailed explanation of one of the 15 built-in Shingan rules.",
 	}, deps.explainRule)
 
 	mcp.AddTool(server, &mcp.Tool{
