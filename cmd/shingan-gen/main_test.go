@@ -118,6 +118,16 @@ func TestGenerate_PromptInjectionSink_ValidJSON(t *testing.T) {
 	}
 }
 
+func TestGenerate_EvalMissing_ValidJSON(t *testing.T) {
+	g := roundTrip(t, "eval-missing", 0, 42)
+	if len(g.Nodes) == 0 {
+		t.Error("expected at least one node after round-trip")
+	}
+	if g.EntryNodeID == "" {
+		t.Error("expected EntryNodeID to be set after round-trip")
+	}
+}
+
 // ---- determinism test ----
 
 func TestGenerate_SeedReproducibility(t *testing.T) {
@@ -141,7 +151,7 @@ func TestGenerate_SeedReproducibility(t *testing.T) {
 
 // Deterministic patterns (ignore seed)
 func TestGenerate_DeterministicPatterns_SameOutput(t *testing.T) {
-	deterministicPatterns := []string{"buggy", "infinite-loop", "pii-leak", "prompt-injection-sink"}
+	deterministicPatterns := []string{"buggy", "infinite-loop", "pii-leak", "prompt-injection-sink", "eval-missing"}
 	for _, p := range deterministicPatterns {
 		t.Run(p, func(t *testing.T) {
 			g1, err1 := generate(p, 0, 1)
@@ -234,6 +244,7 @@ func TestGenerate_AllPatterns_NonEmpty(t *testing.T) {
 		{"pii-leak", 0, 42},
 		{"cycle", 4, 42},
 		{"prompt-injection-sink", 0, 42},
+		{"eval-missing", 0, 42},
 	}
 
 	for _, tc := range patterns {

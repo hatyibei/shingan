@@ -625,3 +625,53 @@ func TestGeneratePromptInjectionSinkGraph_OtherRulesClean(t *testing.T) {
 		}
 	}
 }
+
+// ---- GenerateEvalMissingGraph ----
+
+func TestGenerateEvalMissingGraph_ReturnsValidGraph(t *testing.T) {
+	g := testutil.GenerateEvalMissingGraph(42)
+	if g == nil {
+		t.Fatal("expected non-nil graph")
+	}
+	if len(g.Nodes) == 0 {
+		t.Error("expected at least one node")
+	}
+	if g.EntryNodeID == "" {
+		t.Error("expected EntryNodeID to be set")
+	}
+	if _, ok := g.Nodes[g.EntryNodeID]; !ok {
+		t.Errorf("entry node %q not found in Nodes map", g.EntryNodeID)
+	}
+}
+
+func TestGenerateEvalMissingGraph_TriggersCriticalFinding(t *testing.T) {
+	g := testutil.GenerateEvalMissingGraph(42)
+	findings := rules.NewEvalMissing().Analyze(g)
+	if len(findings) == 0 {
+		t.Fatal("expected at least one eval_missing finding")
+	}
+	if !hasFinding(findings, "eval_missing", domain.Critical) {
+		t.Errorf("expected eval_missing Critical finding, got %+v", findings)
+	}
+}
+
+func TestGenerateEvalMissingGraph_OtherRulesClean(t *testing.T) {
+	g := testutil.GenerateEvalMissingGraph(42)
+	// Independent rules that should NOT fire on this minimal eval graph.
+	other := []domain.AnalysisRule{
+		rules.NewCycleDetector(),
+		rules.NewLoopGuardChecker(),
+		rules.NewReachabilityChecker(),
+		rules.NewRedundantLLMDetector(),
+		rules.NewPIILeakScanner(),
+		rules.NewSecretExposureScanner(),
+		rules.NewDeprecatedModelChecker(),
+		rules.NewMaxParallelBranchesChecker(),
+		rules.NewPromptInjectionSink(),
+	}
+	for _, r := range other {
+		if fs := r.Analyze(g); len(fs) != 0 {
+			t.Errorf("rule %q: expected 0 findings on eval-missing graph, got %d: %+v", r.Name(), len(fs), fs)
+		}
+	}
+}

@@ -737,6 +737,67 @@ func GenerateTemperatureMisuseGraph(seed int64) *domain.WorkflowGraph {
 	}
 }
 
+// GenerateEvalMissingGraph generates a WorkflowGraph that triggers the
+// eval_missing rule with a Critical finding.
+//
+// Structure:
+//   - entry LLM node → Tool node with Config["category"]="code_execution"
+//   - The LLM output flows directly into a code-execution sink with no
+//     Condition node and no Human approver, so the rule fires Critical.
+//
+// Expected findings:
+//   - eval_missing: Critical (Confidence 0.9, ConfidenceReason
+//     heuristic_pattern). The path LLM → eval_tool has no validation gate
+//     between the model and the runner.
+func GenerateEvalMissingGraph(seed int64) *domain.WorkflowGraph {
+	_ = seed // deterministic pattern
+
+	nodes := make(map[string]*domain.Node)
+	var edges []domain.Edge
+
+	// LLM node — Source
+	nodes["plan_llm"] = &domain.Node{
+		ID:   "plan_llm",
+		Name: "plan_llm",
+		Type: domain.NodeTypeLLM,
+		Config: map[string]any{
+			"model":           "gpt-4o-mini",
+			"prompt_template": "Generate a Python snippet that solves the user's request.",
+		},
+	}
+
+	// Code-execution Tool — Sink (Config["category"] = "code_execution")
+	nodes["python_runner"] = &domain.Node{
+		ID:   "python_runner",
+		Name: "python_runner",
+		Type: domain.NodeTypeTool,
+		Config: map[string]any{
+			"category":    "code_execution",
+			"tool":        "python_runner",
+			"description": "Executes generated Python with eval()",
+		},
+	}
+
+	// Output node
+	nodes["eval_output"] = &domain.Node{
+		ID:     "eval_output",
+		Name:   "output",
+		Type:   domain.NodeTypeOutput,
+		Config: map[string]any{},
+	}
+
+	edges = append(edges,
+		domain.Edge{From: "plan_llm", To: "python_runner"},
+		domain.Edge{From: "python_runner", To: "eval_output"},
+	)
+
+	return &domain.WorkflowGraph{
+		Nodes:       nodes,
+		Edges:       edges,
+		EntryNodeID: "plan_llm",
+	}
+}
+
 // GenerateModelCardMismatchGraph generates a WorkflowGraph that triggers the
 // model_card_mismatch rule with a Critical finding.
 //

@@ -1,0 +1,43 @@
+{
+  "entry_node_id": "plan_llm",
+  "nodes": [
+    {
+      "id": "plan_llm",
+      "name": "plan_llm",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "prompt_template": "Plan a Python snippet to satisfy the user's request. Output JSON {\"steps\":[...]}."
+      }
+    },
+    {
+      "id": "human_approver",
+      "name": "human_approver",
+      "type": "human",
+      "config": {
+        "description": "Reviewer must approve every code snippet before it reaches the runner"
+      }
+    },
+    {
+      "id": "python_runner",
+      "name": "python_runner",
+      "type": "tool",
+      "config": {
+        "category": "code_execution",
+        "tool": "python_runner",
+        "description": "Executes the approved Python snippet"
+      }
+    },
+    {
+      "id": "output",
+      "name": "final_response",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    { "from": "plan_llm",       "to": "human_approver" },
+    { "from": "human_approver", "to": "python_runner", "condition": "approved" },
+    { "from": "python_runner",  "to": "output" }
+  ]
+}

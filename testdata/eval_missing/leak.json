@@ -1,0 +1,34 @@
+{
+  "entry_node_id": "plan_llm",
+  "nodes": [
+    {
+      "id": "plan_llm",
+      "name": "plan_llm",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "prompt_template": "Generate a Python snippet to satisfy the user's request."
+      }
+    },
+    {
+      "id": "python_runner",
+      "name": "python_runner",
+      "type": "tool",
+      "config": {
+        "category": "code_execution",
+        "tool": "python_runner",
+        "description": "Executes the model's Python output via eval()"
+      }
+    },
+    {
+      "id": "output",
+      "name": "final_response",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    { "from": "plan_llm",      "to": "python_runner" },
+    { "from": "python_runner", "to": "output" }
+  ]
+}

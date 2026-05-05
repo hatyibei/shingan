@@ -192,6 +192,7 @@ go test -tags=demo -v -run TestDemo_ .
 | max_parallel_branches | 単一ノードの fan-out (outgoing edges数) が上限超過 | Critical | 1.0 (Critical) / 0.9 (Warning) / 0.7 (Info) |
 | deprecated_model | Shutdown / 近日 deprecated 予定の LLM モデル名 (OpenAI / Anthropic / Google) | Critical | 1.0 (shutdown) / 0.9 (deprecated soon) |
 | prompt_injection_sink | user_input → LLM の system prompt template への到達 (substitution あり=Critical / なし=Warning / non-system template=Info) | Critical | 0.9 (Critical) / 0.7 (Warning) / 0.5 (Info) |
+| eval_missing | LLM ノード → コード実行系 Tool (eval/exec/code_interpreter/python_runner/shell) への到達 (validation gate なし=Critical / Condition のみ=Warning / Human gate=skip) | Critical | 0.9 (Critical) / 0.6 (Warning) |
 
 ## サポートフォーマット
 

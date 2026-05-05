@@ -5,6 +5,14 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 ## [Unreleased]
 
 ### Added
+- **`eval_missing` rule (Phase 2 #2)** — Path tier (ADR-007)、14 番目の builtin。
+  - **Sources**: `NodeType.LLM` の任意のノード (Severity は path 上の gate に依存するため source 側絞り込みは行わない)
+  - **Sinks**: `NodeType.Tool` のうち以下のいずれか — Config["category"] ∈ {code_execution, code_eval} / Config["tool"] ∈ {eval, exec, code_interpreter, python_runner, shell} / Name または ID が `(?i)(eval|exec|code[_]?runner|python[_]?runner|shell|bash)` に部分一致
+  - **Severity マトリクス**: 何も挟まない → Critical (0.9, heuristic_pattern) / 中間に NodeType.Condition → Warning (0.6, heuristic_pattern) / 中間に NodeType.Human → skip
+  - **アルゴリズム**: 各 source から forward BFS、frontier に `viaCondition` フラグを持たせて per-path Severity を決定。Human ノード以降は展開停止 (PII leak rule の Human-gate 規則と同形)。
+  - **新規ファイル**: `domain/rules/eval_missing.go` / `domain/rules/eval_missing_test.go` (15 ケース) / `testdata/eval_missing/{leak,safe}.json` + `README.md` / `docs/rules/eval-missing.md`
+  - **生成 CLI**: `shingan-gen --pattern eval-missing` を追加 (`testutil.GenerateEvalMissingGraph`)
+  - **Factory 自動登録**: `init()` 内で `registerBuiltin()`、`AnalyzerFactory.Create("eval_missing")` で取得可能
 - **`docs/rule-authoring.md`** — internal builtin rule writers 向け実装ガイド (#11 解消)
   - 13 セクション構成: tier フローチャート / Local・Path・Global テンプレート / ConfidenceReason 選択ガイド (ADR-008) / Severity 判断軸 / TDD パターン / 既存 10 ルール設計記録 / `check_confidence_reason.sh` 解説 / 命名規約 / `registerBuiltin` 自動登録 (ADR-010) / v1.0 plugin 移行パス / Phase 2 で追加予定 10 ルールの当てはめ
   - 全 code template を `go build -tags=authoringguide_verify ./domain/rules/...` でコンパイル検証 (Local / Path / Global × `domain.LocalRule` / `domain.PathRule` / `domain.GlobalRule` / `domain.AnalysisRule` の dual-implementation を interface assertion で確認)
