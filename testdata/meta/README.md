@@ -5,7 +5,7 @@
 Shinganの解析パイプライン (ParserFactory → AnalysisOrchestrator → ReporterFactory) を WorkflowGraph として表現したメタサンプル。
 
 これに対して `shingan analyze` を実行すると、現行ルールの誤検知が5件発火する。
-詳細は [docs/self-dogfood.md](../../docs/self-dogfood.md)。
+
 
 このfixtureはSelf-dogfoodingおよびv0.2での誤検知率改善の回帰テスト用。
 

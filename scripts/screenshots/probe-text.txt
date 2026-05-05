@@ -1,9 +1,0 @@
-Agent Development Kit
-light_mode
-left_panel_close
-Select an agent
-add
-edit
-Welcome to ADK!
-Select an agent on the left to begin with.
-ADK Web Developer UI

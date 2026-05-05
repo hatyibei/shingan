@@ -1,24 +1,24 @@
 # Shingan ユースケース集
 
-Shingan の10ルール + 4エントリポイントが、現場で具体的にどう活用されるかのシナリオ集。
+Shingan の 20 ルール + 7 エントリポイント (CLI / LSP / MCP / API / GitHub Action / Runner / Web middleware) が、現場で具体的にどう活用されるかのシナリオ集。
 
 ---
 
 ## 1. SaaS エージェントプラットフォーム — 保存時の品質ゲート
 
-**シナリオ**: SamuraiAI のようなGUIワークフローエディタで、ユーザー (非エンジニア) がワークフローを保存しようとした時。
+**シナリオ**: GUI ワークフローエディタ (n8n / Dify / 自社 SaaS) で、ユーザー (非エンジニア) がワークフローを保存しようとした時。
 
 **統合**:
 ```
 [ユーザー: 保存ボタンクリック]
   ↓
-[SamuraiAI backend] → POST https://shingan.internal/analyze { format: "samurai", content: {...} }
+[エディタ backend] → POST https://shingan.internal/analyze { format: "json", content: {...} }
   ↓
-[Shingan API] 10ルール並行解析 (典型的なワークフロー: 30ノード → 0.2ms)
+[Shingan API] 20 ルール並行解析 (典型的なワークフロー: 30ノード → 0.2ms)
   ↓
 [response] { findings: [...], summary: {...} }
   ↓
-[SamuraiAI] Critical あれば保存ブロック、UI に警告表示
+[エディタ] Critical あれば保存ブロック、UI に警告表示
 ```
 
 **防げる事故**:
@@ -117,14 +117,17 @@ shingan analyze --format json --input exercise.json --output markdown
 
 ## 6. 他システムへの組み込み
 
-### SamuraiAI への埋め込み (想定)
-`infrastructure/parser/samurai.go` をスキーマ差し替えるだけで対応可能。
+### LangGraph (Python) — GA
+`infrastructure/parser/langgraph.go` + `scripts/export_langgraph_server.py` で `StateGraph` を抽出。`pip install langgraph` 必要。
 
-### n8n への対応 (v0.6予定)
-`infrastructure/parser/n8n.go` を追加することで FlowLint の上位互換 (AIエージェント固有問題もカバー)。
+### ADK-Go (Google) — GA
+`go/parser` + `go/types` ネイティブ解析。`functiontool.New[TArgs, TResults]` のジェネリクスから Tool カテゴリ推定。
 
-### LangGraph (Python) への対応 (v1.0予定)
-Python AST を JSON にシリアライズして parser で読み込み。
+### Generic JSON workflow / 自社 GUI エディタ — GA
+任意の workflow JSON を `domain.WorkflowGraph` 形式に正規化すれば 20 ルールがそのまま動く。`docs/rule-authoring.md` の IR section 参照。
+
+### n8n / CrewAI / Mastra への対応 (v0.7+ 予定)
+新 parser を `infrastructure/parser/<framework>.go` に追加するだけ。Onion Architecture により domain / application 層は不変。
 
 ---
 

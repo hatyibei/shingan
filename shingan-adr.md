@@ -3,12 +3,12 @@
 ## AI Agent Workflow Static Analyzer — Architecture Decision Records
 
 ```
-作成者:    hatyibei (中堀広夢)
-作成日:    2026-04-14
-対象企業:  株式会社Kiva（SamuraiAI）
+作成者:    hatyibei
 リポジトリ: github.com/hatyibei/shingan
-ステータス: Draft → Implementation Ready
+ステータス: v0.6.1 Released (Phase 0 + 1 + 2 完遂)
 ```
+
+> **注 (2026-05-05)**: ADR-001 と ADR-002 は v0.1 (2026-04) 当時の判断記録です。当初は特定エンタープライズ製品 (GUI ワークフローエディタ) を念頭に置いた narrative で書かれていますが、Shingan は v0.6 で **汎用 AI agent linter** として再ポジショニングされ、LangGraph (Phase 1 主戦場、ADR-011) / ADK-Go / Generic JSON workflow / 任意 GUI ワークフローエディタを横並びでサポートします。当時の specific 文言は context として残しますが、最新方針は **ADR-006〜012** を参照してください。
 
 ---
 
@@ -1390,7 +1390,9 @@ merge 後の graph は entry を 1 つしか持たないため、最初に encou
 ---
 
 <a id="appendix-b"></a>
-# Appendix B: SamuraiAI ↔ ADK-Go ノードマッピング（詳細）
+# Appendix B: Generic GUI Workflow ↔ ADK-Go ノードマッピング（詳細）
+
+> 注: 元は SamuraiAI 想定で書かれた表ですが、任意の GUI ワークフローエディタ (n8n / Dify / Voiceflow / 自社 SaaS) を ADK-Go の WorkflowGraph 構造に正規化するときの参考テンプレートとして再利用できます。「14 ノード型」は当時の SamuraiAI 想定スキーマで、汎用化する場合は自社のノード定義と読み替えてください。
 
 | SamuraiAI | ノード型 | ADK-Go | ADK-Go型 | マッピング根拠 |
 |---|---|---|---|---|

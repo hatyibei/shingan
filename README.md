@@ -8,9 +8,11 @@ AIエージェントのワークフローを実行前に構造解析し、無限
 
 ## なぜShinganか
 
-LLMオーケストレーションが普及した現在、ワークフローの「設計時バグ」を検出するカテゴリが空白になっている。FlowLintはn8n専用、LangSmithはランタイム観測に特化しており、いずれも**実行前**の構造検査には対応していない。
+LLM オーケストレーションが普及した現在、ワークフローの「設計時バグ」を検出するカテゴリが空白になっている。FlowLint は n8n 専用、LangSmith はランタイム観測に特化しており、いずれも **実行前** の構造検査には対応していない。
 
-エンタープライズ向けエージェント（ブラウザ自動操作・外部API連携）は一度実行すると副作用が不可逆になる。サイクル・到達不能・エラーハンドリング欠落を**デプロイ前**に機械的に検出できれば、コスト損失とインシデントの大半を未然に防げる。
+AI agent は一度実行すると副作用が不可逆になる (外部 API 呼出、ブラウザ操作、コード実行)。無限ループ・到達不能ノード・エラーハンドリング欠落・PII漏洩経路・prompt injection sink を **デプロイ前** に機械的に検出できれば、コスト爆発とインシデントの大半を未然に防げる。
+
+LangGraph / ADK-Go / CrewAI / n8n / 自前 JSON DSL — どのフレームワークでも、ワークフロー構造の本質は同じ「nodes と edges の有向グラフ」。Shingan は IR (中間表現) を中心に据えた Onion Architecture で、フレームワーク非依存に設計時バグを 20+ ルールで検出する。
 
 ## アーキテクチャ
 
@@ -115,57 +117,6 @@ CI統合例（GitHub Actions）:
   run: shingan analyze --format adk-go --input ./agents/
 ```
 
-## ランタイムデモ — Vertex AI Gemini で実行
-
-`shingan-runner` CLIは、静的解析のsafe-guard付きでADK-Go AgentをVertex AI上で実際に実行する。
-「静的解析で警告したバグが本当に問題を起こすか」を1分で実証できる。
-
-### 事前準備
-
-```bash
-# GCPプロジェクト設定（Vertex AI API有効化済み）
-export GOOGLE_CLOUD_PROJECT=<your-project-id>
-export GOOGLE_CLOUD_LOCATION=us-central1
-export GOOGLE_GENAI_USE_VERTEXAI=true
-
-# Application Default Credentials認証
-gcloud auth application-default login
-
-# バイナリビルド
-go build -o shingan ./cmd/shingan
-go build -o shingan-runner ./cmd/runner
-```
-
-### デモフロー（4ステップ）
-
-```bash
-bash scripts/demo.sh
-```
-
-1. **静的解析でCritical警告**: `infinite_loop_unbounded.go` (MaxIterations未設定) を解析
-2. **Runner safe-guardで実行拒否**: Critical finding検出時は実行をブロック
-3. **安全版は実行成功**: `infinite_loop_bounded.go` (MaxIterations=3) はクリーン判定で実行
-4. **Vertex AI Gemini応答**: `simple_agent.go` で実際のLLM呼び出し
-
-コスト: 1デモ実行あたり<0.1円 (gemini-2.0-flash-001, max_tokens=100)
-
-詳細は [docs/runtime-demo.md](./docs/runtime-demo.md) 参照。
-
-## ADK Web UI統合デモ (面接向け)
-
-SamuraiAI のような GUI ワークフローエディタに Shingan を統合した動作を見せるデモ。
-Google 公式の ADK Web UI を Shingan から起動し、Run API に **実行前静的解析ガード** を middleware 注入する。
-
-```bash
-bash scripts/web-demo.sh
-# ブラウザで http://localhost:8080 を開く
-```
-
-- Critical な問題を持つ Agent (`infinite_loop_unbounded`) → 実行ブロック、Web UI にエラー表示
-- クリーンな Agent (`infinite_loop_bounded`, `simple_hello`) → ADK Web UI から通常通り Vertex AI Gemini 実行
-
-詳細: [docs/adk-webui-integration.md](./docs/adk-webui-integration.md)
-
 ## 本物のADK-Goサンプルでのデモ
 
 `examples/real/` に配置した `google.golang.org/adk v1.1.0` SDK準拠のサンプル3種に対してShinganが検出するFinding:
@@ -230,8 +181,8 @@ go test -tags=demo -v -run TestDemo_ .
 | langgraph | **Phase 1 primary** (ADR-011) | Python `langgraph.graph.StateGraph` を long-lived Python subprocess + JSON-RPC で抽出。`pip install langgraph` 別途必要 ([詳細](./docs/langgraph.md)) |
 | adk-go | GA / maintained | Google ADK-Go (`google.golang.org/adk`) のAST解析 |
 | json | GA | Shingan独自のWorkflowGraph JSON |
-| samurai | Alpha | SamuraiAI想定スキーマ（社内実スキーマ差し替え前提） |
-| n8n | Planned (v0.2) | n8n JSON export |
+| samurai | Alpha | 汎用 GUI ワークフローエディタ向け JSON スキーマアダプタ (拡張サンプル) |
+| n8n | Planned | n8n JSON export |
 
 ### IDE / Editor 統合
 
@@ -253,11 +204,10 @@ go test -tags=demo -v -run TestDemo_ .
 
 ## ロードマップ
 
-- **v0.1（2026-04）**: ADK-Go + JSON + SamuraiAI想定スキーマ対応、6ルール、CLI + goa API、SARIF出力、Vertex AIランタイムデモ ✓
-- **v0.2**: n8nパーサー、SamuraiAI公式スキーマ対応、CI Plugin ✓
-- **v0.3**: PIIリークルール (pii_leak_scanner / secret_exposure_scanner)、8ルール体制 ✓
-- **v0.4**: 信頼度スコア (Confidence 0.0–1.0)、`--min-confidence` CLI フラグ、SARIF precision、CI統合強化 ✓
-- **v1.0**: LangGraph/Dify対応、マルチフレームワーク安定版
+- **v0.1〜v0.5** (2026-04): JSON / ADK-Go / Samurai parser、Confidence × Severity 二次元、SARIF / GitHub Action、9 ルール ✓
+- **v0.6** (2026-05): ESLint方式 visitor + 3層分離 (ADR-006/007)、shingan-lsp、shingan-mcp、LangGraph parser、20 ルール、`shingan-lint` npm 配布、tag→Release→npm-publish 自動化 ✓
+- **v0.7+**: n8n / CrewAI / Mastra parser、ルール 30+、Plugin SDK 公開準備、公式サイト + 動画
+- **v1.0**: 5+ framework × 25+ rules、Plugin SDK GA、Marketplace 公開
 
 ## 開発
 
@@ -265,18 +215,23 @@ go test -tags=demo -v -run TestDemo_ .
 go test ./...
 go vet ./...
 go build -o shingan ./cmd/shingan
+make lint        # check_confidence_reason + go vet
 ```
+
+新ルール追加時は [docs/rule-authoring.md](./docs/rule-authoring.md) を参照。
 
 ## ドキュメント
 
 - [アーキテクチャ詳細](./docs/architecture.md)
-- [ランタイムデモ手順](./docs/runtime-demo.md)
-- [SARIF出力とGitHub Code Scanning統合](./docs/sarif-output.md)
-- [SamuraiAIアダプター設計](./docs/samurai-adapter.md)
-- [cycle_detectionの技術ノート](./docs/cycle-detection-note.md)
+- [ルール作成ガイド (内部)](./docs/rule-authoring.md)
+- [LangGraph parser](./docs/langgraph.md)
 - [LSP server (`shingan-lsp`) — VS Code / Neovim / Helix / Zed setup](./docs/lsp.md)
 - [MCP server (`shingan-mcp`) — Claude Desktop / Cursor / LangGraph Studio setup](./docs/mcp-server.md)
-- [全ADR](./shingan-adr.md)
+- [SARIF 出力 + GitHub Code Scanning 統合](./docs/sarif-output.md)
+- [diff モード + baseline (`--since` / `--baseline`)](./docs/diff-mode.md)
+- [Confidence scoring](./docs/confidence-scoring.md)
+- [cycle_detection の技術ノート](./docs/cycle-detection-note.md)
+- [全 ADR (001〜012)](./shingan-adr.md)
 
 ### Contributing → New rules
 

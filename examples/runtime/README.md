@@ -42,4 +42,4 @@ shingan-runner --sample infinite_loop_unbounded --dry-run
 # → Critical 検出で実行拒否
 ```
 
-詳細は [docs/runtime-demo.md](../../docs/runtime-demo.md) を参照。
+詳細は CHANGELOG.md / docs/architecture.md を参照。

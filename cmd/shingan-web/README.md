@@ -1,10 +1,10 @@
 # shingan-web
 
-ADK Web UI + Shingan pre-execution guard — face interview demo launcher.
+ADK Web UI + Shingan pre-execution guard — middleware-injection demo launcher.
+
+GUI ワークフローエディタに Shingan の静的解析を **実行前ガード** として組み込む参考実装。Google ADK Web UI (`localhost:8080/ui/`) を起動し、Run API (`/api/run`, `/api/run_sse`) に middleware を注入する。同じ pattern は SamuraiAI / Dify / 自社 GUI 等にも応用可。
 
 ## 概要
-
-Google ADK の Web UI (`localhost:8080/ui/`) を起動し、Run API (`/api/run`, `/api/run_sse`) に Shingan の静的解析ガード middleware を注入する。
 
 - **Critical な問題を持つ Agent** → 実行ブロック (HTTP 403) + JSON エラー
 - **クリーンな Agent** → ADK Web UI から通常通り Vertex AI Gemini 実行

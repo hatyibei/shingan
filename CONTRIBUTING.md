@@ -33,13 +33,17 @@ cmd/  → infrastructure/  → application/  → domain/
 
 ## 新ルール追加の手順
 
-1. `docs/interview-cheatsheet.md` の既存ルール表で既出でないか確認
-2. Issue起票（`[Rule]` ラベル）
-3. `domain/rules/<rule_id>.go` に `AnalysisRule` interface 実装
-4. `domain/rules/<rule_id>_test.go` に最低5ケース（エッジケース含む）
-5. `infrastructure/factory/analyzer.go` の `Create()` と `CreateAll()` に追加
-6. `README.md` の解析ルール一覧表に追加
-7. `go test -race ./...` グリーン
+詳しい手順 + tier 振り分け + ConfidenceReason 選び方は [docs/rule-authoring.md](./docs/rule-authoring.md) を参照。要約:
+
+1. README の解析ルール表で既出でないか確認
+2. Issue 起票 (`enhancement`, `new-rule` ラベル)
+3. `domain/rules/<rule_id>.go` に `LocalRule` / `PathRule` / `GlobalRule` interface 実装 (ADR-007)
+4. `domain/rules/<rule_id>_test.go` に最低 5 ケース (positive / negative / edge / Reason stamp / Meta)
+5. `init()` で `registerBuiltin(NewYourRule())` を呼ぶ — factory 編集不要
+6. `domain/testutil/generate.go` に generator + `cmd/shingan-gen/main.go` に pattern 追加
+7. `docs/rules/<rule-id>.md` 新規 + README ルール表更新
+8. `cmd/shingan-mcp/explain.go` に説明追加 (parity 維持)
+9. `make lint && go test -race ./...` グリーン
 
 ## PRを出す前に
 
