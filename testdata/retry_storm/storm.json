@@ -1,0 +1,35 @@
+{
+  "entry_node_id": "orchestrator",
+  "nodes": [
+    {
+      "id": "orchestrator",
+      "name": "ParallelOrchestrator",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "description": "fan-out parent that drives storm_api"
+      }
+    },
+    {
+      "id": "storm_api",
+      "name": "external_api_caller",
+      "type": "tool",
+      "config": {
+        "category": "api",
+        "retries": 5,
+        "max_concurrency": 20,
+        "description": "no exponential backoff, no circuit breaker — storms upstream on failure"
+      }
+    },
+    {
+      "id": "storm_output",
+      "name": "output",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    { "from": "orchestrator", "to": "storm_api" },
+    { "from": "storm_api",    "to": "storm_output" }
+  ]
+}

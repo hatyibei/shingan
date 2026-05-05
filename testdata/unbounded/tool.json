@@ -1,0 +1,42 @@
+{
+  "entry_node_id": "search_tool",
+  "nodes": [
+    {
+      "id": "search_tool",
+      "name": "search_tool",
+      "type": "tool",
+      "config": {
+        "category": "api",
+        "args_schema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "free-form search query (no maxLength!)"
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "page_size": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "tool_output",
+      "name": "output",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    {"from": "search_tool", "to": "tool_output"}
+  ]
+}

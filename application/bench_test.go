@@ -14,7 +14,7 @@ const appBenchSeed = 42
 // allRules returns the full set of analysis rules used in production.
 //
 // Now that every rule registers itself via init(), AllBuiltins() returns
-// all 15 builtins (cycle, reachability, max_parallel_branches, deprecated_model,
+// all 20 builtins (cycle, reachability, max_parallel_branches, deprecated_model,
 // loop_guard, redundant_llm_call, secret_exposure_scanner, error_handler_checker,
 // cost_estimation, pii_leak_scanner, temperature_misuse, model_card_mismatch,
 // prompt_injection_sink, eval_missing, dynamic_node_construction) — eight
@@ -24,7 +24,7 @@ func allRules() []domain.AnalysisRule {
 	return rules.AllBuiltins()
 }
 
-// BenchmarkOrchestratorAll benchmarks the concurrent Orchestrator with all 15 rules.
+// BenchmarkOrchestratorAll benchmarks the concurrent Orchestrator with all 20 rules.
 func BenchmarkOrchestratorAll_N10(b *testing.B) {
 	runOrchestratorBench(b, 10)
 }
@@ -49,7 +49,7 @@ func runOrchestratorBench(b *testing.B, n int) {
 }
 
 // BenchmarkOrchestratorSequential benchmarks sequential (non-goroutine) execution
-// of all 15 rules for direct comparison with the concurrent version.
+// of all 20 rules for direct comparison with the concurrent version.
 func BenchmarkOrchestratorSequential_N10(b *testing.B) {
 	runSequentialBench(b, 10)
 }

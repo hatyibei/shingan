@@ -1,0 +1,47 @@
+{
+  "entry_node_id": "orchestrator_agent",
+  "nodes": [
+    {
+      "id": "orchestrator_agent",
+      "name": "OrchestratorAgent",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "agent_role": "orchestrator",
+        "sub_agents": ["planner_agent", "worker_agent"],
+        "description": "top-level orchestrator; calls sub-agents linearly with no return-handoff"
+      }
+    },
+    {
+      "id": "planner_agent",
+      "name": "PlannerAgent",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "agent_role": "planner",
+        "description": "produces a plan; result is consumed by WorkerAgent (no back-edge)"
+      }
+    },
+    {
+      "id": "worker_agent",
+      "name": "WorkerAgent",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "agent_role": "worker",
+        "description": "executes the plan and forwards to output"
+      }
+    },
+    {
+      "id": "output",
+      "name": "final_output",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    { "from": "orchestrator_agent", "to": "planner_agent" },
+    { "from": "planner_agent",      "to": "worker_agent" },
+    { "from": "worker_agent",       "to": "output" }
+  ]
+}

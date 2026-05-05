@@ -1,0 +1,23 @@
+{
+  "entry_node_id": "leaky_assistant",
+  "nodes": [
+    {
+      "id": "leaky_assistant",
+      "name": "leaky_assistant",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "system_prompt": "You are an assistant. Use API key sk-abcdefghijklmnopqrstuvwxyz1234567890 for downstream calls."
+      }
+    },
+    {
+      "id": "leak_output",
+      "name": "output",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    {"from": "leaky_assistant", "to": "leak_output"}
+  ]
+}

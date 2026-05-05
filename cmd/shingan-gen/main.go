@@ -22,6 +22,11 @@
 //	prompt-injection-sink  — User input → LLM system_prompt with substitution (prompt_injection_sink Critical)
 //	eval-missing           — LLM output → code_execution Tool with no validation (eval_missing Critical)
 //	dynamic-construction   — Tool with Config["body"] containing eval(...) (dynamic_node_construction Critical)
+//	retry-storm            — Tool with retries × parallelism = blast radius (retry_storm Critical)
+//	circular-dep-agents    — A→B→A delegation cycle in multi-agent workflow (circular_dep_agents Warning)
+//	unbounded-tool-arg     — Tool argument schema without maxLength/maxItems (unbounded_tool_arg Warning)
+//	prompt-secret          — Hardcoded API key in LLM prompt template (secret_in_prompt_template Critical)
+//	dataset-missing        — Production-flagged graph without eval_dataset (missing_eval_dataset Warning)
 package main
 
 import (
@@ -95,8 +100,18 @@ func generate(pattern string, size int, seed int64) (*domain.WorkflowGraph, erro
 		return testutil.GenerateEvalMissingGraph(seed), nil
 	case "dynamic-construction":
 		return testutil.GenerateDynamicNodeConstructionGraph(seed), nil
+	case "retry-storm":
+		return testutil.GenerateRetryStormGraph(seed), nil
+	case "circular-dep-agents":
+		return testutil.GenerateCircularDepAgentsGraph(seed), nil
+	case "unbounded-tool-arg":
+		return testutil.GenerateUnboundedToolArgGraph(seed), nil
+	case "prompt-secret":
+		return testutil.GenerateSecretInPromptTemplateGraph(seed), nil
+	case "dataset-missing":
+		return testutil.GenerateMissingEvalDatasetGraph(seed), nil
 	default:
-		return nil, fmt.Errorf("unknown pattern %q: must be one of random, clean, buggy, infinite-loop, unreachable, pii-leak, cycle, secret-exposure, deprecated-model, high-fanout, temperature-misuse, model-mismatch, prompt-injection-sink, eval-missing, dynamic-construction", pattern)
+		return nil, fmt.Errorf("unknown pattern %q: must be one of random, clean, buggy, infinite-loop, unreachable, pii-leak, cycle, secret-exposure, deprecated-model, high-fanout, temperature-misuse, model-mismatch, prompt-injection-sink, eval-missing, dynamic-construction, retry-storm, circular-dep-agents, unbounded-tool-arg, prompt-secret, dataset-missing", pattern)
 	}
 }
 
@@ -128,6 +143,11 @@ Patterns:
   prompt-injection-sink User-input tool → LLM system_prompt with {{var}} substitution — triggers prompt_injection_sink (Critical)
   eval-missing          LLM output → code_execution Tool without validation gate — triggers eval_missing (Critical)
   dynamic-construction  Tool with Config["body"] = "lambda x: eval(x)" — triggers dynamic_node_construction (Critical)
+  retry-storm           Tool with high retries × parallelism — triggers retry_storm (Critical at blast >= 100)
+  circular-dep-agents   Multi-agent A → B → A delegation cycle — triggers circular_dep_agents (Warning)
+  unbounded-tool-arg    Tool args_schema without maxLength/maxItems — triggers unbounded_tool_arg (Warning)
+  prompt-secret         Hardcoded sk-... in LLM prompt template — triggers secret_in_prompt_template (Critical)
+  dataset-missing       Production-flagged graph without eval_dataset — triggers missing_eval_dataset (Warning)
 
 The output is valid JSON compatible with: shingan analyze --format json --input <path>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -153,7 +173,7 @@ The output is valid JSON compatible with: shingan analyze --format json --input 
 		},
 	}
 
-	rootCmd.Flags().StringVar(&pattern, "pattern", "random", "Pattern: random|clean|buggy|infinite-loop|unreachable|pii-leak|cycle|secret-exposure|deprecated-model|high-fanout|temperature-misuse|model-mismatch|prompt-injection-sink|eval-missing|dynamic-construction")
+	rootCmd.Flags().StringVar(&pattern, "pattern", "random", "Pattern: random|clean|buggy|infinite-loop|unreachable|pii-leak|cycle|secret-exposure|deprecated-model|high-fanout|temperature-misuse|model-mismatch|prompt-injection-sink|eval-missing|dynamic-construction|retry-storm|circular-dep-agents|unbounded-tool-arg|prompt-secret|dataset-missing")
 	rootCmd.Flags().IntVar(&size, "size", 10, "Number of nodes (for random/clean/unreachable/cycle patterns)")
 	rootCmd.Flags().Int64Var(&seed, "seed", 42, "Random seed for reproducible output")
 	rootCmd.Flags().StringVar(&output, "output", "", "Output file path (default: stdout; use '-' for stdout)")

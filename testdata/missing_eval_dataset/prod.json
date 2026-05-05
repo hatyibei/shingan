@@ -1,0 +1,24 @@
+{
+  "entry_node_id": "prod_orchestrator",
+  "nodes": [
+    {
+      "id": "prod_orchestrator",
+      "name": "prod_orchestrator",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "deployment": true,
+        "env": "prod"
+      }
+    },
+    {
+      "id": "prod_output",
+      "name": "output",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    {"from": "prod_orchestrator", "to": "prod_output"}
+  ]
+}

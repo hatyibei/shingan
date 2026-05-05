@@ -19,7 +19,7 @@ in `shingan analyze` or in CI via `actions/shingan`.
                     +-----------------+
    editor (LSP) --- |  shingan-lsp    | --- AnalysisOrchestrator
         ^           |                 |          |
-        |           |  SHA256 LRU     |     [15 builtin rules]
+        |           |  SHA256 LRU     |     [20 builtin rules]
         +---------- |  diff cache     |          |
                     |                 |     ParserFactory
                     |  PythonHealth   |
@@ -183,7 +183,7 @@ populate `WorkspaceEdit` automatically.
 | Phase              | Latency       | Notes                                            |
 |--------------------|---------------|--------------------------------------------------|
 | Cache hit          | 10–30 ms      | SHA-256 → in-memory lookup, no parse             |
-| Cache miss (small) | 80–150 ms     | parse + 15 rules concurrently                    |
+| Cache miss (small) | 80–150 ms     | parse + 20 rules concurrently                    |
 | Cache miss (large) | 200–500 ms    | adk-go directory walk over 100+ files            |
 | Cold start         | 50–80 ms      | go binary boot + first Initialize                |
 
@@ -207,7 +207,7 @@ extra Info-severity diagnostic:
 [shingan_degraded_mode] shingan: limited analysis — python health not yet probed
 ```
 
-This is purely a heads-up signal today — none of Shingan's 15 built-in
+This is purely a heads-up signal today — none of Shingan's 20 built-in
 rules require Python. The diagnostic exists because Track P (LangGraph
 parser) will introduce Python-dependent rules; users who see the notice
 ahead of time can install `python3` once and avoid surprises later.

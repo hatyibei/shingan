@@ -893,3 +893,252 @@ func GenerateModelCardMismatchGraph(seed int64) *domain.WorkflowGraph {
 		EntryNodeID: "mismatch_llm",
 	}
 }
+func GenerateCircularDepAgentsGraph(seed int64) *domain.WorkflowGraph {
+	_ = seed // deterministic pattern
+
+	nodes := make(map[string]*domain.Node)
+	var edges []domain.Edge
+
+	nodes["planner_agent"] = &domain.Node{
+		ID:   "planner_agent",
+		Name: "PlannerAgent",
+		Type: domain.NodeTypeLLM,
+		Config: map[string]any{
+			"model":      "gpt-4o-mini",
+			"agent_role": "planner",
+		},
+	}
+
+	nodes["worker_agent"] = &domain.Node{
+		ID:   "worker_agent",
+		Name: "WorkerAgent",
+		Type: domain.NodeTypeLLM,
+		Config: map[string]any{
+			"model":      "gpt-4o-mini",
+			"agent_role": "worker",
+		},
+	}
+
+	// 2-agent delegation cycle.
+	edges = append(edges,
+		domain.Edge{From: "planner_agent", To: "worker_agent"},
+		domain.Edge{From: "worker_agent", To: "planner_agent"},
+	)
+
+	return &domain.WorkflowGraph{
+		Nodes:       nodes,
+		Edges:       edges,
+		EntryNodeID: "planner_agent",
+	}
+}
+
+// GenerateRetryStormGraph generates a WorkflowGraph that triggers the
+// retry_storm rule with a Critical finding.
+//
+// Structure:
+//   - entry orchestrator LLM →
+//     storm_api Tool with retries=5 and max_concurrency=20
+//     (blast = 5 × 20 = 100 → Critical)
+//
+// Expected findings:
+//   - retry_storm: Critical (Confidence 0.9, ConfidenceReason
+//     exact_static_match)
+func GenerateRetryStormGraph(seed int64) *domain.WorkflowGraph {
+	_ = seed // deterministic pattern
+
+	nodes := make(map[string]*domain.Node)
+	var edges []domain.Edge
+
+	// Orchestrator (drives the storm_api). Plain LLM, no retry config.
+	nodes["orchestrator"] = &domain.Node{
+		ID:   "orchestrator",
+		Name: "ParallelOrchestrator",
+		Type: domain.NodeTypeLLM,
+		Config: map[string]any{
+			"model": "gpt-4o-mini",
+		},
+	}
+
+	// Tool node with retries=5 and max_concurrency=20 → blast 100 → Critical.
+	nodes["storm_api"] = &domain.Node{
+		ID:   "storm_api",
+		Name: "external_api_caller",
+		Type: domain.NodeTypeTool,
+		Config: map[string]any{
+			"category":        "api",
+			"retries":         5,
+			"max_concurrency": 20,
+			"description":     "no exponential backoff, no circuit breaker — storms upstream on failure",
+		},
+	}
+
+	// Output node
+	nodes["storm_output"] = &domain.Node{
+		ID:     "storm_output",
+		Name:   "output",
+		Type:   domain.NodeTypeOutput,
+		Config: map[string]any{},
+	}
+
+	edges = append(edges,
+		domain.Edge{From: "orchestrator", To: "storm_api"},
+		domain.Edge{From: "storm_api", To: "storm_output"},
+	)
+
+	return &domain.WorkflowGraph{
+		Nodes:       nodes,
+		Edges:       edges,
+		EntryNodeID: "orchestrator",
+	}
+}
+
+func GenerateMissingEvalDatasetGraph(seed int64) *domain.WorkflowGraph {
+	_ = seed // deterministic pattern
+
+	nodes := make(map[string]*domain.Node)
+	var edges []domain.Edge
+
+	// Production-flagged orchestrator with NO eval_dataset anywhere.
+	nodes["prod_orchestrator"] = &domain.Node{
+		ID:   "prod_orchestrator",
+		Name: "prod_orchestrator",
+		Type: domain.NodeTypeLLM,
+		Config: map[string]any{
+			"model":      "gpt-4o-mini",
+			"deployment": true,
+			"env":        "prod",
+		},
+	}
+
+	nodes["prod_output"] = &domain.Node{
+		ID:     "prod_output",
+		Name:   "output",
+		Type:   domain.NodeTypeOutput,
+		Config: map[string]any{},
+	}
+
+	edges = append(edges,
+		domain.Edge{From: "prod_orchestrator", To: "prod_output"},
+	)
+
+	return &domain.WorkflowGraph{
+		Nodes:       nodes,
+		Edges:       edges,
+		EntryNodeID: "prod_orchestrator",
+	}
+}
+
+// GenerateSecretInPromptTemplateGraph generates a WorkflowGraph that
+// triggers the secret_in_prompt_template rule with a Critical finding.
+//
+// Structure:
+//   - entry LLM node whose Config["system_prompt"] contains a hardcoded
+//     OpenAI-style API key.
+//
+// Expected findings:
+//   - secret_in_prompt_template: Critical (sk- key in system_prompt,
+//     Confidence 0.95, ConfidenceReason exact_static_match)
+//   - secret_exposure_scanner: also fires (OnAny recursive scan); not a
+//     bug — the two rules carry different Suggestion text and severities,
+//     and they apply on different scopes per ADR design.
+func GenerateSecretInPromptTemplateGraph(seed int64) *domain.WorkflowGraph {
+	_ = seed // deterministic pattern
+
+	nodes := make(map[string]*domain.Node)
+	var edges []domain.Edge
+
+	// LLM node with a secret in its system_prompt — triggers
+	// secret_in_prompt_template Critical (Confidence 0.95).
+	nodes["leaky_assistant"] = &domain.Node{
+		ID:   "leaky_assistant",
+		Name: "leaky_assistant",
+		Type: domain.NodeTypeLLM,
+		Config: map[string]any{
+			"model":         "gpt-4o-mini",
+			"system_prompt": "You are an assistant. Use API key sk-abcdefghijklmnopqrstuvwxyz1234567890 for downstream calls.",
+		},
+	}
+
+	nodes["leak_output"] = &domain.Node{
+		ID:     "leak_output",
+		Name:   "output",
+		Type:   domain.NodeTypeOutput,
+		Config: map[string]any{},
+	}
+
+	edges = append(edges,
+		domain.Edge{From: "leaky_assistant", To: "leak_output"},
+	)
+
+	return &domain.WorkflowGraph{
+		Nodes:       nodes,
+		Edges:       edges,
+		EntryNodeID: "leaky_assistant",
+	}
+}
+
+// GenerateUnboundedToolArgGraph generates a WorkflowGraph that triggers the
+// unbounded_tool_arg rule with at least one Warning finding.
+//
+// Structure:
+//   - entry Tool node whose Config["args_schema"] declares a string field
+//     `query` and an array field `tags` neither of which has an upper bound.
+//
+// Expected findings:
+//   - unbounded_tool_arg: Warning × 2 (string `query` without maxLength,
+//     array `tags` without maxItems). ConfidenceReason heuristic_pattern.
+func GenerateUnboundedToolArgGraph(seed int64) *domain.WorkflowGraph {
+	_ = seed // deterministic pattern
+
+	nodes := make(map[string]*domain.Node)
+	var edges []domain.Edge
+
+	// Tool node with an unbounded args_schema — triggers unbounded_tool_arg.
+	nodes["unbounded_tool"] = &domain.Node{
+		ID:   "unbounded_tool",
+		Name: "search_tool",
+		Type: domain.NodeTypeTool,
+		Config: map[string]any{
+			"category": "api",
+			"args_schema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{
+						"type":        "string",
+						"description": "search query",
+					},
+					"tags": map[string]any{
+						"type": "array",
+						"items": map[string]any{
+							"type":      "string",
+							"maxLength": 64.0, // bounded inner string is fine
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Output node
+	nodes["unbounded_output"] = &domain.Node{
+		ID:     "unbounded_output",
+		Name:   "output",
+		Type:   domain.NodeTypeOutput,
+		Config: map[string]any{},
+	}
+
+	edges = append(edges,
+		domain.Edge{From: "unbounded_tool", To: "unbounded_output"},
+	)
+
+	return &domain.WorkflowGraph{
+		Nodes:       nodes,
+		Edges:       edges,
+		EntryNodeID: "unbounded_tool",
+	}
+}
+
+// GenerateModelCardMismatchGraph generates a WorkflowGraph that triggers the
+// model_card_mismatch rule with a Critical finding.
+//
+// Structure:

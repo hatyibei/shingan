@@ -85,6 +85,31 @@ Example: An LLM node feeding directly into a Tool with Config["category"] = "cod
 Why it matters: Dynamic code construction lets workflow authors generate logic at runtime, defeating static analysis and (when the input is attacker-controllable) opening an RCE attack surface. The rule complements eval_missing — that one looks at structural reachability between an LLM and a code-execution Tool; this one inspects the literal string content of Config values.
 Severity: Critical for eval(/exec(/Function( (Confidence 0.95, exact_static_match). Warning for compile(/__import__( (Confidence 0.85, exact_static_match). Info for getattr(/setattr( (Confidence 0.6, heuristic_pattern). Pure placeholder values like "${EVAL_FN}" are skipped; mixed values like "eval(${PAYLOAD})" still fire because eval( survives placeholder removal.
 Example: A Tool node with Config["body"] = "lambda x: eval(x)" → Critical. Mitigation: refactor to explicit dispatch tables (commands = {"sum": handler_sum, ...}) or use a sandboxed evaluator with allowlist.`,
+
+	"retry_storm": `retry_storm — flags Tool nodes whose retry configuration combined with the surrounding parallelism produces a high blast radius against an upstream API.
+Why it matters: A retry-loop with no exponential backoff or shared rate limit can fan a single transient outage into a coordinated stampede that takes the upstream provider out, exhausts your token budget, or trips IP-based rate limits.
+Algorithm: Source = Tool with Config["retries"|"max_retries"|"retry_count"] >= 3. Parallelism = max(fan-in count, source's max_concurrency, upstream Loop's max_iterations, upstream node's max_concurrency). blast = retries × parallelism. Severity by blast: >=100 Critical (Confidence 0.9, exact_static_match), >=30 Warning (Confidence 0.7, heuristic_pattern), >=10 Info (Confidence 0.5, heuristic_pattern).
+Example: An api Tool with retries=5 and max_concurrency=20 → blast 100 → Critical. Mitigation: add exponential backoff, a circuit breaker, or a shared rate limiter across the parallel orchestrator.`,
+
+	"circular_dep_agents": `circular_dep_agents — detects multi-agent workflows in which one agent can delegate to another that delegates back, creating a delegation cycle.
+Why it matters: Without an explicit max_handoffs budget or an orchestrator pattern, two or more agents that can hand control to each other risk infinite delegation. cycle_detection catches this structurally (Critical), but circular_dep_agents adds an agent-aware Warning so the message and suggestion can speak to "agent A → agent B → agent A" specifically.
+Algorithm: agents are identified by Config["agent_role"] (LangGraph / ADK convention) or Config["sub_agents"] non-empty. DFS forward from each agent looking for a path that returns to it; the cycle's distinct-agent count drives the Severity / Confidence pair: 2-agent cycle → Warning 0.85 exact_static_match, 3+ agent cycle → Warning 0.75 exact_static_match, self-reference → Info 0.6 heuristic_pattern.
+Example: planner_agent → worker_agent → planner_agent → Warning. Mitigation: switch to an orchestrator pattern or set explicit max_handoffs.`,
+
+	"unbounded_tool_arg": `unbounded_tool_arg — flags Tool nodes whose JSON-schema-shaped args_schema / parameters / input_schema contains fields with no upper bound (string maxLength, array maxItems, number maximum).
+Why it matters: An LLM (or attacker) can send a monster payload through an unbounded Tool argument, blowing up token usage, hitting provider rate limits, or OOM-ing the tool runtime.
+Severity: Warning when string maxLength is missing (Confidence 0.7) or array maxItems is missing (Confidence 0.7); Info when string maxLength exceeds 100K (Confidence 0.5) or number maximum is missing (Confidence 0.4). All findings carry ConfidenceReason=heuristic_pattern. Findings are capped at 5 per node.
+Example: A Tool node with Config["args_schema"]={"type":"object","properties":{"query":{"type":"string"}}} → Warning. Mitigation: add maxLength (4000-32000), maxItems, or maximum.`,
+
+	"secret_in_prompt_template": `secret_in_prompt_template — narrow rule that flags hardcoded credentials inside LLM prompt templates: system_prompt / prompt_template / user_message_template / instruction.
+Why it matters: API keys pasted into prompt-engineering iterations leak through every channel a workflow definition touches — version control, logs, exported runs, third-party inference traces.
+Severity: Critical for AWS access keys, OpenAI/Anthropic API keys, GitHub tokens, and PEM blocks (Confidence 0.95, exact_static_match). Warning for JWTs (Confidence 0.7, heuristic_pattern). Environment-variable substitutions are stripped before matching.
+Example: Config["system_prompt"]="You are X. Use sk-abc123..." → Critical. Mitigation: switch to ${API_KEY} env-var substitution and rotate the leaked credential.`,
+
+	"missing_eval_dataset": `missing_eval_dataset — flags workflow graphs that declare a production / staging deployment signal anywhere in the graph but carry no eval dataset / benchmark reference.
+Why it matters: Production AI agents need regression eval to catch model upgrades that change behavior. Without an eval_dataset / benchmark reference, model drift goes undetected until a customer complains.
+Algorithm: OnGraph aggregation (one finding per graph). Trigger when ANY node Config has env=prod|staging or deployment=true and NO node carries eval_dataset / test_set / benchmark.
+Severity: Warning (Confidence 0.7, heuristic_pattern). Mitigation: add Config["eval_dataset"] pointing to a versioned test set on the entry or any node.`,
 }
 
 // knownRuleNames returns the sorted list of rule identifiers, used to build

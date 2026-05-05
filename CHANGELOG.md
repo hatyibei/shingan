@@ -5,6 +5,14 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 ## [Unreleased]
 
 ### Added
+- **Phase 2 batch 2: 5 new builtin rules (Factory 15 → 20)**
+  - **`retry_storm` (Path)** — Tool with retries × parallelism = blast radius. >=100 Critical (0.9 exact_static_match), >=30 Warning (0.7 heuristic_pattern), >=10 Info (0.5 heuristic_pattern). 14 tests. shingan-gen pattern `retry-storm`.
+  - **`circular_dep_agents` (Path)** — A→B→A delegation cycle detection in multi-agent workflows. Source via Config[agent_role] / sub_agents non-empty. 2-agent Warning 0.85 / 3+ agent Warning 0.75 / self-ref Info 0.6. 13 tests. Coexists with cycle_detection (regression-tested via TestCircularDepAgents_CoexistsWithCycleDetection). shingan-gen pattern `circular-dep-agents`.
+  - **`unbounded_tool_arg` (Local)** — Tool args_schema / parameters / input_schema fields without maxLength/maxItems/maximum. 17 tests, capped at 5 findings/node. shingan-gen pattern `unbounded-tool-arg`.
+  - **`secret_in_prompt_template` (Local)** — Hardcoded credentials in LLM prompt template fields (system_prompt / prompt_template / user_message_template / instruction). 18 tests. Critical 0.95 exact_static_match for AWS/OpenAI/Anthropic/GitHub/PEM, Warning 0.7 heuristic_pattern for JWT. Env-var substitutions (${VAR}, {{ENV}}) stripped before matching. shingan-gen pattern `prompt-secret`.
+  - **`missing_eval_dataset` (Local)** — Production-flagged graphs without eval_dataset / benchmark reference. 19 tests. OnGraph aggregation (1 finding per graph). shingan-gen pattern `dataset-missing`.
+  - cascade: factory_test count 15 → 20 + 5 Create_* tests, MCP explain.go 5 entries, tools.go count, bench_test count, docs/lsp.md, docs/mcp-server.md, README rules table.
+- **Codex iter10 P1 fix**: `eval_missing` BFS now preserves Critical when both Condition-guarded and direct paths reach the same sink. Previously first-arrival via Condition locked in Warning even when an unguarded Critical path existed.
 - **`dynamic_node_construction` rule (Phase 2 #3)** — Local tier (ADR-007)、15 番目の builtin。
   - **走査対象**: Node.Config の curated subset (`body` / `fn` / `handler` / `callback` / `code` / `factory` / `builder`) の文字列値を再帰的に scan
   - **検出パターン**: `eval(` / `exec(` / `Function(` / `compile(` / `__import__(` / `getattr(` / `setattr(` (regex `\bX\s*\(`)

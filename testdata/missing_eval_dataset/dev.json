@@ -1,0 +1,23 @@
+{
+  "entry_node_id": "dev_orchestrator",
+  "nodes": [
+    {
+      "id": "dev_orchestrator",
+      "name": "dev_orchestrator",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "env": "dev"
+      }
+    },
+    {
+      "id": "dev_output",
+      "name": "output",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    {"from": "dev_orchestrator", "to": "dev_output"}
+  ]
+}

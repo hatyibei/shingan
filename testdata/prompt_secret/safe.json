@@ -1,0 +1,23 @@
+{
+  "entry_node_id": "safe_assistant",
+  "nodes": [
+    {
+      "id": "safe_assistant",
+      "name": "safe_assistant",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "system_prompt": "You are an assistant. Use API key ${OPENAI_API_KEY} for downstream calls."
+      }
+    },
+    {
+      "id": "safe_output",
+      "name": "output",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    {"from": "safe_assistant", "to": "safe_output"}
+  ]
+}

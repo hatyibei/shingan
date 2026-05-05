@@ -1,0 +1,36 @@
+{
+  "entry_node_id": "orchestrator",
+  "nodes": [
+    {
+      "id": "orchestrator",
+      "name": "ParallelOrchestrator",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "description": "calls api_caller with shared rate limiter"
+      }
+    },
+    {
+      "id": "api_caller",
+      "name": "external_api_caller",
+      "type": "tool",
+      "config": {
+        "category": "api",
+        "retries": 2,
+        "max_concurrency": 4,
+        "backoff_factor": 2.0,
+        "description": "low retry count + exponential backoff — blast radius below threshold"
+      }
+    },
+    {
+      "id": "output",
+      "name": "output",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    { "from": "orchestrator", "to": "api_caller" },
+    { "from": "api_caller",   "to": "output" }
+  ]
+}

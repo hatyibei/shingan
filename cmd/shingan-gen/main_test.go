@@ -279,3 +279,38 @@ func TestGenerate_AllPatterns_NonEmpty(t *testing.T) {
 		})
 	}
 }
+
+func TestGenerate_RetryStorm_ValidJSON(t *testing.T) {
+	g := roundTrip(t, "retry-storm", 0, 42)
+	if len(g.Nodes) == 0 {
+		t.Error("expected at least one node after round-trip")
+	}
+}
+
+func TestGenerate_CircularDepAgents_ValidJSON(t *testing.T) {
+	g := roundTrip(t, "circular-dep-agents", 0, 42)
+	if len(g.Nodes) == 0 {
+		t.Error("expected at least one node after round-trip")
+	}
+}
+
+func TestGenerate_UnboundedToolArg_ValidJSON(t *testing.T) {
+	g := roundTrip(t, "unbounded-tool-arg", 0, 42)
+	if len(g.Nodes) == 0 {
+		t.Error("expected at least one node after round-trip")
+	}
+}
+
+func TestGenerate_PromptSecret_ValidJSON(t *testing.T) {
+	g := roundTrip(t, "prompt-secret", 0, 42)
+	if len(g.Nodes) == 0 {
+		t.Error("expected at least one node after round-trip")
+	}
+}
+
+func TestGenerate_DatasetMissing_ValidJSON(t *testing.T) {
+	g := roundTrip(t, "dataset-missing", 0, 42)
+	if len(g.Nodes) == 0 {
+		t.Error("expected at least one node after round-trip")
+	}
+}

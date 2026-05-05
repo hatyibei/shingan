@@ -15,7 +15,7 @@ parsers as the CLI (`shingan analyze`).
 
 ### `shingan_analyze_graph(graph_json: string) → FindingList`
 
-Run all 15 built-in rules against a `WorkflowGraph` JSON payload.
+Run all 20 built-in rules against a `WorkflowGraph` JSON payload.
 
 Input:
 

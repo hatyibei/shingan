@@ -1,0 +1,29 @@
+{
+  "entry_node_id": "planner_agent",
+  "nodes": [
+    {
+      "id": "planner_agent",
+      "name": "PlannerAgent",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "agent_role": "planner",
+        "description": "produces a plan and hands the work off to WorkerAgent"
+      }
+    },
+    {
+      "id": "worker_agent",
+      "name": "WorkerAgent",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o-mini",
+        "agent_role": "worker",
+        "description": "executes a step and may hand control back to PlannerAgent for replanning"
+      }
+    }
+  ],
+  "edges": [
+    { "from": "planner_agent", "to": "worker_agent" },
+    { "from": "worker_agent",  "to": "planner_agent" }
+  ]
+}

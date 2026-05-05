@@ -96,11 +96,11 @@ func TestCreate_RedundantLLMCall(t *testing.T) {
 	}
 }
 
-func TestCreateAll_ReturnsFifteenRules(t *testing.T) {
+func TestCreateAll_ReturnsTwentyRules(t *testing.T) {
 	f := factory.NewAnalyzerFactory()
 	all := f.CreateAll()
-	if len(all) != 15 {
-		t.Fatalf("expected 15 rules, got %d", len(all))
+	if len(all) != 20 {
+		t.Fatalf("expected 20 rules, got %d", len(all))
 	}
 }
 
@@ -124,6 +124,11 @@ func TestCreateAll_ContainsExpectedNames(t *testing.T) {
 		"prompt_injection_sink":     false,
 		"eval_missing":              false,
 		"dynamic_node_construction": false,
+		"retry_storm":               false,
+		"circular_dep_agents":       false,
+		"unbounded_tool_arg":        false,
+		"secret_in_prompt_template": false,
+		"missing_eval_dataset":      false,
 	}
 
 	for _, rule := range all {
@@ -276,6 +281,61 @@ func TestCreate_DynamicNodeConstruction(t *testing.T) {
 		t.Errorf("expected *rules.DynamicNodeConstruction, got %T", rule)
 	}
 	if rule.Name() != "dynamic_node_construction" {
+		t.Errorf("unexpected Name(): %s", rule.Name())
+	}
+}
+
+func TestCreate_RetryStorm(t *testing.T) {
+	f := factory.NewAnalyzerFactory()
+	rule, err := f.Create("retry_storm")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rule.Name() != "retry_storm" {
+		t.Errorf("unexpected Name(): %s", rule.Name())
+	}
+}
+
+func TestCreate_CircularDepAgents(t *testing.T) {
+	f := factory.NewAnalyzerFactory()
+	rule, err := f.Create("circular_dep_agents")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rule.Name() != "circular_dep_agents" {
+		t.Errorf("unexpected Name(): %s", rule.Name())
+	}
+}
+
+func TestCreate_UnboundedToolArg(t *testing.T) {
+	f := factory.NewAnalyzerFactory()
+	rule, err := f.Create("unbounded_tool_arg")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rule.Name() != "unbounded_tool_arg" {
+		t.Errorf("unexpected Name(): %s", rule.Name())
+	}
+}
+
+func TestCreate_SecretInPromptTemplate(t *testing.T) {
+	f := factory.NewAnalyzerFactory()
+	rule, err := f.Create("secret_in_prompt_template")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rule.Name() != "secret_in_prompt_template" {
+		t.Errorf("unexpected Name(): %s", rule.Name())
+	}
+}
+
+func TestCreate_MissingEvalDataset(t *testing.T) {
+	f := factory.NewAnalyzerFactory()
+	rule, err := f.Create("missing_eval_dataset")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rule.Name() != "missing_eval_dataset" {
 		t.Errorf("unexpected Name(): %s", rule.Name())
 	}
 }
