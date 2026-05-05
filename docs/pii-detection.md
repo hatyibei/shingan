@@ -1,90 +1,92 @@
-# PIIリーク検出ルール (`pii_leak_scanner`) — 設計・実装ドキュメント
+> 🌐 Language: **English** | [日本語](./pii-detection.ja.md)
 
-> **対象バージョン**: v0.3 (v0.2最適化済み)
-> **実装ファイル**: `domain/rules/pii_leak.go`
+# PII Leak Detection Rule (`pii_leak_scanner`) — Design and Implementation Doc
 
----
-
-## 1. 背景・動機
-
-エンタープライズ向けAIエージェントシステムにおいて、**個人情報（PII: Personally Identifiable Information）の意図しない外部漏洩**は最大のコンプライアンスリスクである。
-
-GDPR（欧州）、CCPA（カリフォルニア州）、日本の個人情報保護法のいずれも、PIIの第三者送信には**本人同意または業務上の正当根拠**が必要であり、ワークフロー設計の段階で漏洩経路を検出できれば、違反リスクを事前に排除できる。
-
-**SamuraiAIのエンタープライズ顧客における最大懸念**: RAG（検索拡張生成）パイプラインが顧客DBから個人情報を取得し、そのまま外部APIやMCPサーバーへ送信してしまうパターン。
+> **Target version**: v0.3 (v0.2 optimization complete)
+> **Implementation file**: `domain/rules/pii_leak.go`
 
 ---
 
-## 2. 検出対象
+## 1. Background and Motivation
 
-### 2.1 PII源ノード（Source）
+For enterprise AI agent systems, **unintended external leakage of PII (Personally Identifiable Information)** is the single largest compliance risk.
 
-| 判定条件 | Severity | 説明 |
-|---------|---------|------|
-| `NodeTypeTool` + `category == "rag"` | Warning | RAGは個人情報を含む可能性が高い |
-| `NodeTypeTool` + `Config["has_pii"] == true` | Warning | 明示的なPIIフラグ |
-| ノード名に `pii`/`user`/`personal`/`private` を含む | Info | ヒューリスティック（偽陽性あり） |
+GDPR (EU), CCPA (California), and Japan's Act on the Protection of Personal Information all require **subject consent or a legitimate business basis** before transmitting PII to a third party. If leak paths can be detected at workflow design time, violation risk can be eliminated upfront.
 
-### 2.2 外部送信ノード（Sink）
-
-`NodeTypeTool` かつ `category` が以下のいずれか:
-
-- `api` — 外部REST/GraphQL API
-- `mcp` — Model Context Protocol サーバー
-- `browser` — ブラウザ自動操作（フォーム送信など）
-
-### 2.3 Human Approval Gate（安全境界）
-
-`NodeTypeHuman` ノードがPII源からSinkへの経路上にある場合、そのパスは安全とみなし検出しない。
-Human ノードがプライバシー担当者や承認フローを表現することを前提とする。
+**The top concern for SamuraiAI's enterprise customers**: a RAG (retrieval-augmented generation) pipeline that fetches PII from a customer database and forwards it directly to an external API or MCP server.
 
 ---
 
-## 3. 検出アルゴリズム (v0.2 — Sink起点逆BFS)
+## 2. Detection Targets
 
-v0.2 最適化: 各PII源から順方向BFSを走らせる旧実装 (O(sources × V × E)) を、**Sinkから逆方向BFS**を走らせる実装 (O(V+E)) に変更。n=1000 で 267ms → 26ms（10倍改善）。
+### 2.1 PII Source Nodes
+
+| Condition | Severity | Description |
+|-----------|----------|-------------|
+| `NodeTypeTool` + `category == "rag"` | Warning | RAG is highly likely to contain PII |
+| `NodeTypeTool` + `Config["has_pii"] == true` | Warning | Explicit PII flag |
+| Node name contains `pii` / `user` / `personal` / `private` | Info | Heuristic (false positives possible) |
+
+### 2.2 External Sink Nodes
+
+`NodeTypeTool` whose `category` is one of:
+
+- `api` — External REST / GraphQL API
+- `mcp` — Model Context Protocol server
+- `browser` — Browser automation (form submission, etc.)
+
+### 2.3 Human Approval Gate (Safety Boundary)
+
+If a `NodeTypeHuman` node sits on the path from a PII source to a sink, that path is treated as safe and is not reported.
+The rule assumes the Human node represents a privacy officer or approval workflow.
+
+---
+
+## 3. Detection Algorithm (v0.2 — Sink-rooted reverse BFS)
+
+v0.2 optimization: replaced the legacy implementation that ran a forward BFS from each PII source (O(sources x V x E)) with **reverse BFS rooted at each Sink** (O(V+E)). At n=1000, runtime improved from 267 ms to 26 ms (10x speed-up).
 
 ```
-Step 1: 逆方向隣接リストを O(E) で構築
+Step 1: Build the reverse adjacency list in O(E)
     reverse[to] = list of edges pointing into "to"
 
-Step 2: ノードを O(V) で分類
+Step 2: Classify nodes in O(V)
     humanSet    = { n | n.Type == NodeTypeHuman }
     ragSources  = { n | isRAGSource(n) or isPIIHintSource(n) }
     sinks       = { n | isExternalSink(n) }
 
-Step 3: 各 Sink から逆BFS
+Step 3: Reverse BFS from each Sink
     for each sink in sinks:
         BFS using reverse adjacency list:
             if predecessor == NodeTypeHuman:
                 stop this branch (Human gate = safe)
-            if predecessor ∈ ragSources:
+            if predecessor in ragSources:
                 emit Finding(severity=Warning/Info, node_id=sink, source=predecessor)
             else:
                 continue BFS backwards
 ```
 
-**計算量**: O(V+E) 全体。逆隣接リスト構築が O(E)、ノード分類が O(V)、全Sinkにわたる逆BFSが合計 O(sinks × (V+E))。典型的なワークフローでは sinks << V のため実質 O(V+E)。
+**Complexity**: O(V+E) overall. Reverse adjacency construction is O(E), node classification is O(V), and reverse BFS over all sinks totals O(sinks x (V+E)). In typical workflows sinks << V, so the practical bound is O(V+E).
 
-### Finding の対応関係
+### Finding correspondence
 
-各 Finding は `(sink_id, source_id)` ペアに対応する。同一のSinkが複数のPII源から逆方向に到達可能な場合、それぞれ個別の Finding を発行する（各経路を独立した漏洩リスクとして扱う）。
-
----
-
-## 4. Severity 表
-
-| 条件 | Severity | 対応 |
-|------|----------|------|
-| RAG源 → 外部Sink（Human gate なし） | `Warning` | Human承認ノードを挿入、またはPIIサニタイズ |
-| `has_pii=true`源 → 外部Sink（Human gate なし） | `Warning` | 同上 |
-| 名前ヒューリスティック源 → 外部Sink | `Info` | 要確認（偽陽性の可能性あり） |
+Each Finding corresponds to a `(sink_id, source_id)` pair. When a single sink is reverse-reachable from multiple PII sources, an individual Finding is emitted per source (each path is treated as an independent leak risk).
 
 ---
 
-## 5. 実例ワークフローと検出結果
+## 4. Severity Table
 
-### 5.1 リスクあり（`testdata/pii/leak_risk.json`）
+| Condition | Severity | Action |
+|-----------|----------|--------|
+| RAG source -> external Sink (no Human gate) | `Warning` | Insert Human approval node, or sanitize PII |
+| `has_pii=true` source -> external Sink (no Human gate) | `Warning` | Same as above |
+| Name-heuristic source -> external Sink | `Info` | Review required (false positive possible) |
+
+---
+
+## 5. Sample Workflows and Detection Results
+
+### 5.1 Risk present (`testdata/pii/leak_risk.json`)
 
 ```
 rag_search ──→ llm_summarize ──→ external_api
@@ -100,19 +102,19 @@ rag_search ──→ llm_summarize ──→ external_api
 }
 ```
 
-### 5.2 安全（`testdata/pii/safe.json`）
+### 5.2 Safe (`testdata/pii/safe.json`)
 
 ```
 rag_search → llm_summarize → human_approval → external_api
 ```
 
-Finding: なし（Human ゲートが保護している）
+Findings: none (the Human gate protects the path).
 
 ---
 
-## 6. AnalyzerFactory での登録
+## 6. Registration in AnalyzerFactory
 
-`pii_leak_scanner` は v0.3 で7番目のルールとして追加された。
+`pii_leak_scanner` was added in v0.3 as the seventh rule.
 
 ```go
 // infrastructure/factory/analyzer.go
@@ -120,7 +122,7 @@ case "pii_leak_scanner":
     return rules.NewPIILeakScanner(), nil
 ```
 
-`CreateAll()` が返す7ルール:
+The seven rules returned by `CreateAll()`:
 
 1. `cycle_detection`
 2. `unreachable_node`
@@ -132,28 +134,28 @@ case "pii_leak_scanner":
 
 ---
 
-## 7. v0.3 での拡張予定
+## 7. Planned Extensions for v0.3
 
-| 機能 | 優先度 | 概要 |
-|------|--------|------|
-| PIIコンテンツ検査 | High | ノードのConfig/Prompt内の正規表現パターン（メール、電話番号、マイナンバー等）でPIIを検出 |
-| `encrypt_in_transit` フラグ | Medium | 送信時暗号化が設定されている場合はSeverityを下げる |
-| SARIF出力連携 | Medium | GitHub Advanced SecurityのSARIF形式でPIIリスクを出力 |
-| データフロータギング | Low | ノードごとにPIIタグを伝播させ、より精密なパス分析を実現 |
-| 正規表現ベース検出 | Low | `\d{3}-\d{4}-\d{4}`（電話番号）等のパターンをPromptTemplate内で検索 |
+| Feature | Priority | Summary |
+|---------|----------|---------|
+| PII content inspection | High | Detect PII via regex patterns (email, phone number, My Number, etc.) inside node Config / Prompt |
+| `encrypt_in_transit` flag | Medium | Lower the severity when transport encryption is configured |
+| SARIF output integration | Medium | Emit PII risks in GitHub Advanced Security's SARIF format |
+| Data-flow tagging | Low | Propagate per-node PII tags for more precise path analysis |
+| Regex-based detection | Low | Search for patterns like `\d{3}-\d{4}-\d{4}` (phone number) inside `PromptTemplate` |
 
 ---
 
-## 8. 面接トークポイント
+## 8. Interview Talking Points
 
-**SamuraiAI向けインパクト文 (50字以内)**:
+**SamuraiAI impact statement (≤ 50 chars JA)**:
 > RAGパイプラインのPII漏洩を設計時に静的検出し、GDPR違反ゼロを保証
 
-**技術的ハイライト**:
-- Onion Architecture準拠: `domain/rules/` に外部依存なし（stdlib + domain パッケージのみ）
-- **v0.2最適化**: Sink起点の逆BFS + 逆方向隣接リスト事前構築により O(V+E) を実現。n=1000 で 275ms → 26ms（10倍改善）
-- Human-in-the-loop パターンを「ゲート」として自動認識
-- 明示フラグ（`has_pii`）+ カテゴリ推論 + 名前ヒューリスティックの3層判定で偽陰性を最小化
+**Technical highlights**:
+- Onion Architecture compliant: `domain/rules/` has no external dependencies (stdlib + domain packages only)
+- **v0.2 optimization**: sink-rooted reverse BFS plus pre-built reverse adjacency list achieves O(V+E). At n=1000, 275 ms -> 26 ms (10x improvement)
+- Human-in-the-loop pattern is auto-recognized as a "gate"
+- Three-layer detection — explicit flag (`has_pii`) + category inference + name heuristic — minimizes false negatives
 
-**競合差別化**:
-従来の静的解析ツール（semgrep等）はコードレベルのパターンマッチングに留まるが、shinganは**ワークフロー意味論**（RAGがPIIを含むという業務知識）をルールに埋め込み、より高精度な検出を実現する。
+**Competitive differentiation**:
+Traditional static-analysis tools (semgrep etc.) stop at code-level pattern matching, but Shingan embeds **workflow semantics** (the domain knowledge that RAG implies PII) into rules, achieving higher-precision detection.

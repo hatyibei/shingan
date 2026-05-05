@@ -1,24 +1,24 @@
-> 🌐 Language: **English** | [日本語](./deprecated-models.ja.md)
+> 🌐 Language: [English](./deprecated-models.md) | **日本語**
 
-# deprecated_model rule — Deprecated and Shutdown Model Detection
+# deprecated_model ルール — 非推奨・停止済みモデル検出
 
-## Overview
+## 概要
 
-The `deprecated_model` rule detects whether LLM nodes in a workflow graph are using **shutdown** or **deprecated** models.
+`deprecated_model` ルールは、ワークフローグラフ内の LLM ノードが **停止済み (shutdown)** または **非推奨 (deprecated)** なモデルを使用しているかを検出します。
 
-| Status | Severity | Confidence | Description |
-|--------|----------|------------|-------------|
-| `shutdown` | Critical | 1.0 | API errors will occur at runtime. Immediate migration required |
-| `deprecated` | Warning | 0.9 | Still callable, but scheduled for shutdown within ~6 months |
+| ステータス | Severity | Confidence | 説明 |
+|-----------|----------|------------|------|
+| `shutdown` | Critical | 1.0 | 実行時に API エラーが発生する。即座に移行必須 |
+| `deprecated` | Warning | 0.9 | まだ呼び出せるが、~6 ヶ月以内に shutdown 予定 |
 
 ---
 
-## Model Classification Tables
+## モデル分類テーブル
 
 ### OpenAI
 
-| Model | Status | Shutdown Date | Recommended Migration |
-|-------|--------|---------------|-----------------------|
+| モデル | ステータス | Shutdown 日 | 推奨移行先 |
+|--------|-----------|------------|-----------|
 | `gpt-3.5-turbo-0301` | shutdown | 2024-06-13 | `gpt-4o-mini` |
 | `gpt-3.5-turbo-0613` | shutdown | 2024-09-13 | `gpt-4o-mini` |
 | `gpt-3.5-turbo-16k-0613` | shutdown | 2024-09-13 | `gpt-4o-mini` |
@@ -31,8 +31,8 @@ The `deprecated_model` rule detects whether LLM nodes in a workflow graph are us
 
 ### Anthropic
 
-| Model | Status | Shutdown Date | Recommended Migration |
-|-------|--------|---------------|-----------------------|
+| モデル | ステータス | Shutdown 日 | 推奨移行先 |
+|--------|-----------|------------|-----------|
 | `claude-1` | shutdown | 2023-11-01 | `claude-3-5-sonnet` |
 | `claude-1.3` | shutdown | 2023-11-01 | `claude-3-5-sonnet` |
 | `claude-2` | shutdown | 2024-07-21 | `claude-3-5-sonnet` |
@@ -44,31 +44,31 @@ The `deprecated_model` rule detects whether LLM nodes in a workflow graph are us
 
 ### Google
 
-| Model | Status | Shutdown Date | Recommended Migration |
-|-------|--------|---------------|-----------------------|
+| モデル | ステータス | Shutdown 日 | 推奨移行先 |
+|--------|-----------|------------|-----------|
 | `gemini-pro` | shutdown | 2025-02-15 | `gemini-1.5-pro` |
 | `text-bison-001` | shutdown | 2024-10-01 | `gemini-1.5-flash` |
 | `chat-bison-001` | shutdown | 2024-10-01 | `gemini-1.5-flash` |
 
 ---
 
-## Migration Recommendations
+## マイグレーション推奨先
 
-### General-purpose tasks (cost-optimized)
-- `gpt-4o-mini` — OpenAI's low-cost, high-quality model
-- `claude-3-haiku` — Anthropic's fast, low-cost model
-- `gemini-1.5-flash` — Google's fast, low-cost model
+### 汎用タスク (コスト最適化優先)
+- `gpt-4o-mini` — OpenAI の低コスト高品質モデル
+- `claude-3-haiku` — Anthropic の高速・低コストモデル
+- `gemini-1.5-flash` — Google の高速・低コストモデル
 
-### High-precision tasks (quality-first)
-- `gpt-4o` — OpenAI flagship
-- `claude-3-5-sonnet` — Anthropic's mainline model
-- `gemini-1.5-pro` — Google's high-performance model
+### 高精度タスク (品質優先)
+- `gpt-4o` — OpenAI フラッグシップ
+- `claude-3-5-sonnet` — Anthropic の主力モデル
+- `gemini-1.5-pro` — Google の高性能モデル
 
 ---
 
-## Update Frequency
+## 更新頻度
 
-Refer to each provider's official deprecation policy and update this table periodically:
+各プロバイダの公式 deprecation policy を参照し、定期的にこのテーブルを更新してください:
 
 - **OpenAI**: https://platform.openai.com/docs/deprecations
 - **Anthropic**: https://docs.anthropic.com/en/api/deprecations
@@ -76,22 +76,22 @@ Refer to each provider's official deprecation policy and update this table perio
 
 ---
 
-## testdata samples
+## testdata サンプル
 
 ```bash
-# Critical x3 (shutdown models)
+# Critical×3 (shutdown models)
 ./shingan analyze --format json --input testdata/deprecated/shutdown_models.json
 
-# Warning x1 (deprecated model)
+# Warning×1 (deprecated model)
 ./shingan analyze --format markdown --input testdata/deprecated/deprecated_models.json
 
 # 0 findings (active models)
 ./shingan analyze --format json --input testdata/deprecated/active_models.json
 ```
 
-## Generation via shingan-gen
+## shingan-gen による生成
 
 ```bash
 ./shingan-gen --pattern deprecated-model | ./shingan analyze --format json --input /dev/stdin
-# Expected: Critical x1 (gpt-3.5-turbo-0613)
+# 期待: Critical×1 (gpt-3.5-turbo-0613)
 ```

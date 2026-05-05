@@ -1,3 +1,5 @@
+> 🌐 Language: **English** (Japanese translation welcome — see [issue tracker](https://github.com/hatyibei/shingan/issues))
+
 # model_card_mismatch
 
 `model_card_mismatch` flags LLM nodes whose declared `model` name disagrees

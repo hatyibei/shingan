@@ -1,3 +1,5 @@
+> 🌐 Language: **English** (Japanese translation welcome — see [issue tracker](https://github.com/hatyibei/shingan/issues))
+
 # temperature_misuse
 
 `temperature_misuse` flags LLM nodes that combine an explicit `temperature > 0`
