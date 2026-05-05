@@ -1,3 +1,5 @@
+> 🌐 Language: [English](./rule-authoring.md) | **日本語**
+
 # Rule Authoring Guide (internal)
 
 本ガイドは Shingan の **builtin rule** を実装する内部 contributor 向けの手引きです。
