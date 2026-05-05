@@ -46,16 +46,42 @@ Onion Architecture — 内側から外側への依存のみ許容。
 
 ## インストール
 
+### npm (推奨、ゼロセットアップ)
+
+```bash
+# 一回だけ実行
+npx shingan-lint analyze --format=langgraph ./agents/
+
+# プロジェクトに固定
+pnpm add -D shingan-lint
+pnpm exec shingan analyze --since main
+
+# グローバルに
+npm install -g shingan-lint
+shingan analyze --input ./testdata/buggy.json
+```
+
+[`shingan-lint`](https://www.npmjs.com/package/shingan-lint) は薄い Node ラッパで、`postinstall` で plat-specific Go バイナリを GitHub Release から取得 + SHA256 検証 + `~/.cache/shingan-lint/v<ver>/` にキャッシュする。Linux / macOS / Windows × amd64 / arm64 を全部サポート。
+
+### Go install (Go 開発者向け)
+
 ```bash
 go install github.com/hatyibei/shingan/cmd/shingan@latest
 ```
 
-またはソースからビルド:
+### ソースからビルド
 
 ```bash
 git clone https://github.com/hatyibei/shingan.git
 cd shingan
 go build -o shingan ./cmd/shingan
+```
+
+### Docker
+
+```bash
+docker pull ghcr.io/hatyibei/shingan:latest
+docker run --rm -v "$(pwd)":/work ghcr.io/hatyibei/shingan analyze --input /work/buggy.json
 ```
 
 ## 使い方
