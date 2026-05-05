@@ -1,0 +1,96 @@
+name: npm-publish
+
+# Triggers when a release is published on GitHub. We tie the workflow
+# to the GitHub release event (rather than the raw tag push) so it only
+# fires after the goreleaser binaries are confirmed-uploaded by the
+# Release workflow — otherwise the published npm package's postinstall
+# would race against missing assets and fail on first install.
+
+on:
+  release:
+    types: [published]
+  # Manual trigger so a release that fired before this workflow existed
+  # can still be re-published without cutting a new tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.6.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write   # required for `npm publish --provenance`
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve target tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "ref=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Verify package version matches tag
+        working-directory: npm
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${{ steps.tag.outputs.ref }}"
+          TAG_VERSION="${TAG_VERSION#v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::npm/package.json version ($PKG_VERSION) does not match tag ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "version match: $PKG_VERSION"
+
+      - name: Wait for release assets to be reachable
+        # Postinstall fetches https://github.com/.../releases/download/<tag>/...
+        # Even after the release is "published", the asset CDN can lag a few
+        # seconds. We poll the canonical platform asset (linux amd64) so the
+        # subsequent publish has a working postinstall on first install.
+        env:
+          TAG: ${{ steps.tag.outputs.ref }}
+        run: |
+          ARCHIVE="shingan_${TAG#v}_linux_amd64.tar.gz"
+          URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${ARCHIVE}"
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -sSfL --head "$URL" >/dev/null; then
+              echo "asset reachable: $URL"
+              exit 0
+            fi
+            echo "attempt $i: asset not yet reachable, sleeping 6s"
+            sleep 6
+          done
+          echo "::error::release asset $ARCHIVE never became reachable after 60s"
+          exit 1
+
+      - name: Install dependencies
+        working-directory: npm
+        run: npm ci --ignore-scripts || npm install --ignore-scripts
+        # --ignore-scripts so postinstall doesn't fire inside the publish
+        # job (we'd be downloading the binary into the runner cache, then
+        # discarding the runner — wasteful, plus pulls the runner's IP
+        # into the GitHub release download analytics needlessly).
+
+      - name: Publish to npm registry
+        working-directory: npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # --access public is required for unscoped + first-time publishes;
+        # harmless for subsequent ones.
+        # --provenance signs the package against this workflow run so
+        # `npm view shingan-lint --json` shows GitHub Actions provenance.
+        run: npm publish --access public --provenance
