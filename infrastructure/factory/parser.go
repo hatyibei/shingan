@@ -16,13 +16,13 @@ func NewParserFactory() *ParserFactory {
 }
 
 // Create returns a WorkflowParser for the given format name.
-// Supported formats: "json", "adk-go", "samurai", "langgraph".
+// Supported formats: "json", "adk-go", "samurai", "langgraph", "n8n".
 // Returns an error for unknown format names.
 //
 // Note: the LangGraph parser owns a Python subprocess. Callers that handle
 // many graphs in one session should keep a single parser instance and reuse
 // it; the factory itself does not memoise instances (matching the existing
-// stateless design for json/adk-go/samurai). Failure to spawn the Python
+// stateless design for json/adk-go/samurai/n8n). Failure to spawn the Python
 // worker (Python missing, langgraph not installed, etc.) yields a descriptive
 // error that callers can surface to the user.
 func (f *ParserFactory) Create(format string) (application.WorkflowParser, error) {
@@ -39,7 +39,9 @@ func (f *ParserFactory) Create(format string) (application.WorkflowParser, error
 			return nil, fmt.Errorf("create langgraph parser: %w", err)
 		}
 		return p, nil
+	case "n8n":
+		return parser.NewN8nParser(), nil
 	default:
-		return nil, fmt.Errorf("unknown parser format %q: supported formats are \"json\", \"adk-go\", \"samurai\", \"langgraph\"", format)
+		return nil, fmt.Errorf("unknown parser format %q: supported formats are \"json\", \"adk-go\", \"samurai\", \"langgraph\", \"n8n\"", format)
 	}
 }
