@@ -31,11 +31,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -133,11 +131,9 @@ func (w *PythonWorker) spawn() error {
 		_ = stdin.Close()
 		return fmt.Errorf("python worker: stdout pipe: %w", err)
 	}
-	if runtime.GOOS != "windows" {
-		// Setpgid lets us SIGKILL the entire process group on Close, capturing
-		// any subprocesses langgraph itself might spawn.
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	}
+	// setProcessGroup is a no-op on Windows; on POSIX it sets Setpgid so
+	// killProcessGroup below can SIGKILL the entire tree on timeout.
+	setProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
@@ -328,21 +324,28 @@ func (w *PythonWorker) Close() error {
 	}
 }
 
-// kill SIGKILLs the subprocess group; safe to call repeatedly.
+// kill SIGKILLs the subprocess group; safe to call repeatedly. Falls
+// back to cmd.Process.Kill() when killProcessGroup is a no-op or
+// returns an error (Windows / Setpgid-disabled targets).
 func (w *PythonWorker) kill() error {
 	if w.cmd == nil || w.cmd.Process == nil {
 		return nil
 	}
-	if runtime.GOOS == "windows" {
-		return w.cmd.Process.Kill()
-	}
 	pid := w.cmd.Process.Pid
-	// Negative PID = process group; falls back to plain Kill if Setpgid failed.
-	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
+	if err := killProcessGroup(pid); err != nil {
 		_ = w.cmd.Process.Kill()
 	}
 	return nil
 }
+
+// errProcessGroupNotSupported sentinel signals that the platform-
+// specific killProcessGroup implementation is not available (Windows
+// today). The caller in kill() above falls back to cmd.Process.Kill().
+var errProcessGroupNotSupported = errSentinel("process group operations not supported on this platform")
+
+type errSentinel string
+
+func (e errSentinel) Error() string { return string(e) }
 
 // healthCheckResult mirrors the shim's health_check JSON shape.
 type healthCheckResult struct {

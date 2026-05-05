@@ -1,0 +1,56 @@
+{
+  "name": "shingan-lint",
+  "version": "0.6.0",
+  "description": "AI Agent Workflow Static Analyzer — detect infinite loops, cost explosions, PII leaks, prompt injection sinks before execution. CLI wrapper that downloads the platform-specific Go binary from GitHub Releases.",
+  "keywords": [
+    "ai-agent",
+    "workflow",
+    "static-analysis",
+    "lint",
+    "linter",
+    "langgraph",
+    "adk",
+    "samurai",
+    "llm",
+    "prompt-injection",
+    "shingan"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/hatyibei/shingan",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hatyibei/shingan.git",
+    "directory": "npm"
+  },
+  "bugs": {
+    "url": "https://github.com/hatyibei/shingan/issues"
+  },
+  "author": "hatyibei <hathibei7@gmail.com>",
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "bin": {
+    "shingan": "./bin/shingan.js"
+  },
+  "scripts": {
+    "postinstall": "node ./scripts/postinstall.js"
+  },
+  "files": [
+    "bin/shingan.js",
+    "scripts/postinstall.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "tar": "^7.4.3"
+  }
+}
