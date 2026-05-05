@@ -75,6 +75,16 @@ Example: model="gpt-4o" + base_url="https://api.anthropic.com/v1" → Critical.`
 Why it matters: When attacker-controllable text is concatenated into a system prompt, an injected instruction can override the agent's policies — credential exfiltration, jailbreak, tool abuse. Static graph analysis catches the structural sink before runtime sanitization can save you.
 Severity: Critical for system_prompt with {{var}}/${var}/{var} substitution (Confidence 0.9); Warning for system_prompt without substitution (Confidence 0.7); Info for non-system templates with substitution (Confidence 0.5). All findings carry ConfidenceReason=heuristic_pattern.
 Example: A "user_query" tool node feeding into an LLM whose Config["system_prompt"] = "You are an assistant. Context: {{user_query}}." → Critical. Mitigation: keep user content in a separate role: user message and reserve the system prompt for trusted strings.`,
+
+	"eval_missing": `eval_missing — traces paths from any LLM node to a code-execution Tool sink (Config["category"] ∈ {code_execution, code_eval}, Config["tool"] ∈ {eval, exec, code_interpreter, python_runner, shell}, or names matching eval/exec/code_runner/python_runner/shell/bash patterns).
+Why it matters: When raw LLM output is fed into eval()/exec()/Function()/code_interpreter, an injected payload becomes arbitrary code execution. Validation (a Condition node) helps but is rarely complete; Human-in-the-loop approval is the only path the rule treats as safe.
+Severity: Critical when no validation gate exists between the LLM and the sink (Confidence 0.9, ConfidenceReason heuristic_pattern). Warning when a Condition node sits on the path (Confidence 0.6, downgraded but not silenced). Paths through a Human approver are skipped entirely.
+Example: An LLM node feeding directly into a Tool with Config["category"] = "code_execution" → Critical. Mitigation: validate / parse / sandbox the output, switch to a structured tool-call schema, or insert a Human approval gate.`,
+
+	"dynamic_node_construction": `dynamic_node_construction — scans a curated subset of Node.Config keys (body, fn, handler, callback, code, factory, builder) for runtime code-construction patterns: eval(/exec(/Function(/compile(/__import__(/getattr(/setattr(.
+Why it matters: Dynamic code construction lets workflow authors generate logic at runtime, defeating static analysis and (when the input is attacker-controllable) opening an RCE attack surface. The rule complements eval_missing — that one looks at structural reachability between an LLM and a code-execution Tool; this one inspects the literal string content of Config values.
+Severity: Critical for eval(/exec(/Function( (Confidence 0.95, exact_static_match). Warning for compile(/__import__( (Confidence 0.85, exact_static_match). Info for getattr(/setattr( (Confidence 0.6, heuristic_pattern). Pure placeholder values like "${EVAL_FN}" are skipped; mixed values like "eval(${PAYLOAD})" still fire because eval( survives placeholder removal.
+Example: A Tool node with Config["body"] = "lambda x: eval(x)" → Critical. Mitigation: refactor to explicit dispatch tables (commands = {"sum": handler_sum, ...}) or use a sandboxed evaluator with allowlist.`,
 }
 
 // knownRuleNames returns the sorted list of rule identifiers, used to build

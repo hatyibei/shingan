@@ -96,11 +96,11 @@ func TestCreate_RedundantLLMCall(t *testing.T) {
 	}
 }
 
-func TestCreateAll_ReturnsThirteenRules(t *testing.T) {
+func TestCreateAll_ReturnsFifteenRules(t *testing.T) {
 	f := factory.NewAnalyzerFactory()
 	all := f.CreateAll()
-	if len(all) != 13 {
-		t.Fatalf("expected 13 rules, got %d", len(all))
+	if len(all) != 15 {
+		t.Fatalf("expected 15 rules, got %d", len(all))
 	}
 }
 
@@ -109,19 +109,21 @@ func TestCreateAll_ContainsExpectedNames(t *testing.T) {
 	all := f.CreateAll()
 
 	expected := map[string]bool{
-		"cycle_detection":         false,
-		"unreachable_node":        false,
-		"error_handler_checker":   false,
-		"cost_estimation":         false,
-		"redundant_llm_call":      false,
-		"loop_guard":              false,
-		"pii_leak_scanner":        false,
-		"secret_exposure_scanner": false,
-		"max_parallel_branches":   false,
-		"deprecated_model":        false,
-		"temperature_misuse":      false,
-		"model_card_mismatch":     false,
-		"prompt_injection_sink":   false,
+		"cycle_detection":           false,
+		"unreachable_node":          false,
+		"error_handler_checker":     false,
+		"cost_estimation":           false,
+		"redundant_llm_call":        false,
+		"loop_guard":                false,
+		"pii_leak_scanner":          false,
+		"secret_exposure_scanner":   false,
+		"max_parallel_branches":     false,
+		"deprecated_model":          false,
+		"temperature_misuse":        false,
+		"model_card_mismatch":       false,
+		"prompt_injection_sink":     false,
+		"eval_missing":              false,
+		"dynamic_node_construction": false,
 	}
 
 	for _, rule := range all {
@@ -246,6 +248,34 @@ func TestCreate_PromptInjectionSink(t *testing.T) {
 		t.Errorf("expected *rules.PromptInjectionSink, got %T", rule)
 	}
 	if rule.Name() != "prompt_injection_sink" {
+		t.Errorf("unexpected Name(): %s", rule.Name())
+	}
+}
+
+func TestCreate_EvalMissing(t *testing.T) {
+	f := factory.NewAnalyzerFactory()
+	rule, err := f.Create("eval_missing")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := rule.(*rules.EvalMissing); !ok {
+		t.Errorf("expected *rules.EvalMissing, got %T", rule)
+	}
+	if rule.Name() != "eval_missing" {
+		t.Errorf("unexpected Name(): %s", rule.Name())
+	}
+}
+
+func TestCreate_DynamicNodeConstruction(t *testing.T) {
+	f := factory.NewAnalyzerFactory()
+	rule, err := f.Create("dynamic_node_construction")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := rule.(*rules.DynamicNodeConstruction); !ok {
+		t.Errorf("expected *rules.DynamicNodeConstruction, got %T", rule)
+	}
+	if rule.Name() != "dynamic_node_construction" {
 		t.Errorf("unexpected Name(): %s", rule.Name())
 	}
 }
