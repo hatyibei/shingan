@@ -81,7 +81,7 @@ jobs:
           pip install -r scripts/requirements-shim.txt
       - name: verify langgraph importable
         run: |
-          python -c "import langgraph, langgraph.graph; print('langgraph', langgraph.__version__)"
+          python -c "import langgraph, langgraph.graph; print('langgraph imported, version =', getattr(langgraph, '__version__', 'unknown'))"
       - name: go test -race (langgraph + python_worker only)
         run: |
           go test -race -count=1 \
