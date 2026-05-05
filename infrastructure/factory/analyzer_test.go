@@ -96,11 +96,11 @@ func TestCreate_RedundantLLMCall(t *testing.T) {
 	}
 }
 
-func TestCreateAll_ReturnsThirteenRules(t *testing.T) {
+func TestCreateAll_ReturnsFourteenRules(t *testing.T) {
 	f := factory.NewAnalyzerFactory()
 	all := f.CreateAll()
-	if len(all) != 13 {
-		t.Fatalf("expected 13 rules, got %d", len(all))
+	if len(all) != 14 {
+		t.Fatalf("expected 14 rules, got %d", len(all))
 	}
 }
 
@@ -122,6 +122,7 @@ func TestCreateAll_ContainsExpectedNames(t *testing.T) {
 		"temperature_misuse":      false,
 		"model_card_mismatch":     false,
 		"prompt_injection_sink":   false,
+		"eval_missing":            false,
 	}
 
 	for _, rule := range all {
@@ -246,6 +247,20 @@ func TestCreate_PromptInjectionSink(t *testing.T) {
 		t.Errorf("expected *rules.PromptInjectionSink, got %T", rule)
 	}
 	if rule.Name() != "prompt_injection_sink" {
+		t.Errorf("unexpected Name(): %s", rule.Name())
+	}
+}
+
+func TestCreate_EvalMissing(t *testing.T) {
+	f := factory.NewAnalyzerFactory()
+	rule, err := f.Create("eval_missing")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := rule.(*rules.EvalMissing); !ok {
+		t.Errorf("expected *rules.EvalMissing, got %T", rule)
+	}
+	if rule.Name() != "eval_missing" {
 		t.Errorf("unexpected Name(): %s", rule.Name())
 	}
 }
