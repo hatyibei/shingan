@@ -331,7 +331,10 @@ func extractHost(raw string) string {
 		if err != nil {
 			return ""
 		}
-		return u.Host
+		// Hostname() strips the port (Codex iter8 P2): u.Host on
+		// "https://api.openai.com:443/v1" is "api.openai.com:443"
+		// which would never match the providerHosts table.
+		return u.Hostname()
 	}
 	// No scheme — strip any path / port and return the leading authority.
 	if i := strings.IndexAny(raw, "/?#"); i >= 0 {
