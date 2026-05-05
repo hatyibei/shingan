@@ -122,9 +122,25 @@ func evaluateUnboundedToolArg(n *domain.Node) []domain.Finding {
 // walkSchema descends into a JSON-schema-shaped map and emits findings for
 // each unbounded primitive field. The path argument records the dotted
 // JSON-pointer-ish path used in messages.
+//
+// Per Codex iter11 P2: tools that take a single primitive or top-level
+// array argument (`args_schema: {"type":"string"}` /
+// `{"type":"array","items":...}`) used to be silently missed because we
+// only classified entries under `properties`. We now classify the root
+// schema as well so primitive / array roots fire.
 func walkSchema(n *domain.Node, path string, schema map[string]any, findings *[]domain.Finding) {
 	if schema == nil {
 		return
+	}
+
+	// Classify the root schema itself when it's a primitive (string /
+	// number) or an array. Object roots are handled via the per-property
+	// loop below; classifying the object root would double-count.
+	if t, _ := schema["type"].(string); t != "" && t != "object" {
+		classifyField(n, path, schema, findings)
+		if len(*findings) >= maxFindingsPerNode {
+			return
+		}
 	}
 
 	// Recurse into properties (object schema).

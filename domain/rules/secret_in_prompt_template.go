@@ -85,11 +85,19 @@ func (s *SecretInPromptTemplate) Analyze(graph *domain.WorkflowGraph) []domain.F
 // promptTemplateKeys is the narrow set of Config keys this rule scans.
 // Generic `prompt` is intentionally omitted — `secret_exposure_scanner`
 // already walks every Config value via OnAny and would duplicate findings.
+//
+// Per Codex iter11 P3: aliases used by `prompt_injection_sink` are
+// included so workflows using `system` / `instructions` / `user_template`
+// receive the prompt-specific finding (env-var substitution + rotation
+// guidance) instead of only the generic secret_exposure detection.
 var promptTemplateKeys = []string{
 	"system_prompt",
+	"system",
 	"prompt_template",
 	"user_message_template",
+	"user_template",
 	"instruction",
+	"instructions",
 }
 
 // promptSecretPattern bundles the metadata each detectable secret category

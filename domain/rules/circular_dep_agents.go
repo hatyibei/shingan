@@ -81,8 +81,28 @@ func isAgentNode(n *domain.Node) bool {
 	if role := stringConfig(n, "agent_role"); role != "" {
 		return true
 	}
+	// Per Codex iter11 P2: require a non-empty sub_agents collection.
+	// Some parsers emit `sub_agents: []` as a default value on every
+	// LLM node, which would otherwise promote plain LLMs to agents and
+	// generate false positives (orchestrator → worker → orchestrator
+	// cycles where orchestrator cannot actually delegate).
 	if v, ok := n.Config["sub_agents"]; ok && v != nil {
-		return true
+		switch s := v.(type) {
+		case []any:
+			if len(s) > 0 {
+				return true
+			}
+		case []string:
+			if len(s) > 0 {
+				return true
+			}
+		default:
+			// Unknown shape (map, struct...) — assume it carries data
+			// and treat as agent. The empty-list false-positive case
+			// the iter11 P2 review targeted is the []any / []string
+			// shape that Go map-decoded JSON produces.
+			return true
+		}
 	}
 	return false
 }
