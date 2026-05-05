@@ -1,3 +1,5 @@
+> 🌐 Language: [English](./CONTRIBUTING.md) | **日本語**
+
 # Contributing to Shingan
 
 ShinganはAIエージェントワークフロー静的解析ツールです。新ルール追加、パーサー拡張、パフォーマンス改善など、ContributionはWelcomeです。

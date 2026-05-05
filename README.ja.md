@@ -1,3 +1,5 @@
+> 🌐 Language: [English](./README.md) | **日本語**
+
 # Shingan（心眼）
 
 > AI Agent Workflow Static Analyzer
