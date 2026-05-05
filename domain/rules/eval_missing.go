@@ -188,15 +188,15 @@ func runEvalMissingForwardBFS(graph *domain.WorkflowGraph, sources []*domain.Nod
 	}
 
 	var findings []domain.Finding
-	// Track emitted (source, sink) pairs so a node reachable via two
-	// branches does not produce duplicate Findings.
-	emitted := make(map[string]bool)
 
 	for _, src := range sources {
-		// visitedAt records, for each visited node, the strongest frontier
-		// that has reached it. We model "strongest" as "viaCondition=false";
-		// that way, a later via-Condition arrival is dropped (already a
-		// Critical was reachable). This keeps Severity stable.
+		// Per-source BFS. Track each (node, viaCondition) cell separately
+		// so a Critical-eligible direct route AND a Warning-eligible
+		// Condition-guarded route both finish exploration. Severity is
+		// decided after BFS completes (Codex iter10 P1): for each (src,
+		// sink) pair we pick the **strongest** observed state — i.e. if
+		// any direct path exists we emit Critical, even when a shorter
+		// Condition-guarded path also reaches the same sink.
 		type stateKey struct {
 			node         string
 			viaCondition bool
@@ -210,18 +210,28 @@ func runEvalMissingForwardBFS(graph *domain.WorkflowGraph, sources []*domain.Nod
 		queue := []queueEntry{{node: src.ID, state: frontierState{}}}
 		visited[stateKey{src.ID, false}] = true
 
+		// bestState records the strongest (viaCondition=false dominates)
+		// arrival state per sink for this source. We aggregate during BFS
+		// and emit after the queue drains.
+		type bestEntry struct {
+			sink  *domain.Node
+			state frontierState
+		}
+		bestForSink := make(map[string]bestEntry)
+
 		for len(queue) > 0 {
 			cur := queue[0]
 			queue = queue[1:]
 
-			// If this node is a sink, emit and stop expanding from it
-			// (a sink that is itself a code-exec endpoint terminates the
-			// dangerous path).
+			// If this node is a sink, record its strongest arrival
+			// state and stop expanding from it (a sink that is itself
+			// a code-exec endpoint terminates the dangerous path).
 			if sinkNode, ok := sinkIDs[cur.node]; ok && cur.node != src.ID {
-				key := src.ID + "|" + cur.node
-				if !emitted[key] {
-					emitted[key] = true
-					findings = append(findings, buildEvalMissingFinding(src, sinkNode, cur.state.viaCondition))
+				existing, seen := bestForSink[cur.node]
+				if !seen ||
+					// upgrade: previous via Condition, current direct
+					(existing.state.viaCondition && !cur.state.viaCondition) {
+					bestForSink[cur.node] = bestEntry{sink: sinkNode, state: cur.state}
 				}
 				continue
 			}
@@ -246,21 +256,14 @@ func runEvalMissingForwardBFS(graph *domain.WorkflowGraph, sources []*domain.Nod
 				if visited[k] {
 					continue
 				}
-				// If a non-via-Condition route already reached `next`, do
-				// not re-enter via the via-Condition route — the existing
-				// Critical-eligible path dominates the downgrade.
-				if !nextState.viaCondition {
-					// no dominating Critical-eligible route yet; record this
-					visited[k] = true
-				} else if visited[stateKey{node: next, viaCondition: false}] {
-					// dominated; skip
-					continue
-				} else {
-					visited[k] = true
-				}
-
+				visited[k] = true
 				queue = append(queue, queueEntry{node: next, state: nextState})
 			}
+		}
+
+		// Emit per (src, sink) using the strongest observed state.
+		for _, b := range bestForSink {
+			findings = append(findings, buildEvalMissingFinding(src, b.sink, b.state.viaCondition))
 		}
 	}
 
