@@ -1,3 +1,5 @@
+> 🌐 Language: [English](./use-cases.md) | **日本語**
+
 # Shingan ユースケース集
 
 Shingan の 20 ルール + 7 エントリポイント (CLI / LSP / MCP / API / GitHub Action / Runner / Web middleware) が、現場で具体的にどう活用されるかのシナリオ集。

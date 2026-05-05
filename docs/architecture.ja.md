@@ -1,3 +1,5 @@
+> 🌐 Language: [English](./architecture.md) | **日本語**
+
 # Shingan アーキテクチャ詳細
 
 ```

@@ -1,3 +1,5 @@
+> 🌐 Language: [English](./comparison.md) | **日本語**
+
 # Shingan vs 競合ツール
 
 Shingan の競合カテゴリは「ワークフロー/コードの静的解析」。AIエージェント固有領域で比較する。
