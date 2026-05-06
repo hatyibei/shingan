@@ -1,178 +1,180 @@
+> 🌐 Language: **English** | [日本語](./sample-generator.ja.md)
+
 # shingan-gen — Sample Workflow Generator
 
-`shingan-gen` は開発者が Shingan の静的解析をすぐに試せるよう、ランダムまたは意図的なパターンの WorkflowGraph JSON を生成するCLIツールです。
+`shingan-gen` is a CLI tool that generates random or intentionally-patterned WorkflowGraph JSON, so developers can try Shingan's static analysis right away.
 
-## インストール / ビルド
+## Install / Build
 
 ```bash
 go build -o shingan-gen ./cmd/shingan-gen
-# または
+# or
 make gen-cli
 ```
 
-## 使い方
+## Usage
 
 ```bash
 shingan-gen --pattern <name> --size <N> --seed <S> --output <path>
 ```
 
-### フラグ
+### Flags
 
-| フラグ | デフォルト | 説明 |
-|--------|-----------|------|
-| `--pattern` | `random` | 生成パターン（下記参照） |
-| `--size` | `10` | ノード数（random/clean/unreachable/cycle に適用） |
-| `--seed` | `42` | 乱数シード（再現性のため固定する） |
-| `--output` | stdout | 出力ファイルパス（`-` または省略でstdout） |
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--pattern` | `random` | Generation pattern (see below) |
+| `--size` | `10` | Number of nodes (applies to random/clean/unreachable/cycle) |
+| `--seed` | `42` | Random seed (fix for reproducibility) |
+| `--output` | stdout | Output file path (`-` or omitted = stdout) |
 
-## パターン一覧
+## Pattern List
 
-### `random` — ランダムグラフ
+### `random` — Random Graph
 
-意図的なバグを含む大規模グラフ。`GenerateRandomGraph` と互換性あり。
+A large graph with intentional bugs. Compatible with `GenerateRandomGraph`.
 
 ```bash
 shingan-gen --pattern random --size 50 --seed 42 > random.json
 shingan analyze --format json --input random.json --output markdown
 ```
 
-**期待されるFindings**: 複数のCritical/Warning（cycles, loop_guard, unreachable, pii_leak など）
+**Expected Findings**: Multiple Critical/Warning (cycles, loop_guard, unreachable, pii_leak, etc.)
 
 ---
 
-### `clean` — 問題なしグラフ
+### `clean` — Issue-Free Graph
 
-全7ルールをパスする構造的に正しいグラフ。
-新ルール実装時の「falseポジティブがないこと」の確認に使用します。
+A structurally correct graph that passes all 7 rules.
+Use when implementing a new rule to confirm it produces no false positives.
 
 ```bash
 shingan-gen --pattern clean --size 20 --seed 42 > clean.json
 shingan analyze --format json --input clean.json --output markdown
-# 期待: 0 findings
+# Expected: 0 findings
 ```
 
-**期待されるFindings**: なし（0件）
+**Expected Findings**: None (0 items)
 
 ---
 
-### `buggy` — 全7ルール発火
+### `buggy` — Trigger All 7 Rules
 
-全ての分析ルールが少なくとも1件のFindingを返すよう設計されたグラフ。
+A graph designed so every analysis rule returns at least one Finding.
 
 ```bash
 shingan-gen --pattern buggy --seed 42 > buggy.json
 shingan analyze --format json --input buggy.json --output markdown
-# 期待: 7種のルールすべて発火
+# Expected: all 7 rules fire
 ```
 
-**期待されるFindings**:
+**Expected Findings**:
 
-| ルール | Severity | 理由 |
-|--------|----------|------|
-| `cycle_detection` | Critical | max_iterations なしのLoopノードがサイクルを形成 |
-| `loop_guard` | Critical | LoopAgentにmax_iterations未設定 |
-| `unreachable_node` | Warning | dangling_node (LLM)がエントリから到達不能 |
-| `error_handler_checker` | Warning | api_toolが無条件エッジのみ（エラーハンドリングなし） |
-| `cost_estimation` | Warning | gpt-4oノードが無限ループ内に存在 |
-| `redundant_llm_call` | Warning | 同一(model, prompt_template)のLLMノードが2つ |
-| `pii_leak_scanner` | Warning | RAGツール → 外部APIへのパスにHuman gateなし |
+| Rule | Severity | Reason |
+|------|----------|--------|
+| `cycle_detection` | Critical | Loop node with no max_iterations forms a cycle |
+| `loop_guard` | Critical | LoopAgent without max_iterations configured |
+| `unreachable_node` | Warning | dangling_node (LLM) is unreachable from the entry |
+| `error_handler_checker` | Warning | api_tool has only unconditional edges (no error handling) |
+| `cost_estimation` | Warning | gpt-4o node sits inside an unbounded loop |
+| `redundant_llm_call` | Warning | Two LLM nodes share the same (model, prompt_template) |
+| `pii_leak_scanner` | Warning | Path from RAG tool → external API has no Human gate |
 
 ---
 
-### `infinite-loop` — LoopGuard発火パターン
+### `infinite-loop` — LoopGuard Trigger Pattern
 
-`max_iterations` 未設定の LoopAgent がサイクルを形成するグラフ。
+A graph where a LoopAgent without `max_iterations` forms a cycle.
 
 ```bash
 shingan-gen --pattern infinite-loop --seed 42 > infinite-loop.json
 shingan analyze --format json --input infinite-loop.json --output markdown
 ```
 
-**期待されるFindings**:
-- `loop_guard`: Critical — `unbounded_loop` に max_iterations なし
-- `cycle_detection`: Critical — Loop ノードがサイクルを形成しているが max_iterations 未設定
+**Expected Findings**:
+- `loop_guard`: Critical — `unbounded_loop` has no max_iterations
+- `cycle_detection`: Critical — Loop node forms a cycle but max_iterations is unset
 
 ---
 
-### `unreachable` — unreachable_node発火パターン
+### `unreachable` — unreachable_node Trigger Pattern
 
-エントリノードから到達できない孤立ノードを含むグラフ。
+A graph that contains isolated nodes unreachable from the entry node.
 
 ```bash
 shingan-gen --pattern unreachable --size 15 --seed 42 > unreachable.json
 shingan analyze --format json --input unreachable.json --output markdown
 ```
 
-**期待されるFindings**:
-- `unreachable_node`: Warning — `dangling_llm` (LLM型) が到達不能
-- `unreachable_node`: Warning — `dangling_tool` (Tool型) が到達不能
+**Expected Findings**:
+- `unreachable_node`: Warning — `dangling_llm` (LLM type) is unreachable
+- `unreachable_node`: Warning — `dangling_tool` (Tool type) is unreachable
 
 ---
 
-### `pii-leak` — PIILeakScanner発火パターン
+### `pii-leak` — PIILeakScanner Trigger Pattern
 
-RAGツールから外部API（Human gateなし）へのパスを持つグラフ。
+A graph with a path from a RAG tool to an external API (no Human gate).
 
 ```bash
 shingan-gen --pattern pii-leak --seed 42 > pii-leak.json
 shingan analyze --format json --input pii-leak.json --output markdown
 ```
 
-**期待されるFindings**:
-- `pii_leak_scanner`: Warning — `user_data_rag` → `external_api` にHuman gateなし
-- `error_handler_checker`: Warning — Tool ノードの条件付きエッジ不足
+**Expected Findings**:
+- `pii_leak_scanner`: Warning — `user_data_rag` → `external_api` with no Human gate
+- `error_handler_checker`: Warning — Tool node missing conditional edges
 
 ---
 
-### `cycle` — 純粋なサイクルグラフ
+### `cycle` — Pure Cycle Graph
 
-Loop/LoopAgent ノードで保護されていない生のサイクル（グラフ定義エラー）。
+A raw cycle that is not protected by a Loop/LoopAgent node (graph definition error).
 
 ```bash
 shingan-gen --pattern cycle --size 4 --seed 42 > cycle.json
 shingan analyze --format json --input cycle.json --output markdown
 ```
 
-**期待されるFindings**:
-- `cycle_detection`: Critical — 非Loopノードが親 Loop ノードなしでサイクルを形成
+**Expected Findings**:
+- `cycle_detection`: Critical — Non-Loop nodes form a cycle without a parent Loop node
 
 ---
 
-## パイプで使う
+## Use With Pipes
 
 ```bash
-# buggy グラフを直接 shingan analyze に渡す
+# Pass a buggy graph directly to shingan analyze
 shingan-gen --pattern buggy | shingan analyze --format json --input /dev/stdin --output markdown
 
-# clean グラフを検証
+# Validate a clean graph
 shingan-gen --pattern clean --size 50 | shingan analyze --format json --input /dev/stdin --output json | jq '.findings | length'
-# 期待出力: 0
+# Expected output: 0
 ```
 
-## Makefile ターゲット
+## Makefile Targets
 
 ```bash
-# shingan-gen をビルド
+# Build shingan-gen
 make gen-cli
 
-# 任意のパターンを生成（stdout）
+# Generate any pattern (stdout)
 make sample-buggy
 make sample-clean
 make sample-pii-leak
-# など
+# etc.
 ```
 
-## 教育目的での活用
+## Educational Use
 
-### 新ルール実装時のフロー
+### Workflow When Implementing a New Rule
 
-1. `shingan-gen --pattern clean` を使って新ルールがfalse positiveを出さないことを確認
-2. 新ルール用のパターンを `domain/testutil/generate.go` に追加
-3. `testdata/generated/` に期待サンプルを追加
+1. Use `shingan-gen --pattern clean` to confirm the new rule produces no false positives
+2. Add a pattern for the new rule in `domain/testutil/generate.go`
+3. Add expected samples to `testdata/generated/`
 
-### テストフィクスチャとして
+### As Test Fixtures
 
-各パターンファイルは `shingan analyze` の E2E テストで入力として使用できます:
+Each pattern file can be used as input for `shingan analyze` E2E tests:
 
 ```go
 testdata := "../../testdata/generated/buggy-seed42.json"
@@ -182,10 +184,10 @@ if !hasCriticalFinding(findings, "cycle_detection") {
 }
 ```
 
-## JSON フォーマット
+## JSON Format
 
-`shingan-gen` が出力する JSON は `shingan analyze --format json` と互換性があります。
-ノードは配列として出力されます（ID順にソート済み）:
+The JSON emitted by `shingan-gen` is compatible with `shingan analyze --format json`.
+Nodes are emitted as an array (sorted by ID):
 
 ```json
 {

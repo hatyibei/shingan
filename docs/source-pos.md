@@ -1,32 +1,35 @@
-# SourcePos — Node 位置情報 (Phase 2 Foundation)
+> 🌐 Language: **English** | [日本語](./source-pos.ja.md)
 
-> Phase 2 の LSP サーバ・VS Code 拡張・CodeAction はすべて
-> `domain.Node.Pos` に載った位置情報を読み取って動く。本ドキュメントは
-> その契約・意図・今後の拡張ポイントをまとめる。
+# SourcePos — Node Position Information (Phase 2 Foundation)
 
-## 設計意図
+> The Phase 2 LSP server, VS Code extension, and CodeAction features all
+> read position information attached to `domain.Node.Pos`. This document
+> summarizes that contract, the design intent, and future extension points.
 
-Phase 1 までの `domain.Finding` は `NodeID` しか位置情報を持たず、
-IDE 上の該当行ハイライトや "Go to Finding" 相当の操作ができなかった。
-Phase 2 で次の UX を実現するには、Parser が各 `Node` にソース位置を
-付与する必要がある:
+## Design Intent
 
-- LSP `textDocument/publishDiagnostics` の `range`
-- LSP `textDocument/codeAction` の編集対象レンジ
-- VS Code Code Lens (`▶ Analyze` / `⚡ Quick Fix all`) の注入位置
-- SARIF レポートの `locations[].physicalLocation`
+Through Phase 1, `domain.Finding` only carried a `NodeID` for location
+information, which made it impossible to highlight the relevant line in an
+IDE or perform a "Go to Finding" equivalent. To realize the following UX
+in Phase 2, the parser must attach source positions to each `Node`:
 
-これらはすべて「`Node` が書かれた行・列」を知らないと出せない。
-位置情報は `Finding` ではなく **`Node` 側** に載せる — 同じノードに
-複数の Finding が立っても、位置は一度で済む。
+- `range` for LSP `textDocument/publishDiagnostics`
+- Edit-target ranges for LSP `textDocument/codeAction`
+- Injection sites for VS Code Code Lens (`▶ Analyze` / `⚡ Quick Fix all`)
+- `locations[].physicalLocation` for SARIF reports
 
-## 型定義
+None of these can be produced without knowing which line and column the
+`Node` was written on. Position information is attached to the **`Node`
+side**, not to the `Finding` — when multiple findings stem from the same
+node, the position only needs to be recorded once.
+
+## Type Definition
 
 `domain/graph.go`:
 
 ```go
 type SourcePos struct {
-    File string `json:"file,omitempty"` // パーサ定義。埋め込み入力では空を許容
+    File string `json:"file,omitempty"` // Parser-defined. Empty allowed for embedded input.
     Line int    `json:"line,omitempty"` // 1-based
     Col  int    `json:"col,omitempty"`  // 1-based
 }
@@ -44,20 +47,22 @@ type Node struct {
 }
 ```
 
-### `IsZero()` 規則
+### `IsZero()` Convention
 
-- **原則**: Parser が位置を確定できない場合は Pos をゼロ値のままにする
-- **消費者の責務**: `SourcePos.IsZero()` で position 情報の有無を判定し、
-  ゼロであれば range 情報を省く / ファイル全体を対象にする等フォールバック
-- ゼロ判定は「3 フィールドすべて空」で行う。`File=""` かつ `Line=0` かつ
-  `Col=0` のときのみ "未設定" 扱い
+- **Principle**: When the parser cannot determine a position, leave Pos at its zero value
+- **Consumer's responsibility**: Use `SourcePos.IsZero()` to determine whether
+  position information is present; if zero, omit range information or fall
+  back to whole-file targeting
+- The zero check is "all 3 fields empty". Treated as "unset" only when
+  `File=""` and `Line=0` and `Col=0`
 
-## Parser ごとの埋め方
+## How Each Parser Populates Pos
 
 ### ADK-Go Parser (`infrastructure/parser/adkgo.go`)
 
-AST ベース。既に `token.FileSet` を保持しているので `cl.Pos()` や
-`ident.Pos()` を `b.sourcePos(pos)` ヘルパー経由で `SourcePos` に変換:
+AST-based. It already holds a `token.FileSet`, so `cl.Pos()` and
+`ident.Pos()` are converted into `SourcePos` via the `b.sourcePos(pos)`
+helper:
 
 ```go
 func (b *adkgoBuilder) sourcePos(pos token.Pos) domain.SourcePos {
@@ -69,59 +74,66 @@ func (b *adkgoBuilder) sourcePos(pos token.Pos) domain.SourcePos {
 }
 ```
 
-埋め込み箇所:
+Population sites:
 
-- `processAgentLit` — bare struct literal (`&LlmAgent{...}` 等) は `cl.Pos()`
-- `processRealAPIConfig` — real SDK (`loopagent.New(loopagent.Config{...})`)
-  は `cfg.Pos()` で Config 複合リテラルを指す (フォールバックで `callExpr.Pos()`)
-- `processToolElement` — tool ノードの識別子 / 式の `Pos()`
-- `extractRealSubAgents`, `processSubAgent` — 未解決 ident の placeholder
-  ノードは `ident.Pos()`
+- `processAgentLit` — bare struct literals (`&LlmAgent{...}` etc.) use `cl.Pos()`
+- `processRealAPIConfig` — real SDK calls (`loopagent.New(loopagent.Config{...})`)
+  use `cfg.Pos()` to point at the Config composite literal (falling back to `callExpr.Pos()`)
+- `processToolElement` — `Pos()` of tool node identifiers / expressions
+- `extractRealSubAgents`, `processSubAgent` — placeholder nodes from
+  unresolved idents use `ident.Pos()`
 
-`Parse([]byte)` ではファイル名に `"input.go"` がハードコードされるため、
-テストはその値を検証する。`ParseFile(path)` は types pass がサクセスした
-場合のみ実ファイルパスが Filename に載る。
+In `Parse([]byte)`, the file name is hardcoded as `"input.go"`, so tests
+verify against that value. `ParseFile(path)` only sets the actual file
+path in Filename when the types pass succeeds.
 
 ### JSON Parser (`infrastructure/parser/json.go`)
 
-コード変更なし。`domain.Node` の `Pos` フィールドに `json:"pos,omitempty"`
-タグが付いているので:
+No code change. Because `domain.Node`'s `Pos` field carries the
+`json:"pos,omitempty"` tag:
 
-- 入力 JSON に `"pos": {"file": ..., "line": ..., "col": ...}` があれば自動デコード
-- `"pos"` フィールドがなければ `SourcePos{}` (IsZero)
-- 既存 v0.5.0 以前の testdata は未修正で動く (backward compatible)
+- If the input JSON contains `"pos": {"file": ..., "line": ..., "col": ...}`, it is auto-decoded
+- If there is no `"pos"` field, a `SourcePos{}` (IsZero) is produced
+- Existing pre-v0.5.0 testdata works unchanged (backward compatible)
 
-> ⚠️ `omitempty` の挙動: Go の `encoding/json` は struct 値を "empty" と
-> 判定しない。したがって `Pos` がゼロ値であっても、`WorkflowGraph` を
-> `json.Marshal` した出力には常に `"pos": {}` が含まれる。これは入力解析には
-> 影響せず (空オブジェクトは ゼロ値にデコードされる)、また既存 consumer は
-> `Pos` フィールドを参照しないため互換性も保たれる。出力サイズ最小化が要件に
-> なった時点で `Pos` を `*SourcePos` に変更する選択肢があるが、Phase 2 では
-> 値型のままで進める (nil チェックの省略を優先)。
+> ⚠️ Behavior of `omitempty`: Go's `encoding/json` does not consider a
+> struct value "empty". Therefore, even when `Pos` is the zero value, the
+> output of `json.Marshal` on a `WorkflowGraph` will always include
+> `"pos": {}`. This does not affect input parsing (an empty object decodes
+> to the zero value), and existing consumers do not reference the `Pos`
+> field, so compatibility is preserved. If output-size minimization later
+> becomes a requirement, an option is to change `Pos` to `*SourcePos`, but
+> for Phase 2 we keep it as a value type (prioritizing the elimination of
+> nil checks).
 
 ### SamuraiAI Parser (`infrastructure/parser/samurai.go`)
 
-想定スキーマ段階なので、入力 JSON に位置情報がある前提にしない。
-`SamuraiNode` に optional な `Pos *domain.SourcePos \`json:"pos,omitempty"\``
-を持たせ、入力に含まれていれば `domain.Node.Pos` にコピー。実際の
-SamuraiAI スキーマ確定後に map して上書きする。
+Since the schema is still in the assumed-spec stage, do not assume that
+input JSON carries position information. Add an optional
+`Pos *domain.SourcePos \`json:"pos,omitempty"\`` field to `SamuraiNode`
+and copy it into `domain.Node.Pos` when present in the input. After the
+real SamuraiAI schema is finalized, map and overwrite accordingly.
 
-## 今後の拡張
+## Future Extensions
 
-- `domain.Finding` に `Range` を追加 (`StartPos`, `EndPos`) — 現状の
-  `Pos` は単点情報、LSP は range が欲しいのでノード宣言の始端・終端を
-  取る必要がある。Phase 2-F の CodeAction 本格実装で追加予定
-- Python (LangGraph) Parser — `python -m shingan_export <file>` が
-  返す JSON に `pos` フィールドを埋めてもらう契約でそのまま動く
-- LSP サーバ — `SourcePos.IsZero()` で `publishDiagnostics` の range を
-  「ファイル先頭 0 列」にフォールバックする。ゼロ値だった場合でも診断
-  自体は返す(「位置不明だが発火した」は情報として有用)
+- Add `Range` to `domain.Finding` (`StartPos`, `EndPos`) — the current
+  `Pos` is single-point, but LSP wants a range, requiring start and end
+  positions of the node declaration. Slated for the full CodeAction
+  implementation in Phase 2-F
+- Python (LangGraph) Parser — works as-is via a contract that the JSON
+  returned from `python -m shingan_export <file>` includes a `pos` field
+- LSP server — when `SourcePos.IsZero()`, fall back to "file beginning,
+  column 0" for the `publishDiagnostics` range. Even when the value is
+  zero, still emit the diagnostic ("fired but position unknown" is still
+  useful information)
 
-## backward compatibility
+## Backward Compatibility
 
-- 既存 JSON testdata は `pos` フィールドを持たない — 全テストが
-  green のまま (`TestJSONParser_NoPosField_BackwardCompat` が gating)
-- 既存の consumer (Reporter / Orchestrator) は `Pos` を読まないため挙動不変
-- ただし `WorkflowGraph` を JSON シリアライズして外部に渡している箇所
-  (現状は無し) では、ゼロ値でも `"pos": {}` が出力に出る点に注意 —
-  受け側が strict mode でなければ無害
+- Existing JSON testdata does not have a `pos` field — all tests stay
+  green (gated by `TestJSONParser_NoPosField_BackwardCompat`)
+- Existing consumers (Reporter / Orchestrator) do not read `Pos`, so
+  behavior is unchanged
+- However, where `WorkflowGraph` is serialized to JSON and passed
+  outside (currently nowhere), note that `"pos": {}` will appear in the
+  output even for zero values — harmless unless the receiver runs in
+  strict mode

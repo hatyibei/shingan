@@ -1,42 +1,44 @@
+> 🌐 Language: **English** | [日本語](./confidence-scoring.ja.md)
+
 # Confidence Scoring (v0.4)
 
-Shingan の Confidence スコアは、各 Finding がどれだけ「真陽性」である可能性が高いかを 0.0〜1.0 で表す指標です。
+Shingan's Confidence score is a 0.0–1.0 indicator of how likely each Finding is a true positive.
 
-## 設計思想: Severity と Confidence の2軸
+## Design Philosophy: Two Axes — Severity and Confidence
 
 ```
-              Severity (重大度)
+              Severity
               ↑
- Critical     │  loop_guard (1.0)   ← 確定的かつ重大
+ Critical     │  loop_guard (1.0)   ← deterministic and severe
               │  error_handler (0.8)
- Warning      │  redundant (0.9)    ← 確信度高いが軽微
+ Warning      │  redundant (0.9)    ← high confidence but minor
               │  pii_leak RAG (0.6)
- Info         │  cost (0.7)         ← ヒューリスティック
-              └──────────────────→ Confidence (確信度)
+ Info         │  cost (0.7)         ← heuristic
+              └──────────────────→ Confidence
                  0.0   0.5   1.0
 ```
 
-- **Severity**: 問題が発生したときの影響度 (Info / Warning / Critical)
-- **Confidence**: このアラートが実際に問題である確率
+- **Severity**: impact when the issue manifests (Info / Warning / Critical)
+- **Confidence**: probability that this alert is an actual problem
 
-この2軸の分離により「重大だが不確かな警告」と「軽微だが確実な通知」を明確に区別できます。
+Separating these two axes makes it possible to clearly distinguish "severe but uncertain warnings" from "minor but certain notifications".
 
-## 各ルールの信頼度根拠
+## Confidence Rationale Per Rule
 
-| Rule ID | Confidence | 根拠 |
-|---------|-----------|------|
-| `cycle_detection` | **1.0** | DFS back-edge検出は数学的に確定。サイクルが存在すれば必ず検出 |
-| `loop_guard` | **1.0** | `Config["max_iterations"]`の有無チェックは確定的 |
-| `unreachable_node` | **1.0** | BFS到達性は確定。エントリから辿れないノードは常に正しく検出 |
-| `error_handler_checker` | **0.8** | 2ホップ先のConditionノードチェック + `reliable` フラグで改善済みだが、3ホップ以上のパターンは未検出 |
-| `redundant_llm_call` | **0.9** | `prompt_template` の完全一致は強い根拠。nil/空文字列スキップで誤検知を排除 |
-| `cost_estimation` | **0.7** | モデル価格階層 (High/Mid/Low) はロードマップ依存。モデル名の変更やプロバイダー値引きで変動 |
-| `pii_leak_scanner` | **0.6** (RAG/has_pii) | `category=rag` または `has_pii=true` は明示的なフラグ。精度は高い |
-| `pii_leak_scanner` | **0.3** (名前ヒント) | ノード名に "user"/"pii"/"personal" を含むだけでは弱い根拠。命名規則に依存 |
-| `secret_exposure_scanner` | **0.95** (Critical/Warning) | AWS AKIA prefix, sk-ant-, OpenAI sk- などは非常に特定的なパターン |
-| `secret_exposure_scanner` | **0.5** (Info) | `password=XXX` / JWT の汎用パターンは誤検知率が高い |
+| Rule ID | Confidence | Rationale |
+|---------|-----------|-----------|
+| `cycle_detection` | **1.0** | DFS back-edge detection is mathematically deterministic. If a cycle exists, it will always be detected. |
+| `loop_guard` | **1.0** | Checking for the presence of `Config["max_iterations"]` is deterministic. |
+| `unreachable_node` | **1.0** | BFS reachability is deterministic. Nodes that cannot be traversed from the entry are always correctly detected. |
+| `error_handler_checker` | **0.8** | Improved by 2-hop Condition node check + `reliable` flag, but patterns 3+ hops away are not yet detected. |
+| `redundant_llm_call` | **0.9** | Exact match on `prompt_template` is strong evidence. Skipping nil/empty strings eliminates false positives. |
+| `cost_estimation` | **0.7** | Model price tiers (High/Mid/Low) are roadmap-dependent. Subject to change due to model renames or provider discounts. |
+| `pii_leak_scanner` | **0.6** (RAG/has_pii) | `category=rag` or `has_pii=true` are explicit flags. High accuracy. |
+| `pii_leak_scanner` | **0.3** (name hint) | Including "user"/"pii"/"personal" in a node name alone is weak evidence. Depends on naming conventions. |
+| `secret_exposure_scanner` | **0.95** (Critical/Warning) | AWS AKIA prefix, sk-ant-, OpenAI sk-, etc. are highly specific patterns. |
+| `secret_exposure_scanner` | **0.5** (Info) | Generic patterns like `password=XXX` / JWT have a high false-positive rate. |
 
-## CI統合例: Critical かつ Confidence >= 0.9 のみブロック
+## CI Integration Example: Block Only Critical with Confidence >= 0.9
 
 ```yaml
 # .github/workflows/shingan.yml
@@ -58,11 +60,11 @@ Shingan の Confidence スコアは、各 Finding がどれだけ「真陽性」
     sarif_file: results.sarif
 ```
 
-このワークフローでは:
-- `cycle_detection` (1.0), `loop_guard` (1.0), `unreachable_node` (1.0), `redundant_llm_call` (0.9) → ブロック対象
-- `error_handler_checker` (0.8), `cost_estimation` (0.7), `pii_leak_scanner` (0.3–0.6) → 通過 (レビュー推奨)
+In this workflow:
+- `cycle_detection` (1.0), `loop_guard` (1.0), `unreachable_node` (1.0), `redundant_llm_call` (0.9) → blocked
+- `error_handler_checker` (0.8), `cost_estimation` (0.7), `pii_leak_scanner` (0.3–0.6) → allowed (review recommended)
 
-## JSON 出力サンプル
+## JSON Output Sample
 
 ```json
 {
@@ -92,16 +94,16 @@ Shingan の Confidence スコアは、各 Finding がどれだけ「真陽性」
 }
 ```
 
-## SARIF 出力 (GitHub Code Scanning)
+## SARIF Output (GitHub Code Scanning)
 
-- `result.properties.confidence`: 各検出の信頼度 (float)
-- `rule.properties.precision`: ルール精度ラベル
+- `result.properties.confidence`: confidence of each detection (float)
+- `rule.properties.precision`: rule precision label
   - `"high"`: Confidence >= 0.9
   - `"medium"`: 0.6 <= Confidence < 0.9
   - `"low"`: Confidence < 0.6
 
-## v0.5 予定: 機械学習による動的 Confidence 調整
+## v0.5 Plan: Dynamic Confidence Adjustment via Machine Learning
 
-- 実際のコードベースからのフィードバック (true positive / false positive) を収集
-- ルールごとの Precision-Recall を計測して Confidence を動的更新
-- `cost_estimation` については LLM プロバイダーの価格 API と連携してリアルタイム更新
+- Collect feedback (true positive / false positive) from real codebases
+- Measure per-rule Precision-Recall and update Confidence dynamically
+- For `cost_estimation`, integrate with LLM provider pricing APIs for real-time updates

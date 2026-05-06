@@ -1,3 +1,5 @@
+> 🌐 Language: **English** (Japanese translation welcome — see [issue tracker](https://github.com/hatyibei/shingan/issues))
+
 # SARIF Output — GitHub Code Scanning Integration
 
 Shingan supports SARIF v2.1.0 output via `--output sarif`, enabling native integration with GitHub Code Scanning for inline PR annotations.

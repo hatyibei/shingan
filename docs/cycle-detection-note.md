@@ -1,22 +1,25 @@
-# cycle_detection の "non-Control node" メッセージについて
+> 🌐 Language: **English** | [日本語](./cycle-detection-note.ja.md)
 
-## 更新 (2026-04-14)
+# `cycle_detection` — the "non-Control node" message
 
-v0.2 実装済み: 以下のオプションをすべて実施した。
+## Update (2026-04-14)
 
-- **Option A (文言改善)**: サイクル検出時、DFSパスを遡って親Control（LoopAgent）を探し、見つかればメッセージを `"cycle detected inside Control node \"<parent>\" via sub-agent \"<node>\""` に変更。
-- **Option B (Severity分離)**: 親Control内かつmax_iterations未設定 → `Warning`、max_iterations >= 100 → `Info`、親Controlなし → `Critical` (グラフ定義誤り)。
-- **Option C (独立ルール LoopGuardChecker)**: `domain/rules/loopguard.go` に `LoopGuardChecker` を新規追加。Controlノードの `max_iterations` 欠落を独立してCritical検出する。AnalyzerFactoryに `"loop_guard"` として登録（計6ルール）。
+All three options below were implemented in v0.2:
 
-実行結果例 (`infinite_loop_unbounded.go`):
+- **Option A (message wording)** — when a cycle is detected, walk back through the DFS path looking for a parent Control node (e.g. `LoopAgent`). If one is found, the message becomes `"cycle detected inside Control node \"<parent>\" via sub-agent \"<node>\""`.
+- **Option B (severity split)** — inside a parent Control with no `max_iterations` configured → `Warning`, with `max_iterations >= 100` → `Info`, no parent Control at all → `Critical` (genuine graph-definition error).
+- **Option C (independent `LoopGuardChecker` rule)** — `domain/rules/loopguard.go` adds a dedicated rule that flags Control nodes missing `max_iterations` as Critical, registered as `"loop_guard"` in the analyzer factory (now 6+ rules total).
+
+Example output for `infinite_loop_unbounded.go`:
+
 ```
-loop_guard   | Critical | unbounded_loop | LoopAgent "unbounded_loop" has no MaxIterations configured — potential infinite loop
-cycle_detection | Warning | classifier | cycle detected inside Control node "unbounded_loop" via sub-agent "classifier"
+loop_guard      | Critical | unbounded_loop | LoopAgent "unbounded_loop" has no MaxIterations configured — potential infinite loop
+cycle_detection | Warning  | classifier     | cycle detected inside Control node "unbounded_loop" via sub-agent "classifier"
 ```
 
-## 現状の挙動
+## Original behaviour (pre-v0.2)
 
-`testdata/real/infinite_loop.go` や `examples/runtime/infinite_loop_unbounded.go` のような **LoopAgentにMaxIterations未設定** のサンプルをShinganで解析すると、以下のFindingが出る:
+Running Shingan on samples like `testdata/real/infinite_loop.go` or `examples/runtime/infinite_loop_unbounded.go` — both **`LoopAgent`s without `MaxIterations`** — produced this finding:
 
 ```
 cycle_detection Critical
@@ -24,83 +27,55 @@ cycle_detection Critical
   message: cycle detected at non-Control node "classifier" (type=llm): graph definition error
 ```
 
-メッセージは「非Controlノードでサイクル検出」と言っているが、実際にはLoopAgent（= Controlノード）の内部で起きているループ。一見ミスリーディングに見える。
+The message says "cycle on a non-Control node", but the cycle is actually inside a `LoopAgent` (a Control node). This reads as misleading at first glance.
 
-## 技術的背景
+## Technical background
 
-### ADK-Go AST パーサーのノード展開
+### How the ADK-Go parser expands nodes
 
-ShinganのADK-Goパーサー (`infrastructure/parser/adkgo.go`) は、`loopagent.New(Config{ AgentConfig: agent.Config{ SubAgents: [A, B] } })` のような構造を以下のように展開する:
+The ADK-Go parser (`infrastructure/parser/adkgo.go`) expands `loopagent.New(Config{ AgentConfig: agent.Config{ SubAgents: [A, B] } })` into:
 
-- LoopAgent本体 → 1ノード (`NodeTypeControl`, `Config["max_iterations"]`)
-- SubAgents `[A, B]` → 各々ノード (`NodeTypeLLM`等)
-- LoopAgentからA, Bへのエッジ
-- **A → B → A のループバックエッジ**（SubAgentsの末尾から先頭へ）
+- The `LoopAgent` itself → one node (`NodeTypeControl`, `Config["max_iterations"]`)
+- Each sub-agent `[A, B]` → its own node (`NodeTypeLLM` etc.)
+- Edges from the `LoopAgent` to A and B
+- **Loop-back edges A → B → A** (last sub-agent back to first)
 
-この時点でサイクルは「A → B → A」で、A/Bは`NodeTypeLLM`なので `非Controlノード上のサイクル` として検出される。
+At this point the cycle is `A → B → A`. Since A and B are `NodeTypeLLM`, the cycle is detected on a "non-Control node".
 
-### CycleDetectorのSeverity判定ロジック (`domain/rules/cycle.go`)
+### Severity logic in `CycleDetector` (`domain/rules/cycle.go`)
 
 ```go
 if cycleNode.Type != domain.NodeTypeControl {
-    // Critical: グラフ定義誤り
+    // Critical: graph definition error
 }
-// Control型ノードの場合は max_iterations を確認
+// Otherwise check max_iterations on the Control node
 ```
 
-ここで判定しているのは **サイクル到達時の先頭ノード** の型。LoopAgent本体ではなくSubAgentsで最初に back-edge のターゲットになるノード。結果として Critical と判定される。
+The check looks at the **first node where the cycle is closed**, not at the enclosing `LoopAgent`. With sub-agent expansion, that first node is an LLM agent, so the result lands on Critical.
 
-## これは仕様か、バグか?
+## Is this a spec or a bug?
 
-**仕様として意図的**。以下2つの意図がある:
+**Intended behaviour**, for two reasons:
 
-1. **可視性**: ユーザーはLoopAgentの内部構造（どのサブAgentが繰り返されるか）を理解して修正する必要がある。LoopAgent本体にFindingを出すより、ループに含まれる実ノード（classifier）を指した方が修正ポイントが明確。
+1. **Visibility** — users need to understand which sub-agents are repeating in order to fix the loop. Pointing at the actual node in the cycle (`classifier`) gives a clearer fix target than pointing at the `LoopAgent` wrapper.
+2. **Catches cycles outside `LoopAgent` too** — if the user accidentally creates a circular reference inside a `SequentialAgent`, the same rule should still fire. Looking at "is this node inside a managed loop?" generalises better than "is the cycle node a Control node?".
 
-2. **LoopAgent外のサイクルとの区別**: もしユーザーが意図せずSequentialAgentの中で circular reference を作った場合も同じルールで検出したい。「Control直下かどうか」より「サイクル内のノードが管理された繰り返しか」を見る方が網羅的。
+The wording, however, was the weak point — `"graph definition error"` is wrong when a `LoopAgent` is managing the cycle. v0.2 fixed that.
 
-ただし**メッセージ文言は改善余地あり**。現状の "graph definition error" は、LoopAgent管理下のケースでは誤解を招く。
+## Why the v0.2 split helps
 
-## 改善方針（v0.2候補）
+| Concern | Rule that catches it | Severity |
+|---------|----------------------|----------|
+| `LoopAgent` with no `max_iterations` | `loop_guard` | Critical |
+| Cycle inside a managed `LoopAgent`, bounded | `cycle_detection` | Warning / Info |
+| Cycle outside any Control node | `cycle_detection` | Critical |
 
-### Option A: 文言改善のみ
+Splitting `cycle_detection` and `loop_guard` separates "is there a loop?" from "is the loop bounded?", so users see one finding per concern instead of one ambiguous message.
 
-サイクルの起点ノードの親（またはサイクルに至るまでの制御ノード）を遡って、LoopAgentが存在する場合はメッセージを差し替える:
+## Open follow-ups
 
-```
-before: cycle detected at non-Control node "classifier": graph definition error
-after:  cycle detected inside LoopAgent "retry_loop" via "classifier". MaxIterations not set → potentially infinite loop.
-```
+- [x] v0.2: include parent Control context (`LoopAgent` name) in `cycle_detection` messages — **shipped**
+- [x] v0.2: introduce the standalone `loop_guard` rule — **shipped**
+- [ ] v0.x: have the ADK-Go parser carry the `LoopAgent → SubAgents` "managed-by" relationship as edge metadata (e.g. `Edge.Kind = "loop_managed"`) so future rules don't need to re-derive it.
 
-### Option B: Severity分離
-
-- LoopAgent管理下のサイクル + MaxIterations未設定 → `Critical` (現状維持)
-- LoopAgent管理下のサイクル + MaxIterations設定済みでも >= 100 → `Warning`
-- LoopAgent管理**外**のサイクル → `Critical` with "graph definition error" (現状の真の対象)
-
-### Option C: 2つのFindingに分割
-
-同じ問題に対して:
-1. `cycle_detection` (Critical) — ループが存在する事実
-2. `loop_without_max_iterations` (Critical) — MaxIterations未設定という独立ルール
-
-CycleDetector を分割し、新ルール `LoopGuardChecker` を作る。責務が明確になる。
-
-## 面接で問われた時の答え方
-
-**Q: このメッセージ、誤検知ではないですか?**
-
-A: 検出自体は正しいんですが、メッセージ文言はもっと分かりやすくできます。現状「non-Control node」と出るのは、AST上でループを構成しているのがLoopAgentの子ノード (classifier) だから。ユーザーから見ると「LoopAgent内のループに警告が出ている」状態で、直したいのはLoopAgentの設定 (MaxIterations) です。
-
-v0.2でメッセージを親コンテキスト込みに改善予定で、「LoopAgent "retry_loop" の MaxIterations が未設定」と出すようにします。独立ルールとして分離することも検討しています。
-
-**Q: 面接までに直さないんですか?**
-
-A: 直せますが、今回のPoCでは「静的解析のフレームワーク確立」が主目的で、個別ルールの文言最適化は入社後のロードマップに入れています。ただしSeverity判定は現状で正しく（MaxIter未設定→Critical）、面接官が見るべき「そもそもこの問題を検出できているか」は満たせています。
-
-## 関連Issue（実作業が発生する場合）
-
-- [x] v0.2: cycle_detection メッセージに親コンテキスト（LoopAgent名）を含める **実装済み**
-- [x] v0.2: `LoopGuardChecker` ルールの新規追加検討 **実装済み**
-- [ ] v0.2: ADK-Go parser でLoopAgent → SubAgents の「管理関係」メタデータを Edge に持たせる（例: `Edge.Kind = "loop_managed"`）
-
-これらは `examples/runtime/infinite_loop_unbounded.go` で再現可能なので、Shingan自身のテストスイートで回帰検証できる。
+The follow-ups are reproducible via `examples/runtime/infinite_loop_unbounded.go`, so Shingan's own test suite can regression-test them.

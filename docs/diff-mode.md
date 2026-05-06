@@ -1,3 +1,5 @@
+> 🌐 Language: **English** (Japanese translation welcome — see [issue tracker](https://github.com/hatyibei/shingan/issues))
+
 # Diff Mode & Progressive Adoption (Phase 2-E)
 
 Shingan ships with three CLI flags that make it practical to roll out on an
