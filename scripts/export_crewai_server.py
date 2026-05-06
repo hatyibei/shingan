@@ -352,29 +352,37 @@ def _build_graph(crew: Any, source_path: str) -> Dict[str, Any]:
                 agent_tools.append((a_id, t, tname))
 
     # ---- 2. Agent.tools → Tool nodes + Edges --------------------------------
+    # `tool_seen` is shared with section 4 so manager_agent's tools (which
+    # bypass the regular `agents` enumeration) can be emitted with the same
+    # deduplication semantics (Codex iter3 P2).
     tool_seen: Dict[str, bool] = {}
-    for a_id, tool, tname in agent_tools:
-        t_id = _tool_id(crew_id, tname)
-        if t_id not in tool_seen:
-            tool_seen[t_id] = True
-            cat = _detect_tool_category(tool, tname)
-            tool_cfg: Dict[str, Any] = {"category": cat, "tool_name": tname}
-            desc = _read(tool, "description")
-            if desc:
-                tool_cfg["description"] = _stringify(desc)
-            args = _read(tool, "args_schema", "input_schema")
-            if args is not None:
-                # Pydantic schemas → just the class name; full schema goes in
-                # via model_json_schema() if downstream rules need it.
-                tool_cfg["args_schema"] = type(args).__name__
-            out_nodes.append({
-                "id":     t_id,
-                "name":   tname,
-                "type":   "tool",
-                "config": tool_cfg,
-                "pos":    {"file": source_path, "line": 0, "col": 0},
-            })
-        out_edges.append({"from": a_id, "to": t_id, "condition": "uses_tool"})
+
+    def _emit_agent_tools(a_id: str, tools_iter: List[Tuple[str, Any, str]]) -> None:
+        for src_id, tool, tname in tools_iter:
+            t_id = _tool_id(crew_id, tname)
+            if t_id not in tool_seen:
+                tool_seen[t_id] = True
+                cat = _detect_tool_category(tool, tname)
+                tool_cfg: Dict[str, Any] = {"category": cat, "tool_name": tname}
+                desc = _read(tool, "description")
+                if desc:
+                    tool_cfg["description"] = _stringify(desc)
+                args = _read(tool, "args_schema", "input_schema")
+                if args is not None:
+                    # Pydantic schemas → just the class name; full schema
+                    # goes in via model_json_schema() if downstream rules
+                    # need it.
+                    tool_cfg["args_schema"] = type(args).__name__
+                out_nodes.append({
+                    "id":     t_id,
+                    "name":   tname,
+                    "type":   "tool",
+                    "config": tool_cfg,
+                    "pos":    {"file": source_path, "line": 0, "col": 0},
+                })
+            out_edges.append({"from": src_id, "to": t_id, "condition": "uses_tool"})
+
+    _emit_agent_tools("", agent_tools)
 
     # ---- 3. Tasks → Tool nodes + sequential / hierarchical edges -----------
     tasks = _read(crew, "tasks", default=[]) or []
@@ -468,6 +476,19 @@ def _build_graph(crew: Any, source_path: str) -> Dict[str, Any]:
                     "config": mcfg,
                     "pos":    {"file": source_path, "line": 0, "col": 0},
                 })
+            # Codex iter3 P2: also emit any tools attached to the manager
+            # agent so eval_missing / unbounded_tool_arg etc. can fire on
+            # `manager → tool` paths (e.g. a manager equipped with
+            # `python_repl`).
+            mgr_tools = _read(manager_agent, "tools", default=[]) or []
+            if isinstance(mgr_tools, (list, tuple)) and mgr_tools:
+                pairs: List[Tuple[str, Any, str]] = []
+                for t in mgr_tools:
+                    tname = _stringify(_read(t, "name", "_name",
+                                             default=type(t).__name__),
+                                        max_len=80) or type(t).__name__
+                    pairs.append((manager_id, t, tname))
+                _emit_agent_tools(manager_id, pairs)
         elif manager_llm is not None:
             mname = _stringify(_read(manager_llm, "model_name", "model",
                                      default=type(manager_llm).__name__),

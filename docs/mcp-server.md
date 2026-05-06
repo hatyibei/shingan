@@ -54,9 +54,11 @@ Read a workflow from disk and analyse it. `framework` is one of:
 | `json`    | single `.json` file  |
 | `adk-go`  | single `.go` file OR a directory walked recursively |
 | `samurai` | single SamuraiAI JSON file |
-| `langgraph` | single `.py` file OR a directory (Python long-lived subprocess; needs `pip install langgraph`) |
+| `langgraph` | single `.py` file (Python long-lived subprocess; needs `pip install langgraph`) |
 | `n8n`     | single `.json` file (n8n workflow export, pure Go) |
-| `crewai`  | single `.py` file OR a directory (Python long-lived subprocess; needs `pip install "crewai>=0.50.0"`) |
+| `crewai`  | single `.py` file (Python long-lived subprocess; needs `pip install "crewai>=0.50.0"`) |
+
+> **Note**: directory inputs for `langgraph` / `crewai` are CLI-only. `shingan_analyze_file` from MCP currently walks directories for `adk-go` only; pass each `.py` file individually for the Python parsers.
 
 Same `FindingList` output shape as `shingan_analyze_graph`.
 
