@@ -522,9 +522,21 @@ def _build_graph(crew: Any, source_path: str) -> Dict[str, Any]:
             # already in seen[] (manager_agent is typically NOT in agents).
             mrole = _stringify(_read(manager_agent, "role", default="manager"),
                                max_len=120) or "manager"
-            manager_id = _agent_id(crew_id, mrole)
-            agent_id_by_obj[id(manager_agent)] = manager_id
-            agent_id_by_role.setdefault(mrole, manager_id)
+            # Codex iter8 P2: if a worker in crew.agents already claimed
+            # this role's ID, suffix to avoid collapsing distinct objects
+            # (e.g. manager_agent and a worker both labelled "manager").
+            # Without this the manager_agent's tools/config are silently
+            # dropped and delegate edges originate from the worker.
+            existing = agent_id_by_obj.get(id(manager_agent))
+            if existing:
+                manager_id = existing
+            else:
+                manager_id = _agent_id(crew_id, mrole)
+                if manager_id in agent_id_by_obj.values():
+                    role_collision_count[mrole] = role_collision_count.get(mrole, 1) + 1
+                    manager_id = _agent_id(crew_id, f"{mrole}-{role_collision_count[mrole]}")
+                agent_id_by_obj[id(manager_agent)] = manager_id
+                agent_id_by_role.setdefault(mrole, manager_id)
             if manager_id not in seen:
                 seen[manager_id] = True
                 mmodel, mllm_cfg = _agent_model(manager_agent)
