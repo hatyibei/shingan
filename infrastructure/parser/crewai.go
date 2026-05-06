@@ -186,7 +186,10 @@ func (p *CrewAIParser) ensureHealthy() error {
 // errCrewAIMissing is the canonical error surfaced when the Python
 // interpreter is reachable but `crewai` itself is not importable.
 // Tests assert against this exact message; do not reword without bumping
-// CHANGELOG.
+// CHANGELOG. It wraps ErrPythonFrameworkMissing so directory walks can
+// distinguish "framework missing" from per-file syntax errors via
+// errors.Is and propagate the former (Codex iter4 P2).
 var errCrewAIMissing = fmt.Errorf(
-	"crewai parser: Python 3.x and `pip install crewai` (>=0.50.0) required for CrewAI format",
+	"crewai parser: Python 3.x and `pip install crewai` (>=0.50.0) required for CrewAI format: %w",
+	ErrPythonFrameworkMissing,
 )

@@ -198,9 +198,12 @@ func (p *LangGraphParser) ensureHealthy() error {
 // errLangGraphMissing is the canonical error surfaced when the Python
 // interpreter is reachable but `langgraph` itself is not importable.
 // Tests assert against this exact message; do not reword without bumping
-// CHANGELOG.
+// CHANGELOG. It wraps ErrPythonFrameworkMissing so directory walks can
+// distinguish "framework missing" from per-file syntax errors via
+// errors.Is and propagate the former (Codex iter4 P2).
 var errLangGraphMissing = fmt.Errorf(
-	"langgraph parser: Python 3.x and `pip install langgraph` required for LangGraph format",
+	"langgraph parser: Python 3.x and `pip install langgraph` required for LangGraph format: %w",
+	ErrPythonFrameworkMissing,
 )
 
 // shimGraphMetadata mirrors the optional metadata block emitted by the shim.

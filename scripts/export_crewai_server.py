@@ -395,8 +395,11 @@ def _build_graph(crew: Any, source_path: str) -> Dict[str, Any]:
             continue
         desc = _stringify(_read(task, "description", default=f"task_{i}"), max_len=120)
         # Many CrewAI tasks share the same description prefix; disambiguate
-        # by index so edges land on the right destination.
-        t_label = f"{desc[:60]}#{i}" if desc else f"task_{i}"
+        # by index so edges land on the right destination. Use `-` rather
+        # than `#` because `_safe_id` strips `#` (Codex iter4 P2): task
+        # descriptions like "a1" + "a" at indices 0 / 10 would otherwise
+        # both collapse to "a10".
+        t_label = f"{desc[:60]}-{i}" if desc else f"task_{i}"
         t_id = _task_id(crew_id, t_label)
         task_ids.append(t_id)
 

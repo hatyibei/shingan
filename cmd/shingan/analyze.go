@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"github.com/hatyibei/shingan/domain"
 	baselineio "github.com/hatyibei/shingan/infrastructure/baseline"
 	"github.com/hatyibei/shingan/infrastructure/factory"
+	"github.com/hatyibei/shingan/infrastructure/parser"
 	"github.com/spf13/cobra"
 )
 
@@ -278,6 +280,13 @@ func parseSourceDirectoryAsMulti(dir string, p application.WorkflowParser, allow
 		}
 		g, err := parseFile(path, p)
 		if err != nil {
+			// Codex iter4 P2: propagate framework-missing errors so CI
+			// fails loudly when `pip install <fw>` is missing, instead
+			// of silently producing 0 findings. Single-file syntax
+			// errors continue to be skipped with a warning.
+			if errors.Is(err, parser.ErrPythonFrameworkMissing) {
+				return fmt.Errorf("crewai/langgraph framework not installed: %w", err)
+			}
 			_, _ = fmt.Fprintf(os.Stderr, "warning: skipping %q: %v\n", path, err)
 			return nil
 		}

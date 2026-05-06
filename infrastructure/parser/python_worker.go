@@ -343,6 +343,14 @@ func (w *PythonWorker) kill() error {
 // today). The caller in kill() above falls back to cmd.Process.Kill().
 var errProcessGroupNotSupported = errSentinel("process group operations not supported on this platform")
 
+// ErrPythonFrameworkMissing is wrapped by the LangGraph and CrewAI
+// parsers' framework-missing errors so callers can distinguish
+// "missing dependency" from per-file syntax errors via errors.Is.
+// Directory walks should propagate (errors.Is(err, ErrPythonFrameworkMissing))
+// rather than swallow these as per-file warnings — a missing dependency
+// is a global failure, not a single-file problem (Codex iter4 P2).
+var ErrPythonFrameworkMissing = errSentinel("python framework not importable; check pip install")
+
 type errSentinel string
 
 func (e errSentinel) Error() string { return string(e) }
