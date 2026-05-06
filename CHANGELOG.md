@@ -4,8 +4,10 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-06
+
 ### Added
-- **n8n parser (v0.7 target)** — pure Go `WorkflowParser` for [n8n](https://n8n.io) workflow JSON exports.
+- **n8n parser** — pure Go `WorkflowParser` for [n8n](https://n8n.io) workflow JSON exports.
   - `infrastructure/parser/n8n.go` + `n8n_test.go`: `--format=n8n` for `shingan analyze`. No Python or Node bridge required (n8n is JSON-DSL).
   - NodeType mapping: substring-based + case-insensitive — `openai/chatgpt/anthropic/claude/gemini/...` → LLM; `if/switch/filter/router` → Condition; `code/function/executeCommand` → Tool with `category=code_execution`; `webhook/trigger` → Tool with `category=trigger`; everything else → Tool with `category=api`.
   - Edge mapping: `connections.<src>.main` 2-D array decoded into `Edge.Condition` ("true"/"false"/"branch_<n>"); langchain `ai_*` sub-connections skipped as decoration.

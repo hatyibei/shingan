@@ -1,6 +1,6 @@
 {
   "name": "shingan-lint",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "AI Agent Workflow Static Analyzer — detect infinite loops, cost explosions, PII leaks, prompt injection sinks before execution. CLI wrapper that downloads the platform-specific Go binary from GitHub Releases.",
   "keywords": [
     "ai-agent",

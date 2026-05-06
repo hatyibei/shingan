@@ -215,7 +215,7 @@ go test -tags=demo -v -run TestDemo_ .
 
 - **v0.1〜v0.5** (Apr 2026): JSON / ADK-Go / Samurai parsers, Confidence × Severity 2-axis, SARIF / GitHub Action, 9 rules ✓
 - **v0.6** (May 2026): ESLint-style visitor + 3-tier split (ADR-006/007), shingan-lsp, shingan-mcp, LangGraph parser, 20 rules, `shingan-lint` npm distribution, tag→release→npm-publish automation ✓
-- **v0.7** (in progress on `main`): n8n parser (pure Go, JSON DSL) merged, bilingual EN/JA docs — release tag pending
+- **v0.7** (May 2026): n8n parser (pure Go, JSON DSL), bilingual EN/JA docs ✓
 - **v0.8+**: CrewAI / Mastra parsers, 30+ rules, Plugin SDK preview, official site + demo video
 - **v1.0**: 5+ frameworks × 25+ rules, Plugin SDK GA, Marketplace listing
 
