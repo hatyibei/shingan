@@ -5,6 +5,15 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 ## [Unreleased]
 
 ### Added
+- **n8n parser (v0.7 target)** — pure Go `WorkflowParser` for [n8n](https://n8n.io) workflow JSON exports.
+  - `infrastructure/parser/n8n.go` + `n8n_test.go`: `--format=n8n` for `shingan analyze`. No Python or Node bridge required (n8n is JSON-DSL).
+  - NodeType mapping: substring-based + case-insensitive — `openai/chatgpt/anthropic/claude/gemini/...` → LLM; `if/switch/filter/router` → Condition; `code/function/executeCommand` → Tool with `category=code_execution`; `webhook/trigger` → Tool with `category=trigger`; everything else → Tool with `category=api`.
+  - Edge mapping: `connections.<src>.main` 2-D array decoded into `Edge.Condition` ("true"/"false"/"branch_<n>"); langchain `ai_*` sub-connections skipped as decoration.
+  - Entry-node detection: trigger node first, else first node with no incoming `main` edges, else first node in array.
+  - Disabled nodes (`"disabled": true`) silently dropped along with incident edges (mirrors n8n runtime).
+  - Five reference fixtures under `testdata/n8n/`: `simple_chain`, `branching`, `loop`, `multi_step`, `ai_agent`.
+  - `domain/testutil/GenerateN8nGraph` + `cmd/shingan-gen --pattern=n8n-simple` for property tests / sample generation.
+  - `docs/n8n.md` (+ `docs/n8n.ja.md`): bilingual usage / mapping / troubleshooting reference.
 - **Phase 2 batch 2: 5 new builtin rules (Factory 15 → 20)**
   - **`retry_storm` (Path)** — Tool with retries × parallelism = blast radius. >=100 Critical (0.9 exact_static_match), >=30 Warning (0.7 heuristic_pattern), >=10 Info (0.5 heuristic_pattern). 14 tests. shingan-gen pattern `retry-storm`.
   - **`circular_dep_agents` (Path)** — A→B→A delegation cycle detection in multi-agent workflows. Source via Config[agent_role] / sub_agents non-empty. 2-agent Warning 0.85 / 3+ agent Warning 0.75 / self-ref Info 0.6. 13 tests. Coexists with cycle_detection (regression-tested via TestCircularDepAgents_CoexistsWithCycleDetection). shingan-gen pattern `circular-dep-agents`.
