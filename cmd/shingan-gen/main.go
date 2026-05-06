@@ -27,6 +27,7 @@
 //	unbounded-tool-arg     — Tool argument schema without maxLength/maxItems (unbounded_tool_arg Warning)
 //	prompt-secret          — Hardcoded API key in LLM prompt template (secret_in_prompt_template Critical)
 //	dataset-missing        — Production-flagged graph without eval_dataset (missing_eval_dataset Warning)
+//	n8n-simple             — Webhook → ChatGPT → HTTP Request (n8n-shape graph for parser smoke tests)
 package main
 
 import (
@@ -110,8 +111,10 @@ func generate(pattern string, size int, seed int64) (*domain.WorkflowGraph, erro
 		return testutil.GenerateSecretInPromptTemplateGraph(seed), nil
 	case "dataset-missing":
 		return testutil.GenerateMissingEvalDatasetGraph(seed), nil
+	case "n8n-simple":
+		return testutil.GenerateN8nGraph(seed), nil
 	default:
-		return nil, fmt.Errorf("unknown pattern %q: must be one of random, clean, buggy, infinite-loop, unreachable, pii-leak, cycle, secret-exposure, deprecated-model, high-fanout, temperature-misuse, model-mismatch, prompt-injection-sink, eval-missing, dynamic-construction, retry-storm, circular-dep-agents, unbounded-tool-arg, prompt-secret, dataset-missing", pattern)
+		return nil, fmt.Errorf("unknown pattern %q: must be one of random, clean, buggy, infinite-loop, unreachable, pii-leak, cycle, secret-exposure, deprecated-model, high-fanout, temperature-misuse, model-mismatch, prompt-injection-sink, eval-missing, dynamic-construction, retry-storm, circular-dep-agents, unbounded-tool-arg, prompt-secret, dataset-missing, n8n-simple", pattern)
 	}
 }
 
@@ -148,6 +151,7 @@ Patterns:
   unbounded-tool-arg    Tool args_schema without maxLength/maxItems — triggers unbounded_tool_arg (Warning)
   prompt-secret         Hardcoded sk-... in LLM prompt template — triggers secret_in_prompt_template (Critical)
   dataset-missing       Production-flagged graph without eval_dataset — triggers missing_eval_dataset (Warning)
+  n8n-simple            Webhook → ChatGPT → HTTP Request — n8n-shape graph for parser smoke tests
 
 The output is valid JSON compatible with: shingan analyze --format json --input <path>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -173,7 +177,7 @@ The output is valid JSON compatible with: shingan analyze --format json --input 
 		},
 	}
 
-	rootCmd.Flags().StringVar(&pattern, "pattern", "random", "Pattern: random|clean|buggy|infinite-loop|unreachable|pii-leak|cycle|secret-exposure|deprecated-model|high-fanout|temperature-misuse|model-mismatch|prompt-injection-sink|eval-missing|dynamic-construction|retry-storm|circular-dep-agents|unbounded-tool-arg|prompt-secret|dataset-missing")
+	rootCmd.Flags().StringVar(&pattern, "pattern", "random", "Pattern: random|clean|buggy|infinite-loop|unreachable|pii-leak|cycle|secret-exposure|deprecated-model|high-fanout|temperature-misuse|model-mismatch|prompt-injection-sink|eval-missing|dynamic-construction|retry-storm|circular-dep-agents|unbounded-tool-arg|prompt-secret|dataset-missing|n8n-simple")
 	rootCmd.Flags().IntVar(&size, "size", 10, "Number of nodes (for random/clean/unreachable/cycle patterns)")
 	rootCmd.Flags().Int64Var(&seed, "seed", 42, "Random seed for reproducible output")
 	rootCmd.Flags().StringVar(&output, "output", "", "Output file path (default: stdout; use '-' for stdout)")

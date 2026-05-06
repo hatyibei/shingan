@@ -1,0 +1,37 @@
+{
+  "name": "Simple Chain (clean)",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "parameters": {"path": "ingest"},
+      "position": [0, 0]
+    },
+    {
+      "id": "2",
+      "name": "ChatGPT",
+      "type": "n8n-nodes-base.openAi",
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "prompt_template": "Summarize the user's request: {{$json.body}}"
+      },
+      "position": [200, 0]
+    },
+    {
+      "id": "3",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.gmail",
+      "parameters": {"operation": "send"},
+      "position": [400, 0]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{"node": "ChatGPT", "type": "main", "index": 0}]]
+    },
+    "ChatGPT": {
+      "main": [[{"node": "Send Email", "type": "main", "index": 0}]]
+    }
+  }
+}

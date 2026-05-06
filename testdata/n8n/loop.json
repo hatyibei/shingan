@@ -1,0 +1,51 @@
+{
+  "name": "Loop (split-in-batches with retry)",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "parameters": {"rule": "every 5 minutes"},
+      "position": [0, 0]
+    },
+    {
+      "id": "2",
+      "name": "Fetch Items",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {"url": "https://api.example.com/queue"},
+      "position": [200, 0]
+    },
+    {
+      "id": "3",
+      "name": "Split In Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "parameters": {"batchSize": 10},
+      "position": [400, 0]
+    },
+    {
+      "id": "4",
+      "name": "Process Item",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "url": "https://api.upstream.example.com/process",
+        "retries": 5,
+        "max_concurrency": 20
+      },
+      "position": [600, 0]
+    }
+  ],
+  "connections": {
+    "Schedule": {
+      "main": [[{"node": "Fetch Items", "type": "main", "index": 0}]]
+    },
+    "Fetch Items": {
+      "main": [[{"node": "Split In Batches", "type": "main", "index": 0}]]
+    },
+    "Split In Batches": {
+      "main": [[{"node": "Process Item", "type": "main", "index": 0}]]
+    },
+    "Process Item": {
+      "main": [[{"node": "Split In Batches", "type": "main", "index": 0}]]
+    }
+  }
+}
