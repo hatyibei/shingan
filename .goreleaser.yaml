@@ -98,8 +98,6 @@ archives:
       - README.md
       - LICENSE
       - CHANGELOG.md
-      - docs/runtime-demo.md
-      - docs/adk-webui-integration.md
 
 checksum:
   name_template: "checksums.txt"
