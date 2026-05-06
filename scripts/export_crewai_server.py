@@ -286,8 +286,18 @@ def _build_graph(crew: Any, source_path: str) -> Dict[str, Any]:
       * Task              → NodeTypeTool (one per task)
       * Each agent.tools  → NodeTypeTool (one per tool, deduplicated)
       * Process.sequential → Tasks linked head-to-tail (Task[i] → Task[i+1])
-      * Process.hierarchical → manager → every worker → manager (over-approx)
-      * Agent.tools[t]    → Edge(agent_id → tool_id, condition="uses_tool")
+      * Process.hierarchical → manager → every worker (over-approximation;
+                               no `worker → manager` back-edge so we don't
+                               manufacture false cycle_detection findings —
+                               the result-return path isn't a real graph
+                               edge). Manager → Task one-shot dispatches.
+      * Agent.tools[t]    → Edge(agent_id → tool_id), unconditional
+      * Task → Agent      → Edge(task_id → agent_id), unconditional
+    Edge.Condition is reserved for actual conditional dispatch (e.g.
+    `delegate` for manager_llm choosing worker, or bidirectional delegate
+    cycles); free-text labels are never written into Condition because
+    error_handler_checker treats any non-empty value as a try/catch-style
+    fallback (Codex iter5 P2).
     """
     out_nodes: List[Dict[str, Any]] = []
     out_edges: List[Dict[str, Any]] = []
@@ -380,7 +390,13 @@ def _build_graph(crew: Any, source_path: str) -> Dict[str, Any]:
                     "config": tool_cfg,
                     "pos":    {"file": source_path, "line": 0, "col": 0},
                 })
-            out_edges.append({"from": src_id, "to": t_id, "condition": "uses_tool"})
+            # Codex iter5 P2: leave Condition empty for non-control-flow
+            # labels — error_handler_checker treats any non-empty
+            # Condition as conditional fallback, which would incorrectly
+            # mute findings on Agents that have tools but no actual
+            # error-handling branch. The "uses_tool" relationship lives
+            # in the topology itself, not in the Condition string.
+            out_edges.append({"from": src_id, "to": t_id})
 
     _emit_agent_tools("", agent_tools)
 
@@ -418,7 +434,8 @@ def _build_graph(crew: Any, source_path: str) -> Dict[str, Any]:
                 # Edge Task → Agent so the Agent (and its Tools) is reachable
                 # from the entry Task. Mental model: the Task pulls in the
                 # Agent's expertise during execution.
-                out_edges.append({"from": t_id, "to": assigned, "condition": "uses_agent"})
+                # Codex iter5 P2: no Condition — see _emit_agent_tools.
+                out_edges.append({"from": t_id, "to": assigned})
         async_exec = _read(task, "async_execution", default=False)
         if async_exec:
             cfg["async_execution"] = True
@@ -528,11 +545,20 @@ def _build_graph(crew: Any, source_path: str) -> Dict[str, Any]:
                 worker_id = agent_id_by_obj.get(id(agent))
                 if not worker_id or worker_id == manager_id:
                     continue
+                # Manager → worker is a real conditional dispatch
+                # (manager_llm chooses which worker), so keep the
+                # Condition. Codex iter5 P2: drop the worker → manager
+                # `report` back-edge — it modelled the result return
+                # path, not a graph dispatch, and was forming false
+                # 2-node cycles that fired cycle_detection Critical on
+                # otherwise valid hierarchical workflows.
                 out_edges.append({"from": manager_id, "to": worker_id, "condition": "delegate"})
-                out_edges.append({"from": worker_id, "to": manager_id, "condition": "report"})
-            # Connect manager into every Task too.
+            # Manager → Task: connect the manager to every Task it
+            # orchestrates. No Condition (the relationship is the edge
+            # itself; "manage" was leaking through error_handler_checker
+            # as a false fallback).
             for tid in task_ids:
-                out_edges.append({"from": manager_id, "to": tid, "condition": "manage"})
+                out_edges.append({"from": manager_id, "to": tid})
         entry_node_id = manager_id or (task_ids[0] if task_ids else "")
     else:
         # Sequential: link Tasks head-to-tail.

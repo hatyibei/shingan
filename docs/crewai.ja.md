@@ -67,8 +67,8 @@ shingan analyze \
 | `Tool` (`@tool` / `BaseTool` 継承) | Tool (`Config["category"]` は heuristic) | 0.8 | `name_heuristic` |
 | `Crew(process=Process.sequential)` | Tasks 順次連結 (Task[i] → Task[i+1]) | 1.0 | `exact_static_match` |
 | `Crew(process=Process.hierarchical, manager_llm=)` | manager → 各 worker → manager (保守的展開) | 0.7 | `over_approximated_dynamic` |
-| `Agent.tools[t]` | エッジ `Agent → Tool`、`condition="uses_tool"` | 1.0 | `exact_static_match` |
-| `Task.agent = A` | エッジ `Task → Agent`、`condition="uses_agent"` (Task が Agent を呼び出す) | 1.0 | `exact_static_match` |
+| `Agent.tools[t]` | エッジ `Agent → Tool` (無条件; Edge.Condition は本来の制御フロー条件にだけ予約) | 1.0 | `exact_static_match` |
+| `Task.agent = A` | エッジ `Task → Agent` (無条件; Task が Agent を呼び出す) | 1.0 | `exact_static_match` |
 | `Agent(allow_delegation=True)` × 2 つ以上 | 該当 Agent 同士に双方向 delegate エッジ | 0.6 | `over_approximated_dynamic` |
 
 ### Tool カテゴリの推定
@@ -107,14 +107,13 @@ Task[0] ──seq──► Task[1] ──seq──► Task[2]
 ### `Process.hierarchical`
 
 ```
-entry = manager (synthetic LLM、`manager_llm` を写像)
-manager ──delegate──► Worker[k]
-manager ◄──report─── Worker[k]
-manager ──manage──► Task[i]
-Task[i] ──uses_agent──► assigned Agent
+entry = manager (synthetic LLM、`manager_llm` または `manager_agent` を写像)
+manager ──delegate──► Worker[k]   (Condition="delegate" — runtime LLM dispatch)
+manager ─────────────► Task[i]    (manager が各 Task を dispatch)
+Task[i] ─────────────► assigned Agent
 ```
 
-manager → worker エッジは保守的展開 (実行時に `manager_llm` が分岐先を決めるため候補全部を列挙)。これらのエッジは Confidence 0.7 / Reason `over_approximated_dynamic`。
+manager → worker エッジは保守的展開 (実行時に LLM が分岐先を決めるため候補全部を列挙)。これらのエッジは Confidence 0.7 / Reason `over_approximated_dynamic`。`worker → manager` の "report" 戻りエッジは **生成しない** — 結果返却パスをグラフエッジとして表現すると `cycle_detection` Critical の偽陽性が出るため。
 
 ## Confidence と ConfidenceReason
 
@@ -137,11 +136,11 @@ Hierarchical のノイズだけ抑えたい場合は `--min-confidence=0.7` で 
 
 | ファイル | パターン | 実測 findings (crewai 1.14.4) |
 |---|---|---|
-| `simple_crew.py` | 1 Agent + 1 Task、`Process.sequential` | クリーン (0 件) |
-| `sequential_pipeline.py` | 3 Agent + 3 Task、`Process.sequential` | クリーン (0 件) |
-| `hierarchical.py` | 2 Agent + `manager_llm=LLM(model="gpt-4o-mini")`、`Process.hierarchical` | Critical 2 件 (`cycle_detection` ×2、manager の双方向 delegate/report エッジ起因) + Warning 2 件 (`circular_dep_agents` ×2、manager↔researcher と manager↔writer ペア) — ADR-013 の保守的展開による設計値; `--min-confidence=0.8` で抑制可 |
-| `multi_tool.py` | 1 Agent + 3 tools (web search / HTTP / `python_repl`) | Critical 1 件 (`eval_missing` Agent → `python_repl` の `code_execution` sink) + Info 1 件 (`pii_leak_scanner` 30%、Task → `http_api_request` external API への path) |
-| `circular_delegation.py` | 2 Agent 両方が `allow_delegation=True` | Critical 1 件 (`cycle_detection` 100% on alpha) + Warning 1 件 (`circular_dep_agents` 85%、alpha↔beta ペア) |
+| `simple_crew.py` | 1 Agent + 1 Task、`Process.sequential` | Warning 1 件 (`error_handler_checker`: Task に error-handling 分岐なし) |
+| `sequential_pipeline.py` | 3 Agent + 3 Task、`Process.sequential` | Warning 3 件 (各 Task に `error_handler_checker`) |
+| `hierarchical.py` | 2 Agent + `manager_llm=LLM(model="gpt-4o-mini")`、`Process.hierarchical` | Warning 2 件 (各 Task の `error_handler_checker`)。v0.8 で `worker → manager` 戻りエッジを削除したため `cycle_detection` 偽陽性は消滅 |
+| `multi_tool.py` | 1 Agent + 3 tools (web search / HTTP / `python_repl`) | Critical 1 件 (`eval_missing` Agent → `python_repl` の `code_execution` sink) + Warning 2 件 (Task と tool 持ち Agent の `error_handler_checker`) + Info 1 件 (`pii_leak_scanner` 30%、Task → `http_api_request` external API への path) |
+| `circular_delegation.py` | 2 Agent 両方が `allow_delegation=True` | Critical 1 件 (`cycle_detection` 100% on alpha — 双方向 delegate cycle は本物) + Warning 3 件 (`circular_dep_agents` 85% alpha↔beta ペア + 各 Task の `error_handler_checker`) |
 
 実行例:
 
@@ -161,7 +160,7 @@ $ shingan analyze --format crewai --input testdata/crewai/multi_tool.py --output
 
 | Total | Critical | Warning | Info |
 |-------|----------|---------|------|
-| 2     | 1        | 0       | 1    |
+| 4     | 1        | 2       | 1    |
 
 ## Critical
 
@@ -169,11 +168,18 @@ $ shingan analyze --format crewai --input testdata/crewai/multi_tool.py --output
 |--------------|----------------------------|------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
 | eval_missing | crew::tool::python_repl    | 90%        | LLM node "crew::agent::multi_tool_assistant" reaches code-execution tool "crew::tool::python_repl" (no validation); LLM output flows into a code runner without sanitisation |
 
+## Warning
+
+| Rule                  | Node                                       | Confidence | Message                                                                                                          |
+|-----------------------|--------------------------------------------|------------|------------------------------------------------------------------------------------------------------------------|
+| error_handler_checker | crew::task::Answer_the_users_question-0    | 80%        | Tool node has no conditional outgoing edges: error handling is missing                                           |
+| error_handler_checker | crew::agent::multi_tool_assistant          | 80%        | LLM node uses tool(s) but has no conditional outgoing edges: error handling for tool failures is missing         |
+
 ## Info
 
-| Rule              | Node                          | Confidence | Message                                                                                                                                       |
-|-------------------|-------------------------------|------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
-| pii_leak_scanner  | crew::tool::http_api_request  | 30%        | potential PII leak: path from RAG/PII node "crew::task::Answer_the_users_question0" to external tool "crew::tool::http_api_request" without Human approval gate |
+| Rule              | Node                          | Confidence | Message                                                                                                                                                                  |
+|-------------------|-------------------------------|------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| pii_leak_scanner  | crew::tool::http_api_request  | 30%        | potential PII leak: path from RAG/PII node "crew::task::Answer_the_users_question-0" to external tool "crew::tool::http_api_request" (category="api") without Human gate |
 ```
 
 ## 設計参照

@@ -1269,9 +1269,15 @@ func GenerateCrewAIGraph(seed int64) *domain.WorkflowGraph {
 	}
 
 	edges = append(edges,
-		domain.Edge{From: researchTask, To: researcher, Condition: "uses_agent"},
-		domain.Edge{From: writeTask, To: writer, Condition: "uses_agent"},
-		domain.Edge{From: researchTask, To: writeTask}, // sequential
+		// Edge.Condition is reserved for true conditional dispatch (e.g.
+		// LangGraph add_conditional_edges, manager_llm delegate). The
+		// task → agent / task → task relationships in CrewAI are
+		// unconditional data-flow, mirrored here without a Condition so
+		// error_handler_checker doesn't treat them as fallback branches
+		// (Codex iter5 P2).
+		domain.Edge{From: researchTask, To: researcher},
+		domain.Edge{From: writeTask, To: writer},
+		domain.Edge{From: researchTask, To: writeTask},
 	)
 
 	return &domain.WorkflowGraph{

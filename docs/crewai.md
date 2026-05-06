@@ -67,8 +67,8 @@ shingan analyze \
 | `Tool` (`@tool` / `BaseTool` subclass) | Tool (`Config["category"]` from heuristic) | 0.8 | `name_heuristic` |
 | `Crew(process=Process.sequential)` | Tasks chained head-to-tail (Task[i] → Task[i+1]) | 1.0 | `exact_static_match` |
 | `Crew(process=Process.hierarchical, manager_llm=)` | manager → every worker → manager (over-approximation) | 0.7 | `over_approximated_dynamic` |
-| `Agent.tools[t]` | Edge `Agent → Tool`, `condition="uses_tool"` | 1.0 | `exact_static_match` |
-| `Task.agent = A` | Edge `Task → Agent`, `condition="uses_agent"` (mental model: Task pulls in Agent during execution) | 1.0 | `exact_static_match` |
+| `Agent.tools[t]` | Edge `Agent → Tool` (unconditional; Edge.Condition is reserved for true control-flow conditions) | 1.0 | `exact_static_match` |
+| `Task.agent = A` | Edge `Task → Agent` (unconditional; mental model: Task pulls in Agent during execution) | 1.0 | `exact_static_match` |
 | `Agent(allow_delegation=True)` × ≥2 agents | Bidirectional delegate edges between every delegating pair | 0.6 | `over_approximated_dynamic` |
 
 ### Tool category heuristic
@@ -107,14 +107,13 @@ All Tasks reach all Agents and all Tools transitively, so reachability rules (`u
 ### `Process.hierarchical`
 
 ```
-entry = manager (synthetic LLM, modelled after `manager_llm`)
-manager ──delegate──► Worker[k]
-manager ◄──report─── Worker[k]
-manager ──manage──► Task[i]
-Task[i] ──uses_agent──► assigned Agent
+entry = manager (synthetic LLM, modelled after `manager_llm` or `manager_agent`)
+manager ──delegate──► Worker[k]   (Condition="delegate" — runtime LLM dispatch)
+manager ─────────────► Task[i]    (manager dispatches each Task)
+Task[i] ─────────────► assigned Agent
 ```
 
-The manager → worker edges are over-approximated (the runtime `manager_llm` decides which worker to invoke, so we list every candidate), giving these edges Confidence 0.7 / Reason `over_approximated_dynamic`.
+The manager → worker edges are over-approximated (the runtime LLM decides which worker to invoke, so we list every candidate), giving these edges Confidence 0.7 / Reason `over_approximated_dynamic`. The `worker → manager` "report" back-edge is **not** materialised — modelling the result-return path as a graph edge created false 2-node cycles that fired `cycle_detection` Critical on otherwise valid hierarchical workflows.
 
 ## Confidence and ConfidenceReason
 
@@ -137,11 +136,11 @@ Five reference samples live under `testdata/crewai/`:
 
 | File | Pattern | Findings observed (crewai 1.14.4) |
 |---|---|---|
-| `simple_crew.py` | 1 Agent + 1 Task, `Process.sequential` | clean (0 findings) |
-| `sequential_pipeline.py` | 3 Agents + 3 Tasks, `Process.sequential` | clean (0 findings) |
-| `hierarchical.py` | 2 Agents + `manager_llm=LLM(model="gpt-4o-mini")`, `Process.hierarchical` | 2 Critical (`cycle_detection` ×2 on the manager from the bidirectional delegate/report edges) + 2 Warning (`circular_dep_agents` ×2 on manager↔researcher and manager↔writer pairs) — by design (ADR-013 over-approximation); filter with `--min-confidence=0.8` to suppress |
-| `multi_tool.py` | 1 Agent + 3 tools (web search / HTTP / `python_repl`) | 1 Critical (`eval_missing` on Agent → `python_repl` `code_execution` sink) + 1 Info (`pii_leak_scanner` 30% on the path Task → `http_api_request` external API) |
-| `circular_delegation.py` | 2 Agents both with `allow_delegation=True` | 1 Critical (`cycle_detection` 100% on alpha) + 1 Warning (`circular_dep_agents` 85% on alpha↔beta pair) |
+| `simple_crew.py` | 1 Agent + 1 Task, `Process.sequential` | 1 Warning (`error_handler_checker` on the Task — no error-handling branch) |
+| `sequential_pipeline.py` | 3 Agents + 3 Tasks, `Process.sequential` | 3 Warning (`error_handler_checker` on each Task in the chain) |
+| `hierarchical.py` | 2 Agents + `manager_llm=LLM(model="gpt-4o-mini")`, `Process.hierarchical` | 2 Warning (`error_handler_checker` on each Task — no false `cycle_detection` since v0.8 dropped the `worker → manager` back-edge) |
+| `multi_tool.py` | 1 Agent + 3 tools (web search / HTTP / `python_repl`) | 1 Critical (`eval_missing` on Agent → `python_repl` `code_execution` sink) + 2 Warning (`error_handler_checker` on the Task and on the tool-using Agent) + 1 Info (`pii_leak_scanner` 30% on the path Task → `http_api_request` external API) |
+| `circular_delegation.py` | 2 Agents both with `allow_delegation=True` | 1 Critical (`cycle_detection` 100% on alpha — the bidirectional delegate cycle is real) + 3 Warning (`circular_dep_agents` 85% on alpha↔beta pair + `error_handler_checker` on each of the 2 Tasks) |
 
 Run them with:
 
@@ -161,7 +160,7 @@ $ shingan analyze --format crewai --input testdata/crewai/multi_tool.py --output
 
 | Total | Critical | Warning | Info |
 |-------|----------|---------|------|
-| 2     | 1        | 0       | 1    |
+| 4     | 1        | 2       | 1    |
 
 ## Critical
 
@@ -169,11 +168,18 @@ $ shingan analyze --format crewai --input testdata/crewai/multi_tool.py --output
 |--------------|----------------------------|------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
 | eval_missing | crew::tool::python_repl    | 90%        | LLM node "crew::agent::multi_tool_assistant" reaches code-execution tool "crew::tool::python_repl" (no validation); LLM output flows into a code runner without sanitisation |
 
+## Warning
+
+| Rule                  | Node                                       | Confidence | Message                                                                                                          |
+|-----------------------|--------------------------------------------|------------|------------------------------------------------------------------------------------------------------------------|
+| error_handler_checker | crew::task::Answer_the_users_question-0    | 80%        | Tool node has no conditional outgoing edges: error handling is missing                                           |
+| error_handler_checker | crew::agent::multi_tool_assistant          | 80%        | LLM node uses tool(s) but has no conditional outgoing edges: error handling for tool failures is missing         |
+
 ## Info
 
-| Rule              | Node                          | Confidence | Message                                                                                                                                       |
-|-------------------|-------------------------------|------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
-| pii_leak_scanner  | crew::tool::http_api_request  | 30%        | potential PII leak: path from RAG/PII node "crew::task::Answer_the_users_question0" to external tool "crew::tool::http_api_request" without Human approval gate |
+| Rule              | Node                          | Confidence | Message                                                                                                                                                                  |
+|-------------------|-------------------------------|------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| pii_leak_scanner  | crew::tool::http_api_request  | 30%        | potential PII leak: path from RAG/PII node "crew::task::Answer_the_users_question-0" to external tool "crew::tool::http_api_request" (category="api") without Human gate |
 ```
 
 ## Design references
