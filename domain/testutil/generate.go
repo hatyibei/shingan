@@ -1222,8 +1222,10 @@ func GenerateCrewAIGraph(seed int64) *domain.WorkflowGraph {
 	const crew = "smoke_test_crew"
 	researcher := crew + "::agent::researcher"
 	writer := crew + "::agent::writer"
-	researchTask := crew + "::task::find_sources#0"
-	writeTask := crew + "::task::write_report#1"
+	// Use `-` rather than `#` as the index separator for parity with the
+	// Python shim's task IDs (Codex iter4 P2: `_safe_id` strips `#`).
+	researchTask := crew + "::task::find_sources-0"
+	writeTask := crew + "::task::write_report-1"
 
 	nodes[researcher] = &domain.Node{
 		ID:   researcher,
