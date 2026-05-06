@@ -1,0 +1,70 @@
+{
+  "name": "Multi-Step (multiple LLM calls + tool fan-out)",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "parameters": {"path": "rag-pipeline"},
+      "position": [0, 0]
+    },
+    {
+      "id": "2",
+      "name": "Embed",
+      "type": "n8n-nodes-base.openAi",
+      "parameters": {
+        "operation": "embed",
+        "model": "text-embedding-3-small"
+      },
+      "position": [200, 0]
+    },
+    {
+      "id": "3",
+      "name": "Vector Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {"url": "https://api.pinecone.io/query"},
+      "position": [400, 0]
+    },
+    {
+      "id": "4",
+      "name": "Generator",
+      "type": "n8n-nodes-base.openAi",
+      "parameters": {
+        "model": "gpt-4o",
+        "prompt_template": "Answer with retrieved context: {{$json.context}}\n\nQuestion: {{$json.question}}"
+      },
+      "position": [600, 0]
+    },
+    {
+      "id": "5",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.gmail",
+      "parameters": {"operation": "send"},
+      "position": [800, -100]
+    },
+    {
+      "id": "6",
+      "name": "Slack Notify",
+      "type": "n8n-nodes-base.slack",
+      "parameters": {"channel": "#answers"},
+      "position": [800, 100]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{"node": "Embed", "type": "main", "index": 0}]]
+    },
+    "Embed": {
+      "main": [[{"node": "Vector Search", "type": "main", "index": 0}]]
+    },
+    "Vector Search": {
+      "main": [[{"node": "Generator", "type": "main", "index": 0}]]
+    },
+    "Generator": {
+      "main": [[
+        {"node": "Send Email",   "type": "main", "index": 0},
+        {"node": "Slack Notify", "type": "main", "index": 0}
+      ]]
+    }
+  }
+}

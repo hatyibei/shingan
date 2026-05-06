@@ -1,0 +1,59 @@
+{
+  "name": "Branching (if-condition)",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "parameters": {"path": "classify"},
+      "position": [0, 0]
+    },
+    {
+      "id": "2",
+      "name": "Classifier",
+      "type": "n8n-nodes-base.openAi",
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "prompt_template": "Is this urgent? Reply YES or NO: {{$json.text}}"
+      },
+      "position": [200, 0]
+    },
+    {
+      "id": "3",
+      "name": "If",
+      "type": "n8n-nodes-base.if",
+      "parameters": {
+        "conditions": {"string": [{"value1": "{{$json.urgent}}", "value2": "YES"}]}
+      },
+      "position": [400, 0]
+    },
+    {
+      "id": "4",
+      "name": "Notify Slack",
+      "type": "n8n-nodes-base.slack",
+      "parameters": {"channel": "#urgent"},
+      "position": [600, -100]
+    },
+    {
+      "id": "5",
+      "name": "Log to DB",
+      "type": "n8n-nodes-base.postgres",
+      "parameters": {"operation": "insert"},
+      "position": [600, 100]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{"node": "Classifier", "type": "main", "index": 0}]]
+    },
+    "Classifier": {
+      "main": [[{"node": "If", "type": "main", "index": 0}]]
+    },
+    "If": {
+      "main": [
+        [{"node": "Notify Slack", "type": "main", "index": 0}],
+        [{"node": "Log to DB",   "type": "main", "index": 0}]
+      ]
+    }
+  }
+}

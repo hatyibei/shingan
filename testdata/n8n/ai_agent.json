@@ -1,0 +1,48 @@
+{
+  "name": "AI Agent (langchain-style)",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "parameters": {"path": "agent"},
+      "position": [0, 0]
+    },
+    {
+      "id": "2",
+      "name": "Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "parameters": {
+        "system_prompt": "You are an assistant. The user said: {{$json.message}}. Respond helpfully."
+      },
+      "position": [300, 0]
+    },
+    {
+      "id": "3",
+      "name": "Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {"url": "https://api.search.example.com"},
+      "position": [600, -100]
+    },
+    {
+      "id": "4",
+      "name": "Code Tool",
+      "type": "n8n-nodes-base.code",
+      "parameters": {"jsCode": "return items"},
+      "position": [600, 100]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{"node": "Agent", "type": "main", "index": 0}]]
+    },
+    "Agent": {
+      "main": [
+        [
+          {"node": "Search",    "type": "main", "index": 0},
+          {"node": "Code Tool", "type": "main", "index": 0}
+        ]
+      ]
+    }
+  }
+}

@@ -729,3 +729,44 @@ func TestGenerateDynamicNodeConstructionGraph_OtherRulesClean(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateN8nGraph_ReturnsValidGraph(t *testing.T) {
+	g := testutil.GenerateN8nGraph(42)
+	if g == nil {
+		t.Fatal("GenerateN8nGraph returned nil")
+	}
+	if len(g.Nodes) != 3 {
+		t.Errorf("len(Nodes) = %d, want 3", len(g.Nodes))
+	}
+	if len(g.Edges) != 2 {
+		t.Errorf("len(Edges) = %d, want 2", len(g.Edges))
+	}
+	if g.EntryNodeID != "Webhook" {
+		t.Errorf("EntryNodeID = %q, want \"Webhook\"", g.EntryNodeID)
+	}
+}
+
+func TestGenerateN8nGraph_NodeTypes(t *testing.T) {
+	g := testutil.GenerateN8nGraph(42)
+	if g.Nodes["Webhook"].Type != domain.NodeTypeTool {
+		t.Errorf("Webhook type = %v, want NodeTypeTool", g.Nodes["Webhook"].Type)
+	}
+	if g.Nodes["ChatGPT"].Type != domain.NodeTypeLLM {
+		t.Errorf("ChatGPT type = %v, want NodeTypeLLM", g.Nodes["ChatGPT"].Type)
+	}
+	if g.Nodes["HTTP Request"].Type != domain.NodeTypeTool {
+		t.Errorf("HTTP Request type = %v, want NodeTypeTool", g.Nodes["HTTP Request"].Type)
+	}
+	// Webhook has trigger category — used by the parser's entry-detection.
+	if cat, _ := g.Nodes["Webhook"].Config["category"].(string); cat != "trigger" {
+		t.Errorf("Webhook category = %q, want \"trigger\"", cat)
+	}
+}
+
+func TestGenerateN8nGraph_Reproducible(t *testing.T) {
+	a := testutil.GenerateN8nGraph(42)
+	b := testutil.GenerateN8nGraph(42)
+	if len(a.Nodes) != len(b.Nodes) || len(a.Edges) != len(b.Edges) {
+		t.Errorf("seed=42 produced different graphs: %v vs %v", a, b)
+	}
+}

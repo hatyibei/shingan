@@ -53,7 +53,7 @@ Exit codes:
 	}
 
 	cmd.Flags().StringVar(&flags.input, "input", "", "Path to the workflow file or directory (required)")
-	cmd.Flags().StringVar(&flags.format, "format", "json", "Input format: json, adk-go, samurai, or langgraph")
+	cmd.Flags().StringVar(&flags.format, "format", "json", "Input format: json, adk-go, samurai, langgraph, or n8n")
 	cmd.Flags().StringVar(&flags.output, "output", "json", "Output format: json, markdown, or sarif")
 	cmd.Flags().StringVar(&flags.outputFile, "output-file", "", "Output file path (default: stdout)")
 	cmd.Flags().Float64Var(&flags.minConfidence, "min-confidence", 0.0, "Exclude findings with confidence below this threshold (0.0–1.0)")
@@ -251,7 +251,7 @@ func loadAsMulti(path, inputFormat string, p application.WorkflowParser, allow [
 	case "langgraph":
 		ext = ".py"
 	default:
-		return nil, fmt.Errorf("directory input is only supported for adk-go and langgraph formats; use a single JSON file for json/samurai formats")
+		return nil, fmt.Errorf("directory input is only supported for adk-go and langgraph formats; use a single JSON file for json/samurai/n8n formats")
 	}
 	return parseSourceDirectoryAsMulti(path, p, allow, ext)
 }
@@ -316,7 +316,7 @@ func loadGraphFiltered(path, inputFormat string, p application.WorkflowParser, a
 	case "langgraph":
 		return parseSourceDirectoryFiltered(path, p, allow, ".py")
 	default:
-		return nil, fmt.Errorf("directory input is only supported for adk-go and langgraph formats; use a single JSON file for json/samurai formats")
+		return nil, fmt.Errorf("directory input is only supported for adk-go and langgraph formats; use a single JSON file for json/samurai/n8n formats")
 	}
 }
 

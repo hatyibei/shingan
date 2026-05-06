@@ -33,8 +33,8 @@ type AnalyzeGraphArgs struct {
 
 // AnalyzeFileArgs is the input schema of shingan_analyze_file.
 type AnalyzeFileArgs struct {
-	Path      string `json:"path" jsonschema:"absolute or working-directory-relative path to the workflow file or adk-go directory"`
-	Framework string `json:"framework" jsonschema:"one of: json, adk-go, samurai"`
+	Path      string `json:"path" jsonschema:"absolute or working-directory-relative path to the workflow file or adk-go/langgraph directory"`
+	Framework string `json:"framework" jsonschema:"one of: json, adk-go, samurai, langgraph, n8n"`
 }
 
 // ExplainRuleArgs is the input schema of shingan_explain_rule.
@@ -102,9 +102,9 @@ func registerTools(server *mcp.Server, deps *toolDeps) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "shingan_analyze_file",
-		Description: "Parse a workflow file (or adk-go directory) from disk " +
+		Description: "Parse a workflow file (or adk-go/langgraph directory) from disk " +
 			"and run all 20 Shingan analysis rules. Supported frameworks: " +
-			"json, adk-go, samurai.",
+			"json, adk-go, samurai, langgraph, n8n.",
 	}, deps.analyzeFile)
 
 	mcp.AddTool(server, &mcp.Tool{

@@ -71,6 +71,40 @@ func TestParserFactory_SamuraiParserCanParseValidInput(t *testing.T) {
 	}
 }
 
+func TestParserFactory_N8n(t *testing.T) {
+	f := factory.NewParserFactory()
+	p, err := f.Create("n8n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := p.(*parser.N8nParser); !ok {
+		t.Errorf("expected *parser.N8nParser, got %T", p)
+	}
+	if got := p.SupportedFormat(); got != "n8n" {
+		t.Errorf("SupportedFormat() = %q, want \"n8n\"", got)
+	}
+}
+
+func TestParserFactory_N8nParserCanParseValidInput(t *testing.T) {
+	f := factory.NewParserFactory()
+	p, err := f.Create("n8n")
+	if err != nil {
+		t.Fatalf("Create(n8n): %v", err)
+	}
+	input := []byte(`{
+		"name": "wf",
+		"nodes": [{"id": "1", "name": "Webhook", "type": "n8n-nodes-base.webhook", "parameters": {}, "position": [0, 0]}],
+		"connections": {}
+	}`)
+	graph, err := p.Parse(input)
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if graph.EntryNodeID != "Webhook" {
+		t.Errorf("EntryNodeID = %q, want \"Webhook\"", graph.EntryNodeID)
+	}
+}
+
 func TestParserFactory_UnknownFormat(t *testing.T) {
 	f := factory.NewParserFactory()
 	p, err := f.Create("yaml")

@@ -1138,7 +1138,62 @@ func GenerateUnboundedToolArgGraph(seed int64) *domain.WorkflowGraph {
 	}
 }
 
-// GenerateModelCardMismatchGraph generates a WorkflowGraph that triggers the
-// model_card_mismatch rule with a Critical finding.
+// GenerateN8nGraph generates a WorkflowGraph that mirrors the shape of an
+// n8n workflow export — a webhook trigger feeding an LLM (n8n's openAi
+// node) which fans out to an HTTP Request tool. The shape exists so tests
+// can verify Shingan rules behave the same way against n8n-derived graphs
+// as they do against ADK-Go / LangGraph inputs.
 //
 // Structure:
+//   - Webhook (Tool, category=trigger) → ChatGPT (LLM) → HTTP Request (Tool, category=api)
+//
+// Expected findings: error_handler_checker fires on the trigger and on the
+// LLM (the LLM uses a Tool but has no conditional outgoing edge).
+func GenerateN8nGraph(seed int64) *domain.WorkflowGraph {
+	_ = seed // deterministic pattern
+
+	nodes := make(map[string]*domain.Node)
+	var edges []domain.Edge
+
+	nodes["Webhook"] = &domain.Node{
+		ID:   "Webhook",
+		Name: "Webhook",
+		Type: domain.NodeTypeTool,
+		Config: map[string]any{
+			"category": "trigger",
+			"n8n_type": "n8n-nodes-base.webhook",
+		},
+	}
+
+	nodes["ChatGPT"] = &domain.Node{
+		ID:   "ChatGPT",
+		Name: "ChatGPT",
+		Type: domain.NodeTypeLLM,
+		Config: map[string]any{
+			"model":           "gpt-4o-mini",
+			"prompt_template": "Summarize the user's request",
+			"n8n_type":        "n8n-nodes-base.openAi",
+		},
+	}
+
+	nodes["HTTP Request"] = &domain.Node{
+		ID:   "HTTP Request",
+		Name: "HTTP Request",
+		Type: domain.NodeTypeTool,
+		Config: map[string]any{
+			"category": "api",
+			"n8n_type": "n8n-nodes-base.httpRequest",
+		},
+	}
+
+	edges = append(edges,
+		domain.Edge{From: "Webhook", To: "ChatGPT"},
+		domain.Edge{From: "ChatGPT", To: "HTTP Request"},
+	)
+
+	return &domain.WorkflowGraph{
+		Nodes:       nodes,
+		Edges:       edges,
+		EntryNodeID: "Webhook",
+	}
+}

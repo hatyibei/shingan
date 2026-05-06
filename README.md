@@ -191,7 +191,7 @@ go test -tags=demo -v -run TestDemo_ .
 | adk-go | GA / maintained | AST analysis of Google ADK-Go (`google.golang.org/adk`) |
 | json | GA | Shingan's native WorkflowGraph JSON |
 | samurai | Alpha | Generic JSON-schema adapter for GUI workflow editors (extension example) |
-| n8n | Planned | n8n JSON export |
+| n8n | **Beta** | n8n workflow JSON export, pure Go (no Python / Node bridge) ([details](./docs/n8n.md)) |
 
 ### IDE / editor integrations
 
@@ -215,7 +215,8 @@ go test -tags=demo -v -run TestDemo_ .
 
 - **v0.1〜v0.5** (Apr 2026): JSON / ADK-Go / Samurai parsers, Confidence × Severity 2-axis, SARIF / GitHub Action, 9 rules ✓
 - **v0.6** (May 2026): ESLint-style visitor + 3-tier split (ADR-006/007), shingan-lsp, shingan-mcp, LangGraph parser, 20 rules, `shingan-lint` npm distribution, tag→release→npm-publish automation ✓
-- **v0.7+**: n8n / CrewAI / Mastra parsers, 30+ rules, Plugin SDK preview, official site + demo video
+- **v0.7** (May 2026): n8n parser (pure Go, JSON DSL), bilingual EN/JA docs ✓
+- **v0.8+**: CrewAI / Mastra parsers, 30+ rules, Plugin SDK preview, official site + demo video
 - **v1.0**: 5+ frameworks × 25+ rules, Plugin SDK GA, Marketplace listing
 
 ## Development
