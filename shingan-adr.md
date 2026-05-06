@@ -5,7 +5,7 @@
 ```
 作成者:    hatyibei
 リポジトリ: github.com/hatyibei/shingan
-ステータス: v0.7.0 Released (Phase 0 + 1 + 2 完遂、5 frameworks: ADK-Go/JSON/Samurai/LangGraph/n8n)
+ステータス: v0.8.0 Released (Phase 0 + 1 + 2 完遂、6 frameworks: ADK-Go/JSON/Samurai/LangGraph/n8n/CrewAI)
 ```
 
 > **注 (2026-05-05)**: ADR-001 と ADR-002 は v0.1 (2026-04) 当時の判断記録です。当初は特定エンタープライズ製品 (GUI ワークフローエディタ) を念頭に置いた narrative で書かれていますが、Shingan は v0.6 で **汎用 AI agent linter** として再ポジショニングされ、LangGraph (Phase 1 主戦場、ADR-011) / ADK-Go / Generic JSON workflow / 任意 GUI ワークフローエディタを横並びでサポートします。当時の specific 文言は context として残しますが、最新方針は **ADR-006〜012** を参照してください。

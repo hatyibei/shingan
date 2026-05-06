@@ -4,8 +4,10 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-05-07
+
 ### Added
-- **CrewAI parser (v0.8 target)** — Python `WorkflowParser` for [CrewAI](https://github.com/crewAIInc/crewAI) Crew/Agent/Task definitions, reusing the LangGraph `PythonWorker` infrastructure (ADR-013).
+- **CrewAI parser (6th supported framework)** — Python `WorkflowParser` for [CrewAI](https://github.com/crewAIInc/crewAI) Crew/Agent/Task definitions, reusing the LangGraph `PythonWorker` infrastructure (ADR-013).
   - `infrastructure/parser/crewai.go` + `crewai_test.go`: `--format=crewai` for `shingan analyze`. Five tests including end-to-end `TestCrewAIParser_SimpleSequential` and `TestCrewAIParser_CircularDelegation` (gated on `pip install crewai`).
   - `scripts/export_crewai_server.py`: long-lived Python JSON-RPC worker that maps Agents → `NodeTypeLLM`, Tasks → `NodeTypeTool`, agent.tools → additional Tool nodes; emits `Task → Agent` edges (`uses_agent`) for reachability and honours `Process.sequential` vs `Process.hierarchical` (the latter with `over_approximated_dynamic` confidence on manager fan-out).
   - `infrastructure/parser/python_worker.go`: extract `LocateShimNamed()` so multiple Python shims share the same walk-up resolution + per-shim env-var override (e.g. `SHINGAN_CREWAI_SHIM`).

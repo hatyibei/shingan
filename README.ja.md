@@ -210,7 +210,7 @@ go test -tags=demo -v -run TestDemo_ .
 - **v0.1〜v0.5** (2026-04): JSON / ADK-Go / Samurai parser、Confidence × Severity 二次元、SARIF / GitHub Action、9 ルール ✓
 - **v0.6** (2026-05): ESLint方式 visitor + 3層分離 (ADR-006/007)、shingan-lsp、shingan-mcp、LangGraph parser、20 ルール、`shingan-lint` npm 配布、tag→Release→npm-publish 自動化 ✓
 - **v0.7** (May 2026): n8n parser (純 Go、JSON DSL)、bilingual EN/JA docs ✓
-- **v0.8** (`main` で進行中): CrewAI parser (Python shim、LangGraph PythonWorker 再利用)、6 frameworks 対応 — release tag 待ち
+- **v0.8** (May 2026): CrewAI parser (Python shim、LangGraph PythonWorker 再利用)、6 frameworks 対応 ✓
 - **v0.9+**: Mastra parser (TypeScript bridge)、ルール 30+、Plugin SDK 公開準備、公式サイト + 動画
 - **v1.0**: 5+ framework × 25+ rules、Plugin SDK GA、Marketplace 公開
 
