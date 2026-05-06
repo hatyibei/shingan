@@ -139,7 +139,7 @@ Hierarchical のノイズだけ抑えたい場合は `--min-confidence=0.7` で 
 | `simple_crew.py` | 1 Agent + 1 Task、`Process.sequential` | Warning 1 件 (`error_handler_checker`: Task に error-handling 分岐なし) |
 | `sequential_pipeline.py` | 3 Agent + 3 Task、`Process.sequential` | Warning 3 件 (各 Task に `error_handler_checker`) |
 | `hierarchical.py` | 2 Agent + `manager_llm=LLM(model="gpt-4o-mini")`、`Process.hierarchical` | Warning 2 件 (各 Task の `error_handler_checker`)。v0.8 で `worker → manager` 戻りエッジを削除したため `cycle_detection` 偽陽性は消滅 |
-| `multi_tool.py` | 1 Agent + 3 tools (web search / HTTP / `python_repl`) | Critical 1 件 (`eval_missing` Agent → `python_repl` の `code_execution` sink) + Warning 2 件 (Task と tool 持ち Agent の `error_handler_checker`) + Info 1 件 (`pii_leak_scanner` 30%、Task → `http_api_request` external API への path) |
+| `multi_tool.py` | 1 Agent + 3 tools (web search / HTTP / `python_repl`) | Critical 1 件 (`eval_missing` Agent → `python_repl` の `code_execution` sink) + Warning 5 件 (Task と tool 持ち Agent の `error_handler_checker` + 3 ツールの `query`/`url`/`code` 文字列引数に `maxLength` 不在の `unbounded_tool_arg`) + Info 1 件 (`pii_leak_scanner` 30%、Task → `http_api_request` external API への path) |
 | `circular_delegation.py` | 2 Agent 両方が `allow_delegation=True` | Critical 1 件 (`cycle_detection` 100% on alpha — 双方向 delegate cycle は本物) + Warning 3 件 (`circular_dep_agents` 85% alpha↔beta ペア + 各 Task の `error_handler_checker`) |
 
 実行例:

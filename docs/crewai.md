@@ -139,7 +139,7 @@ Five reference samples live under `testdata/crewai/`:
 | `simple_crew.py` | 1 Agent + 1 Task, `Process.sequential` | 1 Warning (`error_handler_checker` on the Task — no error-handling branch) |
 | `sequential_pipeline.py` | 3 Agents + 3 Tasks, `Process.sequential` | 3 Warning (`error_handler_checker` on each Task in the chain) |
 | `hierarchical.py` | 2 Agents + `manager_llm=LLM(model="gpt-4o-mini")`, `Process.hierarchical` | 2 Warning (`error_handler_checker` on each Task — no false `cycle_detection` since v0.8 dropped the `worker → manager` back-edge) |
-| `multi_tool.py` | 1 Agent + 3 tools (web search / HTTP / `python_repl`) | 1 Critical (`eval_missing` on Agent → `python_repl` `code_execution` sink) + 2 Warning (`error_handler_checker` on the Task and on the tool-using Agent) + 1 Info (`pii_leak_scanner` 30% on the path Task → `http_api_request` external API) |
+| `multi_tool.py` | 1 Agent + 3 tools (web search / HTTP / `python_repl`) | 1 Critical (`eval_missing` on Agent → `python_repl` `code_execution` sink) + 5 Warning (`error_handler_checker` on the Task and on the tool-using Agent + `unbounded_tool_arg` on each of the 3 tools' `query`/`url`/`code` `str` args lacking `maxLength`) + 1 Info (`pii_leak_scanner` 30% on the path Task → `http_api_request` external API) |
 | `circular_delegation.py` | 2 Agents both with `allow_delegation=True` | 1 Critical (`cycle_detection` 100% on alpha — the bidirectional delegate cycle is real) + 3 Warning (`circular_dep_agents` 85% on alpha↔beta pair + `error_handler_checker` on each of the 2 Tasks) |
 
 Run them with:

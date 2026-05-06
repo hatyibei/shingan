@@ -227,6 +227,38 @@ def _safe_id(name: str) -> str:
     return "".join(out).strip("_") or "node"
 
 
+def _pydantic_to_schema(args: Any) -> Optional[Dict[str, Any]]:
+    """Serialise a Pydantic model class (or instance) to a JSON schema dict.
+
+    Tries Pydantic v2's `model_json_schema()` first, then falls back to v1's
+    `schema()`. Returns the dict on success, None when neither is available
+    (e.g. a plain Python class or a dict was passed). Used so the
+    `unbounded_tool_arg` rule — which expects a map-valued JSON schema —
+    can fire on CrewAI tools whose `args_schema` is a Pydantic model
+    (Codex iter6 P2).
+    """
+    if isinstance(args, dict):
+        return args
+    # Both class-level and instance-level access work.
+    for method in ("model_json_schema", "schema"):
+        fn = getattr(args, method, None)
+        if callable(fn):
+            try:
+                result = fn()
+            except TypeError:
+                # `schema()` is sometimes an unbound method on the class;
+                # call with the type itself as `self`.
+                try:
+                    result = fn(args)  # type: ignore[arg-type]
+                except Exception:  # noqa: BLE001
+                    continue
+            except Exception:  # noqa: BLE001
+                continue
+            if isinstance(result, dict):
+                return result
+    return None
+
+
 def _detect_tool_category(tool: Any, name: str) -> str:
     """Map a CrewAI tool to a Shingan Config["category"].
 
@@ -379,10 +411,18 @@ def _build_graph(crew: Any, source_path: str) -> Dict[str, Any]:
                     tool_cfg["description"] = _stringify(desc)
                 args = _read(tool, "args_schema", "input_schema")
                 if args is not None:
-                    # Pydantic schemas → just the class name; full schema
-                    # goes in via model_json_schema() if downstream rules
-                    # need it.
-                    tool_cfg["args_schema"] = type(args).__name__
+                    # Pydantic schemas → serialise to JSON schema dict so
+                    # `unbounded_tool_arg` (which scans map-valued JSON
+                    # schemas for missing maxLength/maxItems/maximum
+                    # constraints) can fire on CrewAI tools too. Try
+                    # Pydantic v2 model_json_schema() first, then v1
+                    # schema(); fall back to the class name for plain
+                    # types we can't introspect (Codex iter6 P2).
+                    schema = _pydantic_to_schema(args)
+                    if schema is not None:
+                        tool_cfg["args_schema"] = schema
+                    else:
+                        tool_cfg["args_schema"] = type(args).__name__
                 out_nodes.append({
                     "id":     t_id,
                     "name":   tname,
