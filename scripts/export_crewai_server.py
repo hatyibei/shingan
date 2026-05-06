@@ -346,12 +346,21 @@ def _build_graph(crew: Any, source_path: str) -> Dict[str, Any]:
     agent_id_by_obj: Dict[int, str] = {}
     agent_id_by_role: Dict[str, str] = {}
     agent_tools: List[Tuple[str, Any, str]] = []  # (agent_id, tool, tool_name)
+    # Counter for disambiguating duplicate-role agents (Codex iter7 P2):
+    # if two distinct Agent objects share role="researcher", we'd
+    # otherwise collapse them into one node and lose one agent's tools
+    # / config. Suffix subsequent collisions with `-2`, `-3`, ….
+    role_collision_count: Dict[str, int] = {}
 
     for agent in agents:
         if not _is_agent(agent):
             continue
         role = _stringify(_read(agent, "role", default="agent"), max_len=120) or "agent"
         a_id = _agent_id(crew_id, role)
+        if a_id in agent_id_by_obj.values():
+            # Duplicate role: append index so we get distinct node IDs.
+            role_collision_count[role] = role_collision_count.get(role, 1) + 1
+            a_id = _agent_id(crew_id, f"{role}-{role_collision_count[role]}")
         agent_id_by_obj[id(agent)] = a_id
         agent_id_by_role.setdefault(role, a_id)
 
