@@ -4,6 +4,20 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Added
+- **CrewAI parser (v0.8 target)** — Python `WorkflowParser` for [CrewAI](https://github.com/crewAIInc/crewAI) Crew/Agent/Task definitions, reusing the LangGraph `PythonWorker` infrastructure (ADR-013).
+  - `infrastructure/parser/crewai.go` + `crewai_test.go`: `--format=crewai` for `shingan analyze`. Five tests including end-to-end `TestCrewAIParser_SimpleSequential` and `TestCrewAIParser_CircularDelegation` (gated on `pip install crewai`).
+  - `scripts/export_crewai_server.py`: long-lived Python JSON-RPC worker that maps Agents → `NodeTypeLLM`, Tasks → `NodeTypeTool`, agent.tools → additional Tool nodes; emits `Task → Agent` edges (`uses_agent`) for reachability and honours `Process.sequential` vs `Process.hierarchical` (the latter with `over_approximated_dynamic` confidence on manager fan-out).
+  - `infrastructure/parser/python_worker.go`: extract `LocateShimNamed()` so multiple Python shims share the same walk-up resolution + per-shim env-var override (e.g. `SHINGAN_CREWAI_SHIM`).
+  - `scripts/requirements-shim.txt`: add `crewai>=0.50.0` (Pydantic v2 only).
+  - `infrastructure/factory/parser.go`: register `case "crewai"`. Error message updated to list 6 supported formats.
+  - `cmd/shingan/analyze.go`: accept `--format=crewai`, extend directory walk (`.py`) to crewai alongside langgraph.
+  - `domain/testutil/generate.go` + `cmd/shingan-gen/main.go`: `GenerateCrewAIGraph` and `--pattern=crewai-simple` for sample generation.
+  - `testdata/crewai/{simple_crew,sequential_pipeline,hierarchical,multi_tool,circular_delegation}.py`: five reference fixtures verified end-to-end against `crewai==1.14.4` (see [docs/crewai.md](./docs/crewai.md) for measured findings).
+  - `docs/crewai.md` + `docs/crewai.ja.md`: bilingual usage / NodeType mapping / sample table / troubleshooting reference.
+  - `shingan-adr.md`: ADR-013 added (CrewAI parser strategy — PythonWorker reuse).
+  - README framework table: CrewAI flipped from Planned to Beta; roadmap split into in-progress v0.8 line and v0.9+ targets.
+
 ## [0.7.0] - 2026-05-06
 
 ### Added

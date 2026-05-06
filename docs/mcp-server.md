@@ -54,6 +54,9 @@ Read a workflow from disk and analyse it. `framework` is one of:
 | `json`    | single `.json` file  |
 | `adk-go`  | single `.go` file OR a directory walked recursively |
 | `samurai` | single SamuraiAI JSON file |
+| `langgraph` | single `.py` file OR a directory (Python long-lived subprocess; needs `pip install langgraph`) |
+| `n8n`     | single `.json` file (n8n workflow export, pure Go) |
+| `crewai`  | single `.py` file OR a directory (Python long-lived subprocess; needs `pip install "crewai>=0.50.0"`) |
 
 Same `FindingList` output shape as `shingan_analyze_graph`.
 

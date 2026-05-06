@@ -192,6 +192,7 @@ go test -tags=demo -v -run TestDemo_ .
 | json | GA | Shingan's native WorkflowGraph JSON |
 | samurai | Alpha | Generic JSON-schema adapter for GUI workflow editors (extension example) |
 | n8n | **Beta** | n8n workflow JSON export, pure Go (no Python / Node bridge) ([details](./docs/n8n.md)) |
+| crewai | **Beta** | CrewAI Crew/Agent/Task definitions via Python long-lived subprocess + JSON-RPC. Requires `pip install "crewai>=0.50.0"` ([details](./docs/crewai.md)) |
 
 ### IDE / editor integrations
 
@@ -216,7 +217,8 @@ go test -tags=demo -v -run TestDemo_ .
 - **v0.1〜v0.5** (Apr 2026): JSON / ADK-Go / Samurai parsers, Confidence × Severity 2-axis, SARIF / GitHub Action, 9 rules ✓
 - **v0.6** (May 2026): ESLint-style visitor + 3-tier split (ADR-006/007), shingan-lsp, shingan-mcp, LangGraph parser, 20 rules, `shingan-lint` npm distribution, tag→release→npm-publish automation ✓
 - **v0.7** (May 2026): n8n parser (pure Go, JSON DSL), bilingual EN/JA docs ✓
-- **v0.8+**: CrewAI / Mastra parsers, 30+ rules, Plugin SDK preview, official site + demo video
+- **v0.8** (in progress on `main`): CrewAI parser (Python shim, reuses LangGraph PythonWorker), 6 frameworks total — release tag pending
+- **v0.9+**: Mastra parser (TypeScript bridge), 30+ rules, Plugin SDK preview, official site + demo video
 - **v1.0**: 5+ frameworks × 25+ rules, Plugin SDK GA, Marketplace listing
 
 ## Development

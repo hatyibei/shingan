@@ -36,6 +36,11 @@ Thumbs.db
 go.work
 go.work.sum
 
+# Python (testdata/crewai/, scripts/)
+__pycache__/
+*.pyc
+*.pyo
+
 # Node.js (scripts/screenshots)
 node_modules/
 npm-debug.log*

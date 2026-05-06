@@ -8,8 +8,7 @@ the cost of some `over_approximated_dynamic` confidence on those edges.
 Expected findings: depending on rule activation, `circular_dep_agents`
 might fire on the manager↔worker bidirectional pattern with low confidence.
 """
-from crewai import Agent, Task, Crew, Process
-from langchain_openai import ChatOpenAI
+from crewai import Agent, Task, Crew, Process, LLM
 
 researcher = Agent(
     role="researcher",
@@ -41,5 +40,5 @@ crew = Crew(
     agents=[researcher, writer],
     tasks=[t_research, t_write],
     process=Process.hierarchical,
-    manager_llm=ChatOpenAI(model="gpt-4o-mini", temperature=0.0),
+    manager_llm=LLM(model="gpt-4o-mini", temperature=0.0),
 )

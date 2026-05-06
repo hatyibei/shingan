@@ -6,7 +6,7 @@ mapping, tools whose name matches `code_runner|python_repl|exec|eval` get
 `Config["category"]="code_execution"`, which is the source for eval_missing.
 """
 from crewai import Agent, Task, Crew, Process
-from crewai_tools import BaseTool
+from crewai.tools import BaseTool
 
 
 class WebSearchTool(BaseTool):
