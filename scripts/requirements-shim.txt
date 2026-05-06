@@ -1,13 +1,20 @@
-# Python dependencies for the Shingan LangGraph shim
-# (scripts/export_langgraph_server.py). Install with:
+# Python dependencies for Shingan's Python shims under `scripts/`.
+# Install with:
 #
 #     pip install -r scripts/requirements-shim.txt
 #
-# The shim itself only uses the standard library, so the worker boots on any
-# Python 3.10+ install. The dependencies below are required when actually
-# parsing user files that import `langgraph` — without them, the worker stays
-# alive but `parse_file` / `parse_content` return a "missing_langgraph" error.
+# The shims themselves only use the standard library, so the workers boot on
+# any Python 3.10+ install. The dependencies below are required when actually
+# parsing user files that import the relevant framework — without them, the
+# worker stays alive but `parse_file` / `parse_content` return a
+# "missing_<framework>" error.
+
+# LangGraph parser (scripts/export_langgraph_server.py)
 langgraph>=0.2.0
-# Optional but recommended (langgraph itself depends on pydantic 2; pinned here
-# so requirements stay self-contained for CI).
+
+# CrewAI parser (scripts/export_crewai_server.py); requires Pydantic v2.
+crewai>=0.50.0
+
+# Optional but recommended (langgraph + crewai both depend on pydantic 2;
+# pinned here so requirements stay self-contained for CI).
 pydantic>=2.0

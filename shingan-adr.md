@@ -1498,6 +1498,105 @@ merge 後の graph は entry を 1 つしか持たないため、最初に encou
 
 ---
 
+# ADR-013: CrewAI parser — LangGraph PythonWorker 再利用戦略
+
+**ステータス**: Accepted (2026-05-06)
+
+## 背景
+
+v0.7.0 で 5 frameworks (ADK-Go / JSON / Samurai / LangGraph / n8n) 対応に到達した。次の主戦場は **CrewAI** — Python 製 multi-agent framework で、`Crew` × `Agent` × `Task` の 3 概念で構成される。GitHub stars 30k+ (2026-05 時点)、LangGraph 0.50k+ に次ぐ Python マルチエージェント FW として採用が広い。
+
+ADR-006 (多言語フロントエンド戦略) で Python 系は **長寿命サブプロセス + JSON-RPC** で統一すると決めた。ADR-011 で LangGraph parser を実装した際、`infrastructure/parser/python_worker.go` (build tag 分離 unix/windows) と `scripts/export_langgraph_server.py` のパターンを確立済み。CrewAI も Python なのでこのインフラを **再利用** すべきか、**専用 worker** を作るべきかが本 ADR の主題。
+
+## 決定
+
+**LangGraph で確立した PythonWorker インフラを framework-agnostic 化して再利用する。** CrewAI 専用の Python シム (`scripts/export_crewai_server.py`) を新規作成するが、Go 側のサブプロセスラッパは LangGraph と同一の `python_worker.go` を共用する。
+
+### CrewAI → WorkflowGraph IR マッピング
+
+| CrewAI 概念 | Shingan IR | Confidence | ConfidenceReason |
+|---|---|---|---|
+| `Agent(role=, goal=, backstory=, tools=[T1,T2])` | `NodeTypeLLM` (Config: model/provider/role/goal を保持) | 1.0 | `exact_static_match` |
+| `Task(description=, expected_output=, agent=A)` | `NodeTypeTool` (description/expected_output を Config) | 1.0 | `exact_static_match` |
+| `Tool` (`@tool` decorator or `BaseTool` subclass) | `NodeTypeTool` (Config["category"]="tool") | 0.8 | `name_heuristic` (tool 種別は名前推定) |
+| `Crew(agents=, tasks=, process=Process.sequential)` | `Tasks` 順次 `Edge` で連結、`entry_node_id = Tasks[0]` | 1.0 | `exact_static_match` |
+| `Crew(process=Process.hierarchical, manager_llm=)` | manager Agent から各 worker Agent への放射 + 戻り `Edge` | 0.7 | `over_approximated_dynamic` (manager LLM が実行時に worker を選ぶ) |
+| Agent.tools の各 Tool | Agent から Tool への `Edge` | 1.0 | `exact_static_match` |
+| `delegation=True` で Agent A が他 Agent に委譲 | A → B 双方向 `Edge` (over-approximation) | 0.6 | `over_approximated_dynamic` |
+
+### 実装ポリシー
+
+- **Python シム**: `scripts/export_crewai_server.py` は `crewai.Crew` / `crewai.Agent` / `crewai.Task` を import → object inspection (`getattr` ベース、API tolerant) → JSON 出力。`requirements-shim.txt` に `crewai>=0.50.0` を追記 (Pydantic v2 以降のみサポート)。
+- **Go 側**: `infrastructure/parser/crewai.go` で `WorkflowParser` 実装。内部で既存 `PythonWorker.Call("parse_file", {path})` を呼び、JSON を `domain.WorkflowGraph` に変換。NodeType マッピングは上表に従う。
+- **Factory**: `infrastructure/factory/parser.go` に `case "crewai":` 追加。エラーメッセージ更新。
+- **CLI**: `--format=crewai` を `cmd/shingan/analyze.go` で受理。directory walk は許可 (LangGraph と同様、`.py` 走査)。
+
+## 結果
+
+### 利点
+
+- LangGraph 用に書いた worker (subprocess management, JSON-RPC framing, degraded mode, build-tag 分離) を 100% 流用 → 実装コスト 50% 減
+- Python 環境セットアップが LangGraph と共通 (`pip install langgraph crewai`) → ユーザー側のインストール手間も同じ
+- `python_worker.go` の degraded mode (Python が不在/壊れた場合の Info diagnostic) が CrewAI でも自動的に効く
+
+### 欠点
+
+- LangGraph と CrewAI の Python シムを **同じ Python プロセスで共存** させない (1 worker = 1 framework)。format ごとに別プロセスを spawn するため、混在ディレクトリでは LangGraph と CrewAI の auto-detect は v0.9 以降に defer
+- CrewAI の Pydantic v1 (`<0.40.0`) は非対応。古い CrewAI を使うユーザーは v0.50.0 以降にアップグレードを強制
+- `Process.hierarchical` の保守的解析は manager Agent から全 worker への edge を張るため、`circular_dep_agents` ルールが偽陽性気味になる可能性 → confidence 0.7 で gate、`--min-confidence=0.8` でユーザー側抑制可能
+
+### 検出可能性
+
+CrewAI で発火する builtin rule:
+- `cycle_detection` — `delegation` 経路の循環
+- `circular_dep_agents` — Agent A.tools=[B], B.tools=[A] パターン
+- `loop_guard` — Crew(max_iter=) 未設定
+- `eval_missing` — Agent.tools に code-execution Tool がある場合
+- `prompt_injection_sink` — Agent.backstory or Task.description に user input 経路
+- `temperature_misuse` — Agent.llm の temperature 設定不一致
+- `model_card_mismatch` — Agent.llm の model 名と provider 不整合
+
+既存 20 ルールがそのまま動く想定。CrewAI 固有の追加ルールは v0.9 以降。
+
+## 代替案 (却下)
+
+### 代替案 A: CrewAI 専用 worker を新規実装 (`crewai_worker.go`)
+
+- 利点: Python シムごとにラッパも分離されるので、依存関係が明確
+- 欠点: subprocess 管理ロジックの二重実装、build-tag 分離も二重メンテ → ROI 低
+- → 却下
+
+### 代替案 B: Python シム 1 つに LangGraph + CrewAI 両対応
+
+- 利点: 1 worker で複数 framework 切り替え可能 (実行時 dispatch)
+- 欠点: Python シムの責務が肥大化、`pip install langgraph crewai` 両必須 (LangGraph しか使わないユーザーにも CrewAI インストール強制)、import 時間が伸びる
+- → 却下 (1 worker = 1 framework の単純さを優先)
+
+### 代替案 C: AST ベースの静的解析 (Python シム不要)
+
+- 利点: Python ランタイム不要 (`go-python` や CGo 不要)
+- 欠点: CrewAI の Pydantic 動的属性, `@tool` decorator のメタプログラミングが追えない → 解析精度が CrewAI の半分以下に劣化
+- → 却下 (LangGraph で既に「ランタイム inspect」を選択した同じ理由)
+
+## Out of Scope (v0.8 では非対応)
+
+- **Sub-crew (`Crew` を Agent.tools に渡すパターン)**: nested Crew は v0.9 以降。今は `tool` 単独 Tool 扱い
+- **Knowledge / Memory / Cache レイヤー**: 実行時 RAG は `Config["memory"]=true` のメタデータのみ、ルールトリガー無し (ADR-016 defer 方針に従う)
+- **Custom Process** (`process=custom_process_fn`): 動的 Process は static 解析対象外、Critical で警告 (新ルール `dynamic_process_construction` は v0.9 候補)
+
+## 検証
+
+`testdata/crewai/` に 5 fixture:
+- `simple_crew.py` — 1 Agent + 1 Task の最小例 (clean)
+- `sequential_pipeline.py` — 3 Agent + 3 Task の Process.sequential
+- `hierarchical.py` — manager + 2 workers の Process.hierarchical
+- `multi_tool.py` — 1 Agent + 3 tools (eval_missing 発火想定)
+- `circular_delegation.py` — A.tools=[B], B.tools=[A] (circular_dep_agents 発火想定)
+
+公式 `crewAIInc/crewAI-examples` から 3-4 パターンを weekly CI で回し、known best-practice 違反を検出できているか確認 (LangGraph と同形)。
+
+---
+
 # 変更履歴
 
 | 日付 | 変更内容 | 変更者 |
@@ -1506,3 +1605,4 @@ merge 後の graph は entry を 1 つしか持たないため、最初に encou
 | 2026-04-14 | ADR-005スケジュール修正。4/15水で全力ビルド、4/16木は動確・修正に変更。Phase 1-4の依存関係ベース実行順序に再構成 | hatyibei |
 | 2026-05-04 | ADR-006〜011 追加。「使える静的解析ツール」化方針への転換に伴い、ESLint方式 visitor pattern (006) / Local-Path-Global 3層分離 (007) / ConfidenceReason 二次元化 (008) / LSP差分実行+degraded mode (009) / Plugin SDK internal-first (010) / 主戦場 LangGraph シフト (011, ADR-002 補正) を確定。別AI壁打ちレビューの6盲点指摘を反映。Appendix A に新用語追加 | hatyibei |
 | 2026-05-05 | ADR-012 追加。self-dogfood で `testdata/agents` の `unreachable_node` 偽陽性 7件を発見し、multi-file directory analysis の per-file independent graph 化を確定 (#9 解決案、Phase 2 着手の前提条件) | hatyibei |
+| 2026-05-06 | ADR-013 追加。v0.7.0 出荷後に CrewAI parser を v0.8 主目標と確定。LangGraph で確立した PythonWorker インフラを framework-agnostic 化して再利用、CrewAI 専用シム `scripts/export_crewai_server.py` を新規追加する戦略を明文化 | hatyibei |

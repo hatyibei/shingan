@@ -388,37 +388,73 @@ const (
 // When nothing is found a descriptive error is returned so callers can produce
 // actionable diagnostics.
 func LocateShim() (string, error) {
-	if env := os.Getenv(envOverride); env != "" {
+	return locateShimNamed(shimRel, envOverride, "langgraph shim")
+}
+
+// LocateShimNamed returns the absolute path to a named shim script under
+// `scripts/`. Used by parsers other than LangGraph (e.g. CrewAI) that ship
+// their own Python worker. The lookup follows the same walk-up logic as
+// LocateShim but with a per-shim env-var override derived from the script
+// name (e.g. SHINGAN_CREWAI_SHIM for export_crewai_server.py).
+func LocateShimNamed(scriptFilename string) (string, error) {
+	rel := filepath.Join("scripts", scriptFilename)
+	envName := "SHINGAN_" + envSuffixFromShim(scriptFilename) + "_SHIM"
+	return locateShimNamed(rel, envName, scriptFilename)
+}
+
+// envSuffixFromShim derives the uppercase token between "export_" and
+// "_server.py" for use in the override env-var name.
+//
+//	export_crewai_server.py  → CREWAI
+//	export_langgraph_server.py → LANGGRAPH
+//	custom_shim.py             → CUSTOM_SHIM
+func envSuffixFromShim(name string) string {
+	trim := strings.TrimSuffix(name, ".py")
+	trim = strings.TrimPrefix(trim, "export_")
+	trim = strings.TrimSuffix(trim, "_server")
+	if trim == "" {
+		trim = name
+	}
+	return strings.ToUpper(strings.ReplaceAll(trim, ".", "_"))
+}
+
+func locateShimNamed(rel, envName, label string) (string, error) {
+	if env := os.Getenv(envName); env != "" {
 		if _, err := os.Stat(env); err == nil {
 			return env, nil
 		}
-		return "", fmt.Errorf("langgraph shim: %s=%q points to a non-existent file", envOverride, env)
+		return "", fmt.Errorf("%s: %s=%q points to a non-existent file", label, envName, env)
 	}
 
 	if cwd, err := os.Getwd(); err == nil {
-		if found, ok := walkUpForShim(cwd); ok {
+		if found, ok := walkUpForShimRel(cwd, rel); ok {
 			return found, nil
 		}
 	}
 
 	if exe, err := os.Executable(); err == nil {
-		if found, ok := walkUpForShim(filepath.Dir(exe)); ok {
+		if found, ok := walkUpForShimRel(filepath.Dir(exe), rel); ok {
 			return found, nil
 		}
 	}
 
 	return "", fmt.Errorf(
-		"langgraph shim: could not locate %s; set %s to point at it",
-		shimRel, envOverride,
+		"%s: could not locate %s; set %s to point at it",
+		label, rel, envName,
 	)
 }
 
-// walkUpForShim returns the absolute path to the shim if any ancestor of
-// startDir contains scripts/export_langgraph_server.py.
+// walkUpForShim returns the absolute path to the LangGraph shim if any
+// ancestor of startDir contains scripts/export_langgraph_server.py.
 func walkUpForShim(startDir string) (string, bool) {
+	return walkUpForShimRel(startDir, shimRel)
+}
+
+// walkUpForShimRel walks ancestors of startDir looking for `<dir>/<rel>`.
+func walkUpForShimRel(startDir, rel string) (string, bool) {
 	dir := startDir
 	for {
-		candidate := filepath.Join(dir, shimRel)
+		candidate := filepath.Join(dir, rel)
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate, true
 		}

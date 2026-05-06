@@ -1197,3 +1197,86 @@ func GenerateN8nGraph(seed int64) *domain.WorkflowGraph {
 		EntryNodeID: "Webhook",
 	}
 }
+
+// GenerateCrewAIGraph generates a WorkflowGraph that mirrors the shape of a
+// CrewAI sequential crew — one researcher Agent + one writer Agent + one
+// research Task + one write Task, with the writer Task chained after the
+// research Task. Used for parser smoke tests.
+//
+// Structure:
+//   researcher (LLM) ──executes──► research_task (Tool)
+//                                       │
+//                                       ▼  (sequential edge)
+//   writer     (LLM) ──executes──► write_task    (Tool)
+//
+// Expected findings: error_handler_checker may fire on each Agent (no
+// conditional outgoing edge) and on the trigger-shaped first Task; the
+// concrete count depends on rule activation. The shape is deterministic
+// so the generator can be used as a stable baseline.
+func GenerateCrewAIGraph(seed int64) *domain.WorkflowGraph {
+	_ = seed // deterministic pattern
+
+	nodes := make(map[string]*domain.Node)
+	var edges []domain.Edge
+
+	const crew = "smoke_test_crew"
+	researcher := crew + "::agent::researcher"
+	writer := crew + "::agent::writer"
+	researchTask := crew + "::task::find_sources#0"
+	writeTask := crew + "::task::write_report#1"
+
+	nodes[researcher] = &domain.Node{
+		ID:   researcher,
+		Name: "researcher",
+		Type: domain.NodeTypeLLM,
+		Config: map[string]any{
+			"agent_role":       "researcher",
+			"goal":             "Find recent papers on a topic",
+			"model":            "gpt-4o-mini",
+			"allow_delegation": false,
+		},
+	}
+	nodes[writer] = &domain.Node{
+		ID:   writer,
+		Name: "writer",
+		Type: domain.NodeTypeLLM,
+		Config: map[string]any{
+			"agent_role":       "writer",
+			"goal":             "Produce the report draft",
+			"model":            "gpt-4o-mini",
+			"allow_delegation": false,
+		},
+	}
+	nodes[researchTask] = &domain.Node{
+		ID:   researchTask,
+		Name: "find_sources",
+		Type: domain.NodeTypeTool,
+		Config: map[string]any{
+			"description":     "Find 3 recent papers on workflow static analysis",
+			"expected_output": "A markdown list of paper titles + abstracts",
+			"assigned_agent":  researcher,
+		},
+	}
+	nodes[writeTask] = &domain.Node{
+		ID:   writeTask,
+		Name: "write_report",
+		Type: domain.NodeTypeTool,
+		Config: map[string]any{
+			"description":     "Write the report based on the research",
+			"expected_output": "A markdown draft",
+			"assigned_agent":  writer,
+		},
+	}
+
+	edges = append(edges,
+		domain.Edge{From: researchTask, To: researcher, Condition: "uses_agent"},
+		domain.Edge{From: writeTask, To: writer, Condition: "uses_agent"},
+		domain.Edge{From: researchTask, To: writeTask}, // sequential
+	)
+
+	return &domain.WorkflowGraph{
+		Nodes:       nodes,
+		Edges:       edges,
+		EntryNodeID: researchTask,
+	}
+}
