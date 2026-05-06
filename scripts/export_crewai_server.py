@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
-import inspect
 import json
 import os
 import sys
@@ -165,18 +164,6 @@ def _is_task(obj: Any) -> bool:
         if base.__name__ == "Task":
             return True
     return False
-
-
-def _source_pos_for(obj: Any, fallback_path: str) -> Dict[str, Any]:
-    try:
-        path = inspect.getsourcefile(obj) or inspect.getfile(obj) or fallback_path
-        try:
-            _, lineno = inspect.getsourcelines(obj)
-        except (OSError, TypeError):
-            lineno = 0
-        return {"file": path, "line": lineno, "col": 0}
-    except (TypeError, OSError):
-        return {"file": fallback_path, "line": 0, "col": 0}
 
 
 def _read(obj: Any, *names: str, default: Any = None) -> Any:
@@ -338,7 +325,7 @@ def _build_graph(crew: Any, source_path: str) -> Dict[str, Any]:
                 "name":   role,
                 "type":   "llm",
                 "config": cfg,
-                "pos":    _source_pos_for(type(agent), source_path),
+                "pos":    {"file": source_path, "line": 0, "col": 0},
             })
 
         # Collect tools attached to this agent.
@@ -370,7 +357,7 @@ def _build_graph(crew: Any, source_path: str) -> Dict[str, Any]:
                 "name":   tname,
                 "type":   "tool",
                 "config": tool_cfg,
-                "pos":    _source_pos_for(type(tool), source_path),
+                "pos":    {"file": source_path, "line": 0, "col": 0},
             })
         out_edges.append({"from": a_id, "to": t_id, "condition": "uses_tool"})
 
@@ -417,7 +404,7 @@ def _build_graph(crew: Any, source_path: str) -> Dict[str, Any]:
                 "name":   t_label[:80],
                 "type":   "tool",
                 "config": cfg,
-                "pos":    _source_pos_for(type(task), source_path),
+                "pos":    {"file": source_path, "line": 0, "col": 0},
             })
 
     # ---- 4. Process: sequential vs hierarchical ----------------------------
