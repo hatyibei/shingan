@@ -124,13 +124,13 @@ n8n is fully static — there is no dynamic graph construction analogous to Lang
 
 Five reference samples live under `testdata/n8n/`:
 
-| File | Pattern | Expected findings |
+| File | Pattern | Findings observed |
 |---|---|---|
-| `simple_chain.json` | Webhook → OpenAI → HTTP Request | `error_handler_checker` (Warning) ×2 |
-| `branching.json` | OpenAI → IF → (HTTP / HTTP) | `error_handler_checker` (Warning) on each terminal HTTP |
-| `loop.json` | Webhook → Code → IF (loops back) | `loop_guard` (Warning) — bounded by `if` but no max-iter guard |
-| `multi_step.json` | 5-node serial pipeline (trigger → 4 tools) | none (clean) |
-| `ai_agent.json` | langchain `aiAgent` with tool sub-connections | langchain sub-tools skipped; only `main` flow analysed |
+| `simple_chain.json` | Webhook → ChatGPT → HTTP Request | 2 Warning — `error_handler_checker` on Webhook (trigger) + ChatGPT (LLM with downstream tool) |
+| `branching.json` | Webhook → ChatGPT → IF → (Slack / Email) | 1 Warning — `error_handler_checker` on Webhook (the IF branches each terminate cleanly) |
+| `loop.json` | Schedule → Fetch → Split In Batches → Process Item ↺ | 2 Critical (`cycle_detection` on Split In Batches; `retry_storm` on Process Item with `retries=5 × parallelism=20`) + 4 Warning (`error_handler_checker` on every linear node) |
+| `multi_step.json` | Webhook → Vector Search → Embed → Generator → Output | 4 Warning — `error_handler_checker` on the trigger, the API tool, and both LLM stages |
+| `ai_agent.json` | langchain `aiAgent` reaching a code-execution tool | 1 Critical (`eval_missing`: Agent → Code Tool path) + 2 Warning (`error_handler_checker` on Webhook and Agent); langchain sub-tool wires (`ai_languageModel`, `ai_memory`, `ai_tool`) skipped as decoration |
 
 Run them with:
 
@@ -142,17 +142,20 @@ shingan analyze --format n8n --input testdata/n8n/simple_chain.json --output mar
 
 ```bash
 $ shingan analyze --format n8n --input testdata/n8n/simple_chain.json --output markdown
-# Findings (2)
+# Shingan Analysis Report
 
-## Warning: error_handler_checker
-- Node: Webhook
-- Confidence: 0.8 (heuristic_pattern)
-- Message: Tool node "Webhook" (category="trigger") has no conditional outgoing edges: error handling is missing
+## Summary
 
-## Warning: error_handler_checker
-- Node: ChatGPT
-- Confidence: 0.8 (heuristic_pattern)
-- Message: LLM node "ChatGPT" uses tool(s) but has no conditional outgoing edges: error handling for tool failures is missing
+| Total | Critical | Warning | Info |
+|-------|----------|---------|------|
+| 2     | 0        | 2       | 0    |
+
+## Warning
+
+| Rule                  | Node    | Confidence | Message                                                                                            |
+|-----------------------|---------|------------|----------------------------------------------------------------------------------------------------|
+| error_handler_checker | Webhook | 80%        | Tool node "Webhook" (category="trigger") has no conditional outgoing edges: error handling is missing |
+| error_handler_checker | ChatGPT | 80%        | LLM node "ChatGPT" uses tool(s) but has no conditional outgoing edges: error handling for tool failures is missing |
 ```
 
 (exit code: `2` — Warnings only, no Critical)
