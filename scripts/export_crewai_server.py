@@ -51,6 +51,21 @@ sys.stdout = sys.stderr  # any stray print() now lands on stderr.
 os.environ.setdefault("OTEL_SDK_DISABLED", "true")
 os.environ.setdefault("CREWAI_TELEMETRY_OPT_OUT", "true")
 
+# Redirect CrewAI's SQLite task-output storage away from $HOME so the worker
+# still functions in read-only-HOME CI sandboxes (Codex iter2 P2). CrewAI
+# follows XDG_DATA_HOME; pointing it at a writable temp dir avoids
+# DatabaseOperationError ("unable to open database file") even when the user
+# never actually invokes a Crew at runtime — Pydantic validators on Crew()
+# touch storage during construction.
+import tempfile
+_default_xdg = os.path.join(tempfile.gettempdir(), "shingan-crewai-xdg")
+try:
+    os.makedirs(_default_xdg, exist_ok=True)
+except OSError:  # noqa: BLE001 — best effort
+    _default_xdg = tempfile.gettempdir()
+os.environ.setdefault("XDG_DATA_HOME", _default_xdg)
+os.environ.setdefault("CREWAI_STORAGE_DIR", _default_xdg)
+
 
 def _emit(payload: Dict[str, Any]) -> None:
     """Write a JSON-RPC frame to the original stdout."""
@@ -413,17 +428,54 @@ def _build_graph(crew: Any, source_path: str) -> Dict[str, Any]:
 
     if "hierarchical" in process_str:
         # manager → every worker, every worker → manager.
-        # Find the manager LLM / agent.
+        # CrewAI 1.x supports two configurations:
+        #   - manager_agent=Agent(...)  (custom Agent, often NOT in crew.agents)
+        #   - manager_llm=LLM(...)      (synthetic manager built from an LLM)
+        # Codex iter2 P2: handle manager_agent first since custom managers
+        # carry richer metadata (role/goal/tools) and are usually outside
+        # the regular agent list — falling through to agents[0] would
+        # produce wrong delegate/report edges.
         manager_id = ""
+        manager_agent = _read(crew, "manager_agent")
         manager_llm = _read(crew, "manager_llm")
-        if manager_llm is not None:
+
+        if manager_agent is not None and _is_agent(manager_agent):
+            # Reuse the existing Agent → node pipeline. Compute the same id
+            # the agents loop would, then materialise the node if it isn't
+            # already in seen[] (manager_agent is typically NOT in agents).
+            mrole = _stringify(_read(manager_agent, "role", default="manager"),
+                               max_len=120) or "manager"
+            manager_id = _agent_id(crew_id, mrole)
+            agent_id_by_obj[id(manager_agent)] = manager_id
+            agent_id_by_role.setdefault(mrole, manager_id)
+            if manager_id not in seen:
+                seen[manager_id] = True
+                mmodel, mllm_cfg = _agent_model(manager_agent)
+                mcfg: Dict[str, Any] = {
+                    "agent_role": mrole,
+                    "is_manager": True,
+                }
+                mcfg.update(mllm_cfg)
+                if mmodel:
+                    mcfg["model"] = mmodel
+                mgoal = _read(manager_agent, "goal")
+                if mgoal:
+                    mcfg["goal"] = _stringify(mgoal)
+                out_nodes.append({
+                    "id":     manager_id,
+                    "name":   mrole,
+                    "type":   "llm",
+                    "config": mcfg,
+                    "pos":    {"file": source_path, "line": 0, "col": 0},
+                })
+        elif manager_llm is not None:
             mname = _stringify(_read(manager_llm, "model_name", "model",
                                      default=type(manager_llm).__name__),
                                 max_len=80) or "manager_llm"
             manager_id = _agent_id(crew_id, "manager_" + mname)
             if manager_id not in seen:
                 seen[manager_id] = True
-                mcfg: Dict[str, Any] = {
+                mcfg = {
                     "agent_role": "manager",
                     "model":      mname,
                     "is_manager": True,
