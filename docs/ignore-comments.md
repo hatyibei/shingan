@@ -63,10 +63,27 @@ import "google.golang.org/adk/agent/llmagent"
 - **No rule list** (`ignore-file` alone) disables all rules — use sparingly; prefer naming the rules so the intent is obvious in code review.
 - The ignore filter operates **after** rules run, on the orchestrator's combined finding list. Confidence and severity are unchanged; the finding is simply suppressed from output.
 
-## Limitations (v0.9-track)
+## n8n JSON workflows (no comments allowed)
 
-- Per-team severity policies (e.g. "downgrade `unbounded_tool_arg` to Info for the platform team") are tracked separately under `.shingan.yaml` (Phase 0.5).
-- Suppression annotations on n8n JSON nodes use `_shingan_ignore: ["rule_a", "rule_b"]` — same semantics, different syntax (JSON has no comments).
+JSON has no comment syntax, so n8n exports use a `_shingan_ignore` array on the node instead:
+
+```json
+{
+  "name": "RiskyCodeNode",
+  "type": "n8n-nodes-base.code",
+  "parameters": { "jsCode": "..." },
+  "_shingan_ignore": ["eval_missing", "unbounded_tool_arg"]
+}
+```
+
+The semantics are identical to a per-line comment: rules in the array are suppressed for that specific node. Use `["*"]` to suppress every rule.
+
+The field name is prefixed with `_` so it can't collide with future n8n schema additions, and Shingan strips it from the canonical Config view (so other rules don't see it as a regular n8n parameter).
+
+## Related
+
+- [`.shingan.yaml`](./severity-policy.md) — organisation-level severity overrides + per-path disable. Use this when a whole team / directory should treat a rule differently.
+- [`--baseline.json`](./diff-mode.md) — fingerprint-based suppression for legacy debt. Use this when you want to gate **new** findings without fixing existing ones.
 
 ## How it works
 

@@ -45,6 +45,61 @@ func NewAnalysisOrchestrator() *AnalysisOrchestrator {
 	}
 }
 
+// filterByNodeIgnoreMeta drops findings whose target node carries a
+// matching `_shingan_ignore` rule list in Config. Used for JSON formats
+// (n8n) that have no source comments to attach `# shingan: ignore` to.
+func filterByNodeIgnoreMeta(findings []domain.Finding, graphsBySource map[string]*domain.WorkflowGraph) []domain.Finding {
+	if len(findings) == 0 || len(graphsBySource) == 0 {
+		return findings
+	}
+	out := findings[:0]
+	for _, f := range findings {
+		g := graphsBySource[f.SourceFile]
+		if g == nil || g.Nodes == nil {
+			out = append(out, f)
+			continue
+		}
+		n, ok := g.Nodes[f.NodeID]
+		if !ok || n == nil || n.Config == nil {
+			out = append(out, f)
+			continue
+		}
+		raw, ok := n.Config["_shingan_ignore"]
+		if !ok {
+			out = append(out, f)
+			continue
+		}
+		if nodeMetaSuppresses(raw, f.RuleName) {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// nodeMetaSuppresses returns true when the given Config["_shingan_ignore"]
+// value (which may be []any of strings, []string, or a single string)
+// contains the rule name or the wildcard "*".
+func nodeMetaSuppresses(raw any, rule string) bool {
+	switch v := raw.(type) {
+	case string:
+		return v == "*" || v == rule
+	case []string:
+		for _, r := range v {
+			if r == "*" || r == rule {
+				return true
+			}
+		}
+	case []any:
+		for _, r := range v {
+			if s, ok := r.(string); ok && (s == "*" || s == rule) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Analyze classifies each rule by its highest-priority tier interface and
 // dispatches accordingly. The signature matches the pre-refactor public API
 // so existing callers (CLI, MCP server, web service, HTTP API) keep working.
@@ -218,6 +273,12 @@ func (o *AnalysisOrchestrator) AnalyzeMulti(inputs []GraphWithSource, rules []do
 		}
 		return file, n.Pos.Line
 	})
+
+	// Apply node-level `_shingan_ignore` metadata (JSON-only equivalent of
+	// `# shingan: ignore` for formats without source comments — primarily
+	// n8n exports). Each node's Config["_shingan_ignore"] may carry a
+	// []any of rule names; "*" disables every rule for that node.
+	combined = filterByNodeIgnoreMeta(combined, graphsBySource)
 
 	// Apply organization-level severity policy (.shingan.yaml).
 	// Phase 0.5: per-rule severity overrides + per-path disable.

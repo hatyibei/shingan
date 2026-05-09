@@ -67,6 +67,18 @@ type n8nNode struct {
 	Parameters map[string]any `json:"parameters"`
 	Position   []float64      `json:"position"`
 	Disabled   bool           `json:"disabled,omitempty"`
+	// ShinganIgnore is the JSON-only equivalent of the `# shingan: ignore`
+	// line comment used by Python / Go parsers. Since n8n exports are
+	// JSON (no comments allowed), users add a `_shingan_ignore` array on
+	// the node to suppress findings. Special value "*" (or an array
+	// containing "*") suppresses every rule for that node.
+	//
+	//   {
+	//     "name": "PythonRepl",
+	//     "type": "n8n-nodes-base.code",
+	//     "_shingan_ignore": ["eval_missing", "unbounded_tool_arg"]
+	//   }
+	ShinganIgnore []string `json:"_shingan_ignore,omitempty"`
 }
 
 // n8nConnectionsByPort is the per-source-node connections map. Keyed by
@@ -147,7 +159,7 @@ func (p *N8nParser) Parse(input []byte) (*domain.WorkflowGraph, error) {
 		// Carry the n8n parameters through as Config so downstream rules
 		// (secret_in_prompt_template, model_card_mismatch, etc.) can inspect
 		// model names, prompts, URLs, etc. unchanged.
-		cfg := make(map[string]any, len(raw.Parameters)+2)
+		cfg := make(map[string]any, len(raw.Parameters)+3)
 		for k, v := range raw.Parameters {
 			cfg[k] = v
 		}
@@ -155,6 +167,18 @@ func (p *N8nParser) Parse(input []byte) (*domain.WorkflowGraph, error) {
 			cfg["category"] = category
 		}
 		cfg["n8n_type"] = raw.Type
+		// Surface `_shingan_ignore` rule list (JSON-only equivalent of
+		// `# shingan: ignore`) into Config so the orchestrator's
+		// suppression filter can drop matching findings without a
+		// per-format detour. Empty / nil arrays are skipped to avoid
+		// littering Config with noise.
+		if len(raw.ShinganIgnore) > 0 {
+			ignored := make([]any, 0, len(raw.ShinganIgnore))
+			for _, r := range raw.ShinganIgnore {
+				ignored = append(ignored, r)
+			}
+			cfg["_shingan_ignore"] = ignored
+		}
 
 		nodes[nodeID] = &domain.Node{
 			ID:     nodeID,
