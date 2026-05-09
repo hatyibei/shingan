@@ -121,38 +121,134 @@ def _package_root(path: str) -> str:
     return os.path.dirname(abs_path)
 
 
-def _import_user_module(path: str) -> types.ModuleType:
-    """Load ``path`` as a fresh Python module without polluting sys.modules.
+def _dotted_name_for(path: str, pkg_root: str) -> str:
+    """Compute the dotted module name for ``path`` relative to pkg_root.
 
-    Both the directory containing ``path`` and the package root (the first
-    ancestor without ``__init__.py``) are prepended to ``sys.path`` so:
-      * sibling imports (`from .helpers import X`) resolve via the
-        immediate-parent dir, and
-      * absolute self-imports (`from <package_name> import Y`) resolve
-        via the package root.
-    The current working directory is also temporarily switched to the
-    file's parent so user-side relative file I/O (`open('config/x.yaml')`)
-    finds files alongside the script — a common AI-agent-framework pattern.
-    All overrides are removed on exit so subsequent parses don't leak.
+    Real-world LangGraph / CrewAI files (e.g.
+    `multi_agents/agents/orchestrator.py` in gpt-researcher) sit several
+    package levels deep and use relative imports (`from .utils.views`,
+    `from ..memory.research`). For relative imports to resolve, the
+    module needs to be loaded under its REAL dotted name with parent
+    packages registered. Falling back to a synthetic name like
+    `_shingan_user_<encoded>` causes ImportError on every relative
+    import.
+    """
+    abs_path = os.path.abspath(path)
+    rel = os.path.relpath(abs_path, pkg_root)
+    parts = rel.replace(os.sep, "/").split("/")
+    if parts[-1].endswith(".py"):
+        parts[-1] = parts[-1][:-3]
+    if parts[-1] == "__init__":
+        parts = parts[:-1]
+    parts = [p for p in parts if p]
+    if not parts:
+        # Edge case: pkg_root IS the file's dir (no __init__.py
+        # ancestors). Fall back to a synthetic-but-stable name.
+        return "_shingan_user_" + abs_path.replace(os.sep, "_")
+    return ".".join(parts)
+
+
+def _is_self_or_parent(missing: str, dotted: str) -> bool:
+    """Return True when `missing` is the same as `dotted` or a prefix of
+    it. Used to distinguish "package layout problem" (try fallback
+    loader) from "third-party dep gap" (surface to user).
+    """
+    if missing == dotted:
+        return True
+    return dotted.startswith(missing + ".")
+
+
+def _register_parent_packages(dotted: str, pkg_root: str) -> list[str]:
+    """Register stub `types.ModuleType` entries in sys.modules for every
+    parent package of ``dotted``, so relative imports inside the loaded
+    module find their parent package context. Returns the list of names
+    inserted so the caller can clean up.
+    """
+    parts = dotted.split(".")
+    inserted: list[str] = []
+    for i in range(1, len(parts)):
+        parent_name = ".".join(parts[:i])
+        if parent_name in sys.modules:
+            continue
+        parent_dir = os.path.join(pkg_root, *parts[:i])
+        stub = types.ModuleType(parent_name)
+        stub.__path__ = [parent_dir]
+        stub.__file__ = os.path.join(parent_dir, "__init__.py")
+        sys.modules[parent_name] = stub
+        inserted.append(parent_name)
+    return inserted
+
+
+def _import_user_module(path: str) -> types.ModuleType:
+    """Load ``path`` so relative imports + parent `__init__.py` side
+    effects work (e.g. `from . import WriterAgent` requires the parent
+    package's __init__.py to execute first and populate its namespace).
+
+    Strategy: prefer `importlib.import_module(dotted)` because Python's
+    import system handles the parent chain (executing each
+    `__init__.py` in order) automatically. Fall back to
+    `spec_from_file_location` only when import_module raises (e.g.
+    file is not actually under a package, or path differs from the
+    canonical install location).
+
+    Steps:
+      1. Walk to the package root (first ancestor without `__init__.py`)
+         and prepend it + the file's dir to `sys.path`.
+      2. chdir to the file's parent during exec so relative file I/O
+         (`open('config/x.yaml')`) finds files alongside the script.
+      3. Try `importlib.import_module(dotted)`. If it succeeds, return.
+      4. Fall back to `spec_from_file_location` with manually-registered
+         parent stubs for files outside any package.
+      5. Clean everything up on exit.
     """
     abs_path = os.path.abspath(path)
     src_dir = os.path.dirname(abs_path)
     pkg_root = _package_root(abs_path)
-    inserted: list[str] = []
+    dotted = _dotted_name_for(abs_path, pkg_root)
+
+    inserted_paths: list[str] = []
     for d in (pkg_root, src_dir):
         if d and d not in sys.path:
             sys.path.insert(0, d)
-            inserted.append(d)
+            inserted_paths.append(d)
     prev_cwd = os.getcwd()
+    inserted_modules: list[str] = []
+    inserted_self = False
     try:
         if src_dir and os.path.isdir(src_dir):
             os.chdir(src_dir)
-        spec = importlib.util.spec_from_file_location(
-            f"_shingan_user_{abs_path.replace(os.sep, '_')}", abs_path
-        )
+
+        # Path 1: dotted import via Python's normal import system.
+        # This executes parent __init__.py files so relative imports
+        # like `from . import WriterAgent` find the populated parent.
+        if "." in dotted and not dotted.startswith("_shingan_user_"):
+            try:
+                return importlib.import_module(dotted)
+            except ModuleNotFoundError as exc:
+                # Distinguish "user's own module path can't be located"
+                # (fall through to spec_from_file_location) from
+                # "transitive third-party dep missing" (re-raise so the
+                # `_missing_dep_message` wrapper surfaces the actual
+                # package name like `bs4` / `langchain_openai` instead of
+                # collapsing it into our synthetic stack frame).
+                missing = getattr(exc, "name", "") or ""
+                if missing and not _is_self_or_parent(missing, dotted):
+                    raise
+                # Otherwise fall through.
+            except ImportError:
+                # Other ImportError flavours: try the fallback loader.
+                pass
+
+        # Path 2: synthetic load with stub parents (for files outside
+        # any package, or when import_module's PYTHONPATH lookup misses
+        # the package layout entirely).
+        inserted_modules = _register_parent_packages(dotted, pkg_root)
+        spec = importlib.util.spec_from_file_location(dotted, abs_path)
         if spec is None or spec.loader is None:
             raise ImportError(f"could not load {abs_path}")
         module = importlib.util.module_from_spec(spec)
+        sys.modules[dotted] = module
+        inserted_self = True
         spec.loader.exec_module(module)  # type: ignore[union-attr]
         return module
     finally:
@@ -160,7 +256,11 @@ def _import_user_module(path: str) -> types.ModuleType:
             os.chdir(prev_cwd)
         except OSError:
             pass
-        for d in inserted:
+        if inserted_self:
+            sys.modules.pop(dotted, None)
+        for name in inserted_modules:
+            sys.modules.pop(name, None)
+        for d in inserted_paths:
             try:
                 sys.path.remove(d)
             except ValueError:

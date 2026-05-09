@@ -173,34 +173,81 @@ def _package_root(path: str) -> str:
     return os.path.dirname(abs_path)
 
 
+def _dotted_name_for(path: str, pkg_root: str) -> str:
+    abs_path = os.path.abspath(path)
+    rel = os.path.relpath(abs_path, pkg_root)
+    parts = rel.replace(os.sep, "/").split("/")
+    if parts[-1].endswith(".py"):
+        parts[-1] = parts[-1][:-3]
+    if parts[-1] == "__init__":
+        parts = parts[:-1]
+    parts = [p for p in parts if p]
+    if not parts:
+        return "_shingan_user_" + abs_path.replace(os.sep, "_")
+    return ".".join(parts)
+
+
+def _is_self_or_parent(missing: str, dotted: str) -> bool:
+    if missing == dotted:
+        return True
+    return dotted.startswith(missing + ".")
+
+
+def _register_parent_packages(dotted: str, pkg_root: str) -> list[str]:
+    parts = dotted.split(".")
+    inserted: list[str] = []
+    for i in range(1, len(parts)):
+        parent_name = ".".join(parts[:i])
+        if parent_name in sys.modules:
+            continue
+        parent_dir = os.path.join(pkg_root, *parts[:i])
+        stub = types.ModuleType(parent_name)
+        stub.__path__ = [parent_dir]
+        stub.__file__ = os.path.join(parent_dir, "__init__.py")
+        sys.modules[parent_name] = stub
+        inserted.append(parent_name)
+    return inserted
+
+
 def _import_user_module(path: str) -> types.ModuleType:
-    """Both the immediate file directory AND the package root go on sys.path
-    so absolute self-imports (`from <pkg> import …`) resolve. The current
-    working directory is also temporarily switched to the file's parent so
-    that user-side relative file I/O (`open('config/agents.yaml')` —
-    common with CrewAI's @CrewBase decorator and similar config-loading
-    patterns) finds files alongside the script. See the LangGraph shim's
-    `_import_user_module` for additional rationale.
+    """Try `importlib.import_module(dotted)` first so parent
+    `__init__.py` side effects fire (relative imports, attribute
+    population). Fall back to `spec_from_file_location` for files
+    outside any package. See the LangGraph shim for full rationale.
     """
     abs_path = os.path.abspath(path)
     src_dir = os.path.dirname(abs_path)
     pkg_root = _package_root(abs_path)
-    inserted: list[str] = []
+    dotted = _dotted_name_for(abs_path, pkg_root)
+
+    inserted_paths: list[str] = []
     for d in (pkg_root, src_dir):
         if d and d not in sys.path:
             sys.path.insert(0, d)
-            inserted.append(d)
+            inserted_paths.append(d)
     prev_cwd = os.getcwd()
-    chdir_to = src_dir
+    inserted_modules: list[str] = []
+    inserted_self = False
     try:
-        if chdir_to and os.path.isdir(chdir_to):
-            os.chdir(chdir_to)
-        spec = importlib.util.spec_from_file_location(
-            f"_shingan_user_{abs_path.replace(os.sep, '_')}", abs_path
-        )
+        if src_dir and os.path.isdir(src_dir):
+            os.chdir(src_dir)
+        if "." in dotted and not dotted.startswith("_shingan_user_"):
+            try:
+                return importlib.import_module(dotted)
+            except ModuleNotFoundError as exc:
+                missing = getattr(exc, "name", "") or ""
+                if missing and not _is_self_or_parent(missing, dotted):
+                    raise  # third-party dep gap — surface via UX wrapper
+                # Otherwise fall through to spec_from_file_location.
+            except ImportError:
+                pass
+        inserted_modules = _register_parent_packages(dotted, pkg_root)
+        spec = importlib.util.spec_from_file_location(dotted, abs_path)
         if spec is None or spec.loader is None:
             raise ImportError(f"could not load {abs_path}")
         module = importlib.util.module_from_spec(spec)
+        sys.modules[dotted] = module
+        inserted_self = True
         spec.loader.exec_module(module)  # type: ignore[union-attr]
         return module
     finally:
@@ -208,7 +255,11 @@ def _import_user_module(path: str) -> types.ModuleType:
             os.chdir(prev_cwd)
         except OSError:
             pass
-        for d in inserted:
+        if inserted_self:
+            sys.modules.pop(dotted, None)
+        for name in inserted_modules:
+            sys.modules.pop(name, None)
+        for d in inserted_paths:
             try:
                 sys.path.remove(d)
             except ValueError:
