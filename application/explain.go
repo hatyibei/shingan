@@ -110,6 +110,11 @@ Example: Config["system_prompt"]="You are X. Use sk-abc123..." → Critical. Mit
 Why it matters: Production AI agents need regression eval to catch model upgrades that change behavior. Without an eval_dataset / benchmark reference, model drift goes undetected until a customer complains.
 Algorithm: OnGraph aggregation (one finding per graph). Trigger when ANY node Config has env=prod|staging or deployment=true and NO node carries eval_dataset / test_set / benchmark.
 Severity: Warning (Confidence 0.7, heuristic_pattern). Mitigation: add Config["eval_dataset"] pointing to a versioned test set on the entry or any node.`,
+
+	"human_gate_missing": `human_gate_missing — flags production-deployed graphs that perform sensitive actions (API writes, code execution, payments, data egress, browser automation) without any Human-type approval node in the workflow.
+Why it matters: AI agents make irreversible side effects (sending money, deleting data, posting publicly). Production graphs without a human-in-the-loop gate fail SOC 2 / ISO 42001 governance reviews and are an incident waiting to happen — the model executes the wrong thing in the wrong context with no chance to intervene. Complements pii_leak_scanner (which traces specific source→sink paths) by enforcing graph-wide governance posture.
+Algorithm: OnGraph aggregation (one finding per graph). Trigger when ALL of: (1) ANY node Config has env=prod|staging|production OR deployment=true, AND (2) ANY Tool node has Config["category"] in {code_execution, api, mcp, browser, trigger} OR a name matching send|post|delete|transfer|payment|email|webhook|execute|deploy|publish|fire, AND (3) NO node has Type==NodeTypeHuman.
+Severity: Warning (Confidence 0.6, heuristic_pattern — naming heuristic for the deploy + sensitive signals). Mitigation: insert a single graph-wide Human approval node before sensitive Tool calls; finer scoping handled by pii_leak_scanner / eval_missing.`,
 }
 
 // KnownRuleNames returns the sorted list of rule identifiers, used to build
