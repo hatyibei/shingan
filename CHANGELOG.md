@@ -4,6 +4,79 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-05-09
+
+### Fixed — Dogfood-driven LangGraph FP elimination
+
+This release is the result of a dogfood sweep across real-world LangGraph
+agent OSS (langchain-ai/open_deep_research, langchain-ai/data-enrichment,
+agno cookbook, gpt-researcher, langchain v1 agents/factory.py). Five FP
+patterns surfaced and were closed at the analyser level. No new rules,
+no new frameworks — just radical signal/noise improvements on the
+patterns LangGraph production code overwhelmingly uses.
+
+- **Bounded-cycle severity downgrade** (`domain/rules/cycle.go`).
+  `cycle_detection` now distinguishes structural cycles (no exit edge —
+  Critical, the graph is broken) from bounded cycles (cycle has at
+  least one outgoing edge to a non-cycle node — Warning, depends on
+  `recursion_limit`). The "tool-calling agent" pattern (chatbot ↔
+  tools loop with conditional `__end__` exit) is now correctly classified
+  as Warning rather than triggering Critical alarms on every LangGraph
+  agent in the wild.
+  Verified: langchain agents/factory.py 2 Critical → 0 Critical;
+  agno cookbook langgraph_tools.py preserves its real Critical because
+  the `__end__` branch is dropped during runtime extraction.
+- **Multi-graph file support** (`infrastructure/parser/shims/export_langgraph_server.py`).
+  Files defining several `StateGraph` instances (subgraph composition —
+  the LangGraph-recommended pattern: `builder.add_node("section",
+  section_builder.compile())`) no longer flat-merge nodes from every
+  graph under a single entry. Both runtime (`_find_state_graphs`) and
+  AST-fallback (`_StateGraphASTVisitor`) paths now select the LAST
+  graph variable passed to `<var>.compile()` as the "main" graph — the
+  idiomatic `graph = builder.compile()` at module bottom. Falls back
+  to the largest graph when no compile() call is detected.
+  Verified: open_deep_research/legacy/graph.py 6 unreachable_node FPs
+  cleared.
+- **Cycle finding dedupe** (`domain/rules/cycle.go`).
+  When a node is reached via multiple distinct back-edges (e.g.
+  `add_conditional_edges("agent", route)` where `route` returns any
+  of `{"tool", "agent", "reflect"}`), the detector now emits exactly
+  ONE `cycle_detection` finding per cycle entry node rather than N
+  duplicates. Engineers reviewing SARIF output read duplicate findings
+  as report churn.
+  Verified: data-enrichment graph.py 5 findings → 3 (3 dup cycle → 1).
+- **`Command(goto=...)` implicit edge extraction**
+  (`infrastructure/parser/shims/export_langgraph_server.py`).
+  LangGraph's runtime introspection only sees edges declared via
+  `add_edge` / `add_conditional_edges` — dynamic dispatch via
+  `def fn(...) -> Command[Literal["a", "b"]]` or `return Command(goto=...)`
+  is invisible. The shim now harvests destinations from BOTH typed-Command
+  return annotations AND inline `return Command(goto="x")` statements,
+  then synthesises edges with `condition="command_goto"`. Applied to
+  both AST-fallback and runtime paths so they produce symmetric graphs.
+  Verified: open_deep_research/legacy/graph.py 4 unreachable_node FPs
+  cleared.
+- **`add_conditional_edges` list path_map shape**.
+  `add_conditional_edges("src", router_fn, ["a", "b"])` (path_map
+  shorthand — list of node names, no `{"label": "node"}` mapping) was
+  previously dropped by the AST visitor. Both list and tuple forms now
+  produce edges.
+  Verified: open_deep_research/legacy/graph.py 1 unreachable_node FP cleared.
+
+### Net dogfood signal/noise
+
+| OSS file | Before | After | Δ |
+|---|---|---|---|
+| open_deep_research/legacy/graph.py | 9 (1 C / 6 W / 2 W) | **1** (1 W) | -8 (7 FP eliminated, 1 legitimate bounded cycle remains) |
+| gpt-researcher/multi_agents/agents/orchestrator.py | 1 C + 3 W | 0 C + 4 W + 3 I | bounded-cycle reclassified Critical → Warning |
+| langchain-ai/data-enrichment graph.py | 5 (3 dup cycle + 2) | 3 | -2 (dup collapse) |
+| langchain v1 agents/factory.py | 2 C + previous | 0 C + 5 W + 1 I | -2 Critical FPs (tool-calling pattern) |
+
+### Docs
+- `docs/case-studies/gpt-researcher.md` updated to reflect bounded-cycle
+  reclassification (Critical → Warning) and the v0.8.5 reasoning. The
+  remediation recommendation (explicit `max_revisions`) is unchanged.
+
 ## [0.8.4] - 2026-05-09
 
 ### Added — Operational trust trio (Phase 0.5)
