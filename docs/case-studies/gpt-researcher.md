@@ -14,15 +14,49 @@ python3 -m pip install langgraph beautifulsoup4 markdown gpt-researcher
 git clone https://github.com/assafelovic/gpt-researcher /tmp/gpt-researcher
 ```
 
-## Findings sweep (Shingan v0.8.2)
+## Findings sweep (Shingan v0.8.3 with AST fallback)
 
-| File | Findings | Why |
-|---|---|---|
-| `multi_agents/agents/orchestrator.py` | 0 | StateGraph constructed inside `ChiefEditorAgent._create_workflow(self, agents)` — instance method with required `agents` parameter; out of v0.8.x parser scope |
-| `multi_agents/agents/editor.py` | 0 | Same pattern |
-| `multi_agents/main.py` | 0 | Top-level wiring without StateGraph |
+| File | Findings | Severity | Notable |
+|---|---|---|---|
+| `multi_agents/agents/orchestrator.py` | **4** | 1 Critical + 3 Warning | `cycle_detection` (100%) on `planner` — first Critical finding in real OSS via AST fallback |
+| `multi_agents/agents/editor.py` | (parses, near-clean) | — | inner sub-graph follows the same instance-method pattern |
+| `multi_agents/main.py` | 0 | — | Top-level wiring without StateGraph |
 
-> **0 findings here is itself the take-away.** gpt-researcher's workflow is OOP-structured: the StateGraph lives inside an instance method that takes runtime arguments. Shingan v0.8.x can detect zero-arg factory functions and `@CrewBase` classes but not arbitrary instance methods with required parameters. v0.9's AST-based fallback parser is on track to address this — it walks the syntax tree for `StateGraph(...).add_node(...)` patterns regardless of containing function/method signature.
+### The Critical finding worth a maintainer conversation
+
+```
+[critical] cycle_detection (100%) on planner
+  cycle detected at non-Loop node "planner" (type=tool): graph definition error
+[warning] error_handler_checker (80%) on browser / planner / researcher
+```
+
+The cycle is the **human-in-the-loop revision flow**:
+
+```python
+workflow.add_conditional_edges(
+    'human',
+    lambda review: "accept" if review['human_feedback'] is None else "revise",
+    {"accept": "researcher", "revise": "planner"},
+)
+```
+
+`human → revise → planner → human → revise → planner → …` is bounded only by the human eventually clicking "accept". LangGraph's default `recursion_limit=25` would trip silently if:
+
+- the human reviewer is automated (e.g. another LLM acting as a reviewer),
+- the human is malicious / accidentally rejecting indefinitely, or
+- the test suite keeps feeding "revise" with no termination check.
+
+**Recommendation we'd surface as a GitHub Issue (drafted, not yet filed):**
+
+> Title: `cycle_detection: planner ↔ human revision loop has no explicit max_revisions`
+>
+> Body: Shingan static analysis surfaces a Critical-severity cycle on the `human → revise → planner` path of `ChiefEditorAgent._create_workflow`. The cycle is intentional (human-in-the-loop revision) but bounded only by the user clicking "accept" — automated reviewers or runaway revision requests will silently hit langgraph's default `recursion_limit=25` rather than producing a clear "max revisions exceeded" error. Consider:
+> 1. Adding a `revisions_count` field to ResearchState and short-circuiting `human` to `researcher` after N revisions, or
+> 2. Setting an explicit `max_revisions` config + raising a typed exception when exceeded, or
+> 3. Documenting the recursion_limit dependency for users wiring automated reviewers.
+> Not a security bug; a UX / robustness improvement. Shingan analysis trace: …
+
+(Issue body is ready to file when the maintainer relationship is established — per the case-study methodology, we don't open unsolicited PRs against external repos.)
 
 ## Bugs in Shingan this case study fixed
 
@@ -52,9 +86,9 @@ Fix: when `ModuleNotFoundError.name` is **not** a prefix of the user's own dotte
 
 ## Take
 
-gpt-researcher is exactly the kind of OSS Shingan must analyse to justify its existence — a multi-agent LangGraph workflow with 7+ specialised agents, used by tens of thousands of developers, with real production deployments. v0.8.x can't extract its graph yet, but the dogfood pass revealed and fixed three layout bugs that affect **every** package-style LangGraph user, not just gpt-researcher.
+gpt-researcher is exactly the kind of OSS Shingan must analyse to justify its existence — a multi-agent LangGraph workflow with 7+ specialised agents, used by tens of thousands of developers, with real production deployments.
 
-The v0.9 AST fallback parser is the unlock for getting findings here. We'll re-run this case study at v0.9 release.
+**v0.8.3 ships the AST fallback that unlocks this surface.** The runtime path can't safely call `ChiefEditorAgent._create_workflow(self, agents)` (required positional args, side-effects), so we now also walk the syntax tree for `StateGraph(...).add_node(...).add_edge(...)` patterns regardless of containing function/method. First Critical finding in real OSS landed here.
 
 ## How to add Shingan to your gpt-researcher fork
 
