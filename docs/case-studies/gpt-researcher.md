@@ -14,19 +14,30 @@ python3 -m pip install langgraph beautifulsoup4 markdown gpt-researcher
 git clone https://github.com/assafelovic/gpt-researcher /tmp/gpt-researcher
 ```
 
-## Findings sweep (Shingan v0.8.3 with AST fallback)
+## Findings sweep (Shingan v0.8.5 — bounded-cycle aware)
+
+> **Update (2026-05-06):** an earlier draft of this case study described
+> the `planner ↔ human` cycle as a Critical finding. Since v0.8.5,
+> `cycle_detection` distinguishes "structural cycle without exit" from
+> "bounded cycle with conditional exit" and downgrades the latter to
+> Warning. The gpt-researcher cycle has an `accept` branch that exits
+> to `researcher`, so it falls into the bounded category — Warning is
+> the more honest classification. The remediation recommendation below
+> still holds; only the severity label changed.
 
 | File | Findings | Severity | Notable |
 |---|---|---|---|
-| `multi_agents/agents/orchestrator.py` | **4** | 1 Critical + 3 Warning | `cycle_detection` (100%) on `planner` — first Critical finding in real OSS via AST fallback |
+| `multi_agents/agents/orchestrator.py` | **7** | 4 Warning + 3 Info | `cycle_detection` Warning on `planner` (bounded cycle, exit via `researcher`) |
 | `multi_agents/agents/editor.py` | (parses, near-clean) | — | inner sub-graph follows the same instance-method pattern |
 | `multi_agents/main.py` | 0 | — | Top-level wiring without StateGraph |
 
-### The Critical finding worth a maintainer conversation
+### The bounded cycle worth a maintainer conversation
 
 ```
-[critical] cycle_detection (100%) on planner
-  cycle detected at non-Loop node "planner" (type=tool): graph definition error
+[warning] cycle_detection (90%) on planner
+  bounded cycle through non-Loop node "planner" (type=tool):
+  the cycle has an exit branch, but no explicit max_iterations /
+  recursion_limit guard
 [warning] error_handler_checker (80%) on browser / planner / researcher
 ```
 
@@ -40,7 +51,11 @@ workflow.add_conditional_edges(
 )
 ```
 
-`human → revise → planner → human → revise → planner → …` is bounded only by the human eventually clicking "accept". LangGraph's default `recursion_limit=25` would trip silently if:
+`human → revise → planner → human → revise → planner → …` is bounded
+only by the human eventually clicking "accept" or by langgraph's
+default `recursion_limit=25`. The exit branch (`accept → researcher`)
+is what kept this from being a structural deadlock — but the silent
+bound is still risky if:
 
 - the human reviewer is automated (e.g. another LLM acting as a reviewer),
 - the human is malicious / accidentally rejecting indefinitely, or
@@ -50,7 +65,13 @@ workflow.add_conditional_edges(
 
 > Title: `cycle_detection: planner ↔ human revision loop has no explicit max_revisions`
 >
-> Body: Shingan static analysis surfaces a Critical-severity cycle on the `human → revise → planner` path of `ChiefEditorAgent._create_workflow`. The cycle is intentional (human-in-the-loop revision) but bounded only by the user clicking "accept" — automated reviewers or runaway revision requests will silently hit langgraph's default `recursion_limit=25` rather than producing a clear "max revisions exceeded" error. Consider:
+> Body: Shingan static analysis surfaces a bounded cycle on the
+> `human → revise → planner` path of `ChiefEditorAgent._create_workflow`.
+> The cycle has an `accept` exit branch but is otherwise bounded only
+> by the user clicking "accept" — automated reviewers or runaway
+> revision requests will silently hit langgraph's default
+> `recursion_limit=25` rather than producing a clear "max revisions
+> exceeded" error. Consider:
 > 1. Adding a `revisions_count` field to ResearchState and short-circuiting `human` to `researcher` after N revisions, or
 > 2. Setting an explicit `max_revisions` config + raising a typed exception when exceeded, or
 > 3. Documenting the recursion_limit dependency for users wiring automated reviewers.
@@ -88,7 +109,7 @@ Fix: when `ModuleNotFoundError.name` is **not** a prefix of the user's own dotte
 
 gpt-researcher is exactly the kind of OSS Shingan must analyse to justify its existence — a multi-agent LangGraph workflow with 7+ specialised agents, used by tens of thousands of developers, with real production deployments.
 
-**v0.8.3 ships the AST fallback that unlocks this surface.** The runtime path can't safely call `ChiefEditorAgent._create_workflow(self, agents)` (required positional args, side-effects), so we now also walk the syntax tree for `StateGraph(...).add_node(...).add_edge(...)` patterns regardless of containing function/method. First Critical finding in real OSS landed here.
+**v0.8.3 ships the AST fallback that unlocks this surface.** The runtime path can't safely call `ChiefEditorAgent._create_workflow(self, agents)` (required positional args, side-effects), so we now also walk the syntax tree for `StateGraph(...).add_node(...).add_edge(...)` patterns regardless of containing function/method. The first **bounded-cycle** finding in real OSS — initially Critical, reclassified to Warning by the v0.8.5 cycle-exit refinement — landed here.
 
 ## How to add Shingan to your gpt-researcher fork
 

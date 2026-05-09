@@ -622,7 +622,7 @@ def _build_graph(graph_obj: Any, source_path: str) -> Dict[str, Any]:
     if not entry_node_id and out_nodes:
         entry_node_id = out_nodes[0]["id"]
 
-    return {
+    payload = {
         "nodes": out_nodes,
         "edges": out_edges,
         "entry_node_id": entry_node_id,
@@ -635,6 +635,77 @@ def _build_graph(graph_obj: Any, source_path: str) -> Dict[str, Any]:
             "conditional_edge_reason": "over_approximated_dynamic",
         },
     }
+
+    # LangGraph's runtime introspection only sees edges declared via
+    # `add_edge` / `add_conditional_edges`. Dynamic dispatch via
+    # `def fn(...) -> Command[Literal[...]]` or `return Command(goto=...)`
+    # bypasses that and shows up only at execution time. We rebuild the
+    # AST visitor at this stage purely to harvest its
+    # `_command_goto_map` + per-node handler links and synthesise the
+    # implicit edges. This keeps runtime-path graphs symmetric with
+    # AST-fallback graphs (open_deep_research dogfood: 9 findings → 1).
+    _augment_runtime_graph_with_command_goto(payload, source_path)
+
+    return payload
+
+
+def _augment_runtime_graph_with_command_goto(
+    payload: Dict[str, Any], source_path: str,
+) -> None:
+    """Attach Command(goto=...) / Command[Literal[...]] edges that the
+    runtime LangGraph introspection misses.
+
+    Strategy: re-parse the source via `_StateGraphASTVisitor`, take its
+    `_command_goto_map` (function-name → destination set) and the
+    handlers it tracked per builder, then for every node in `payload`
+    whose handler is also recorded in the AST view, add the
+    Command-goto edges to the payload (skipping duplicates).
+    """
+    try:
+        if not source_path:
+            return
+        with open(source_path, encoding="utf-8") as fp:
+            content = fp.read()
+        tree = _ast.parse(content, filename=source_path)
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return
+    visitor = _StateGraphASTVisitor(source_path)
+    visitor.visit(tree)
+    if not visitor._command_goto_map:
+        return
+    # Combine handler maps from every discovered builder var; the
+    # runtime path doesn't tell us which subgraph a node lives in, so
+    # we treat all handler→fn associations as eligible.
+    handler_to_fn: Dict[str, str] = {}
+    for graph_state in visitor._graphs.values():
+        for node_name, fn_name in (graph_state.get("handlers") or {}).items():
+            handler_to_fn[node_name] = fn_name
+    if not handler_to_fn:
+        return
+    node_ids = {n["id"] for n in payload.get("nodes", [])}
+    existing_edges = {(e["from"], e["to"]) for e in payload.get("edges", [])}
+    added = 0
+    for node_id in node_ids:
+        fn_name = handler_to_fn.get(node_id)
+        if not fn_name:
+            continue
+        dests = visitor._command_goto_map.get(fn_name)
+        if not dests:
+            continue
+        for dest in sorted(dests):
+            if dest not in node_ids:
+                continue
+            if (node_id, dest) in existing_edges:
+                continue
+            payload["edges"].append({
+                "from":      node_id,
+                "to":        dest,
+                "condition": "command_goto",
+            })
+            existing_edges.add((node_id, dest))
+            added += 1
+    if added:
+        payload["metadata"]["command_goto_edges"] = added
 
 
 def _find_state_graphs(module: types.ModuleType) -> Any:
@@ -918,6 +989,133 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
         # findings on langchain's own factory.py (dogfood) where the
         # collapsed self-loop wasn't real.
         self._dyn_counter: int = 0
+        # function name → set of node names it dispatches to via
+        # `Command(goto=...)`. Built by visit_FunctionDef before the
+        # visitor reaches `<builder>.add_node(...)` so that when
+        # `add_node("human_feedback", human_feedback)` resolves, we
+        # can synthesise the implicit edges that LangGraph derives at
+        # runtime from `def human_feedback(...) -> Command[Literal[...]]`
+        # type annotations.
+        #
+        # Dogfood (open_deep_research/legacy/graph.py): without this
+        # extraction the "human_feedback" node looked like a dead-end
+        # in the static graph because its outgoing edges were dynamic
+        # (return-value driven), producing 4 false-positive
+        # `unreachable_node` warnings on every node it could reach.
+        self._command_goto_map: Dict[str, set[str]] = {}
+
+    # ---- Command(goto=...) discovery -----------------------------------
+
+    def visit_FunctionDef(self, node: _ast.FunctionDef) -> None:
+        self._collect_command_goto(node)
+        self.generic_visit(node)
+
+    def visit_AsyncFunctionDef(self, node: _ast.AsyncFunctionDef) -> None:  # type: ignore[override]
+        self._collect_command_goto(node)
+        self.generic_visit(node)
+
+    def _collect_command_goto(self, fn_node: Any) -> None:
+        """Populate _command_goto_map[fn_node.name] = {dest1, dest2, …}.
+
+        Source 1 (preferred — when annotated):
+          def fn(...) -> Command[Literal["a", "b"]]:
+        We walk the return-type subscript and pull every string Literal
+        argument inside the parameterised `Literal[...]`.
+
+        Source 2 (heuristic — when unannotated / `Command` only):
+          return Command(goto="a")
+          return Command(goto=["a", "b"])
+        We scan the function body for `return Command(goto=...)` calls
+        and harvest string literals from the goto kwarg.
+
+        Together these handle the two patterns LangGraph examples and
+        production code use: typed Command for static-analysis-friendly
+        helpers (open_deep_research), and bare `Command(goto=...)` for
+        ad-hoc routing logic.
+        """
+        dests: set[str] = set()
+
+        # Source 1: return-type annotation Command[Literal[...]].
+        ret = getattr(fn_node, "returns", None)
+        if ret is not None:
+            dests.update(self._extract_command_dests_from_annotation(ret))
+
+        # Source 2: scan body for `return Command(goto=...)`.
+        for sub in _ast.walk(fn_node):
+            if not isinstance(sub, _ast.Return):
+                continue
+            val = sub.value
+            if val is None:
+                continue
+            dests.update(self._extract_command_dests_from_return(val))
+
+        # Drop sentinels (`__end__`/END/etc) — they don't become real edges.
+        dests = {d for d in dests if d not in self._SENTINELS}
+
+        if dests:
+            existing = self._command_goto_map.setdefault(fn_node.name, set())
+            existing.update(dests)
+
+    def _extract_command_dests_from_annotation(self, ann: _ast.expr) -> set[str]:
+        """Pull `Literal["a","b"]` destinations from `Command[Literal[...]]`.
+
+        Also handles `Optional[Command[Literal[...]]]`,
+        `Union[Command[Literal[...]], None]`, and the older
+        `Command[Literal["a"], Literal["b"]]` shape (rare but legal).
+        """
+        out: set[str] = set()
+        for sub in _ast.walk(ann):
+            if not isinstance(sub, _ast.Subscript):
+                continue
+            base = sub.value
+            base_name = ""
+            if isinstance(base, _ast.Name):
+                base_name = base.id
+            elif isinstance(base, _ast.Attribute):
+                base_name = base.attr
+            if base_name != "Literal":
+                continue
+            # The slice is the Literal arguments. AST shape differs
+            # across Python 3.8 vs 3.9+ (Index wrapper vs raw).
+            slice_node = sub.slice
+            if isinstance(slice_node, _ast.Index):  # py3.8 (deprecated)
+                slice_node = slice_node.value  # type: ignore[attr-defined]
+            if isinstance(slice_node, _ast.Tuple):
+                for elt in slice_node.elts:
+                    if isinstance(elt, _ast.Constant) and isinstance(elt.value, str):
+                        out.add(elt.value)
+            elif isinstance(slice_node, _ast.Constant) and isinstance(slice_node.value, str):
+                out.add(slice_node.value)
+        return out
+
+    def _extract_command_dests_from_return(self, val: _ast.expr) -> set[str]:
+        """Harvest `Command(goto="x")` / `Command(goto=["x","y"])` strings.
+
+        Only string literals are collected — non-literal `goto=cond`
+        expressions are skipped (we can't statically know the value).
+        """
+        out: set[str] = set()
+        if not isinstance(val, _ast.Call):
+            return out
+        callee = val.func
+        callee_name = ""
+        if isinstance(callee, _ast.Name):
+            callee_name = callee.id
+        elif isinstance(callee, _ast.Attribute):
+            callee_name = callee.attr
+        if callee_name != "Command":
+            return out
+        for kw in val.keywords:
+            if kw.arg != "goto":
+                continue
+            v = kw.value
+            if isinstance(v, _ast.Constant) and isinstance(v.value, str):
+                out.add(v.value)
+            elif isinstance(v, (_ast.List, _ast.Tuple)):
+                for elt in v.elts:
+                    if isinstance(elt, _ast.Constant) and isinstance(elt.value, str):
+                        out.add(elt.value)
+        return out
 
     # ---- builder discovery ---------------------------------------------
 
@@ -1074,8 +1272,9 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
         # invent self-cycles between them.
         if len(node.args) >= 2:
             name = self._str_arg(node.args[0]) or self._next_dynamic_name()
-            ntype = self._node_type_for(node.args[1])
-            self._ensure_node(graph_id, name, ntype)
+            fn = node.args[1]
+            self._ensure_node(graph_id, name, self._node_type_for(fn))
+            self._record_handler(graph_id, name, fn)
         else:
             # Single-arg form: callable's name.
             fn = node.args[0]
@@ -1087,6 +1286,25 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
             if not name:
                 name = self._next_dynamic_name()
             self._ensure_node(graph_id, name, self._node_type_for(fn))
+            self._record_handler(graph_id, name, fn)
+
+    def _record_handler(self, graph_id: str, node_name: str, fn: _ast.expr) -> None:
+        """Stash the (node_name → handler-function-name) link.
+
+        Used by `build()` to materialise Command(goto=...) implicit
+        edges. Only string-resolvable handlers are recorded; lambda /
+        instance-method / chained call handlers fall through.
+        """
+        fn_name = ""
+        if isinstance(fn, _ast.Name):
+            fn_name = fn.id
+        elif isinstance(fn, _ast.Attribute):
+            fn_name = fn.attr
+        if not fn_name:
+            return
+        graph = self._graphs[graph_id]
+        handlers = graph.setdefault("handlers", {})
+        handlers[node_name] = fn_name
 
     def _next_dynamic_name(self) -> str:
         self._dyn_counter += 1
@@ -1130,30 +1348,50 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
         if src in self._SENTINELS:
             return
         self._ensure_node(graph_id, src, "llm")
-        # Try to extract the {key: target_name} mapping from the third positional
-        # arg (or `path_map`/`mapping` keyword).
-        mapping = None
-        if len(node.args) >= 3 and isinstance(node.args[2], _ast.Dict):
-            mapping = node.args[2]
+        # Extract destination nodes from the third positional arg
+        # (or `path_map`/`mapping`/`then` keyword). Two shapes:
+        #   1. dict {"label": "node_name", …} — labelled mapping
+        #   2. list/tuple ["node_a", "node_b"] — `path_map` shorthand
+        # The list form is what open_deep_research/legacy/graph.py
+        # uses on the `gather_completed_sections` conditional —
+        # missing list support left two LangGraph nodes apparently
+        # unreachable in the AST fallback.
+        mapping_node: Optional[_ast.expr] = None
+        if len(node.args) >= 3:
+            cand = node.args[2]
+            if isinstance(cand, (_ast.Dict, _ast.List, _ast.Tuple)):
+                mapping_node = cand
         for kw in node.keywords:
-            if kw.arg in ("path_map", "mapping") and isinstance(kw.value, _ast.Dict):
-                mapping = kw.value
+            if kw.arg in ("path_map", "mapping", "then") and isinstance(
+                kw.value, (_ast.Dict, _ast.List, _ast.Tuple)
+            ):
+                mapping_node = kw.value
                 break
-        if mapping is None:
+        if mapping_node is None:
             return
         graph = self._graphs[graph_id]
-        for key, value in zip(mapping.keys, mapping.values):
-            cond = self._str_arg(key) if key is not None else ""
-            target = self._sentinel_arg(value) or self._str_arg(value)
-            if not target:
-                continue
-            if target in self._SENTINELS:
-                continue
-            self._ensure_node(graph_id, target, "llm")
-            edge = {"from": src, "to": target}
-            if cond:
-                edge["condition"] = cond
-            graph["edges"].append(edge)
+        if isinstance(mapping_node, _ast.Dict):
+            for key, value in zip(mapping_node.keys, mapping_node.values):
+                cond = self._str_arg(key) if key is not None else ""
+                target = self._sentinel_arg(value) or self._str_arg(value)
+                if not target:
+                    continue
+                if target in self._SENTINELS:
+                    continue
+                self._ensure_node(graph_id, target, "llm")
+                edge = {"from": src, "to": target}
+                if cond:
+                    edge["condition"] = cond
+                graph["edges"].append(edge)
+        else:  # list / tuple
+            for elt in mapping_node.elts:
+                target = self._sentinel_arg(elt) or self._str_arg(elt)
+                if not target:
+                    continue
+                if target in self._SENTINELS:
+                    continue
+                self._ensure_node(graph_id, target, "llm")
+                graph["edges"].append({"from": src, "to": target})
 
     def _handle_set_entry(self, graph_id: str, node: _ast.Call) -> None:
         if not node.args:
@@ -1163,6 +1401,41 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
         if name and not graph["entry"]:
             graph["entry"] = name
             self._ensure_node(graph_id, name, "llm")
+
+    def _materialize_command_goto_edges(self, graph: Dict[str, Any]) -> int:
+        """For each node whose handler returns Command(goto="<dest>"),
+        synthesise the implicit edges LangGraph would derive at runtime.
+
+        Skips destinations not present in this graph's nodes (the
+        Command return type may name nodes from a different subgraph,
+        in which case the edge would be misleading). Skips edges
+        already present so a partial conditional mapping doesn't get
+        duplicated.
+
+        Returns the number of edges synthesised — surfaced in metadata
+        so the consumer can tell that some over-approximation
+        happened.
+        """
+        handlers = graph.get("handlers") or {}
+        existing = {(e["from"], e["to"]) for e in graph["edges"]}
+        synthesised = 0
+        for node_name, fn_name in handlers.items():
+            dests = self._command_goto_map.get(fn_name)
+            if not dests:
+                continue
+            for dest in sorted(dests):
+                if dest not in graph["nodes"]:
+                    continue
+                if (node_name, dest) in existing:
+                    continue
+                graph["edges"].append({
+                    "from": node_name,
+                    "to": dest,
+                    "condition": "command_goto",
+                })
+                existing.add((node_name, dest))
+                synthesised += 1
+        return synthesised
 
     def build(self) -> Dict[str, Any]:
         # Pick the "main" graph among potentially many StateGraphs in the
@@ -1192,6 +1465,7 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
                 },
             }
         graph = self._graphs[chosen_id]
+        synthesised = self._materialize_command_goto_edges(graph)
         out_nodes = list(graph["nodes"].values())
         entry = graph["entry"]
         if not entry and out_nodes:
@@ -1203,6 +1477,7 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
             "conditional_edge_reason": "over_approximated_dynamic",
             "selected_graph":          chosen_id,
             "discovered_graph_count":  len(self._graphs),
+            "command_goto_edges":      synthesised,
         }
         return {
             "nodes": out_nodes,

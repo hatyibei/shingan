@@ -386,6 +386,57 @@ func TestLangGraphParser_MultiGraphSubgraph(t *testing.T) {
 	}
 }
 
+// TestLangGraphParser_CommandGoto verifies that the AST shim
+// recovers implicit edges from `def fn(...) -> Command[Literal[...]]`
+// type annotations AND from inline `return Command(goto="x")` calls.
+//
+// Without this, every LangGraph node whose handler dispatches via
+// Command appears as a dead-end in the static graph and triggers
+// false-positive `unreachable_node` warnings on every downstream
+// node. Real-world dogfood: open_deep_research/legacy/graph.py
+// reduced 9 findings to 1 once Command/goto + list path_map were
+// both extracted.
+func TestLangGraphParser_CommandGoto(t *testing.T) {
+	requirePythonLangGraph(t)
+	dir := findTestdataDir(t)
+
+	p, err := parser.NewLangGraphParser(parser.WithLangGraphScriptPath(findShim(t)))
+	if err != nil {
+		t.Fatalf("NewLangGraphParser: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	graph, err := p.ParseFile(filepath.Join(dir, "command_goto.py"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+
+	hasEdge := func(from, to string) bool {
+		for _, e := range graph.Edges {
+			if e.From == from && e.To == to {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Source 1: typed Command[Literal["planner", "writer"]] on
+	// human_feedback. Both destinations must materialise.
+	for _, dst := range []string{"planner", "writer"} {
+		if !hasEdge("human_feedback", dst) {
+			t.Errorf("expected typed-Command edge human_feedback → %s; edges: %+v", dst, graph.Edges)
+		}
+	}
+
+	// Source 2: bare Command(goto=...) inside `router`. Both
+	// destinations (archiver, reviewer) must materialise.
+	for _, dst := range []string{"archiver", "reviewer"} {
+		if !hasEdge("router", dst) {
+			t.Errorf("expected bare-Command edge router → %s; edges: %+v", dst, graph.Edges)
+		}
+	}
+}
+
 // nodeIDList returns the sorted node ID slice for diagnostic messages.
 func nodeIDList(g *domain.WorkflowGraph) []string {
 	out := make([]string, 0, len(g.Nodes))
