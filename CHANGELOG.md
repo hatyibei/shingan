@@ -4,6 +4,29 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-05-09
+
+### Added — Operational trust trio (Phase 0.5)
+Per the v2 market analysis, operational ergonomics — not rule count — was the #1 adoption blocker vs Snyk / Semgrep / ESLint. v0.8.4 closes that gap.
+
+- **`# shingan: ignore` comments** (`docs/ignore-comments.md`). Three scopes — line / next-line / file — with comma-separated rule names or "ignore-all". Both `#` (Python / YAML) and `//` (Go / TS) comment prefixes accepted. Applied at the orchestrator level via `application.FilterIgnoredFindings` so every framework benefits without per-parser changes.
+- **`.shingan.yaml` severity policy** (`docs/severity-policy.md`). YAML config, ESLint / golangci-lint tradition: top-level `rules:` for global per-rule severity / enable / disable, plus path-scoped `overrides:` (`legacy/**` glob support). Auto-discovered via walk-up from CWD; `--policy=<path>` overrides. Resolution order: rule defaults → top-level → matching override (later wins).
+- **PR bot** (`docs/pr-bot.md`). New `pr-comment: true` input on `action.yml` posts a sticky markdown summary on pull requests (sticky-marker `<!-- shingan-pr-comment-marker -->` so subsequent pushes update in place — no timeline noise). `pr-comment-mode`: `always` / `on-findings` / `on-failure`. Uses the workflow's `${{ github.token }}` — no extra secret.
+
+### Resolution order at runtime (later steps see fewer findings)
+1. Rules run, producing raw findings with built-in severities.
+2. `# shingan: ignore` comments suppress per-line / per-file matches.
+3. `.shingan.yaml` policy adjusts severity / drops disabled rules.
+4. `--baseline.json` (if present) suppresses fingerprints already known.
+5. `--min-confidence` filters by confidence threshold.
+
+### Fixed
+- Stale root `package.json` (`name: shingan`, `version: 1.0.0`, `license: ISC`) and `package-lock.json` deleted — they were inconsistent with `LICENSE=MIT` and `npm/package.json@0.8.x`. The npm wrapper at `npm/` is now the single source of truth.
+
+### Docs
+- README + README.ja.md restructured with the v2 market analysis 1-line tagline ("Your agent can spend money, leak data, and call tools before you notice…") + a "Status: Beta" callout + a new "Where Shingan stands today" operational-features comparison table + a complete OWASP Agentic AI Top 10 (2025) coverage table.
+- 3 case-study docs published under `docs/case-studies/`: crewAI-examples (multi_tool 7 findings + game-builder-crew 3 findings), n8n-community-workflows (15 findings + the v0.8.2 fixes that drove them), gpt-researcher (4 findings via AST fallback including the first Critical in real OSS — `cycle_detection` on `planner` from the human-in-the-loop revision flow).
+
 ## [0.8.3] - 2026-05-09
 
 ### Added
