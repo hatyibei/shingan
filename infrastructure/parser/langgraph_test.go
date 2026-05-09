@@ -437,6 +437,50 @@ func TestLangGraphParser_CommandGoto(t *testing.T) {
 	}
 }
 
+// TestLangGraphParser_ConditionalRouterLiteral verifies that
+// `add_conditional_edges("src", router_fn)` (no mapping argument)
+// recovers destinations from the router function's `-> Literal[...]`
+// return-type annotation.
+//
+// Without this, every node behind such a conditional appears as
+// `unreachable_node` because the AST visitor only saw the START →
+// router source edge. Real-world dogfood: executive-ai-assistant
+// (langchain-ai) emitted 11 false-positive unreachable warnings on
+// graph.py before this lookup landed.
+func TestLangGraphParser_ConditionalRouterLiteral(t *testing.T) {
+	requirePythonLangGraph(t)
+	dir := findTestdataDir(t)
+
+	p, err := parser.NewLangGraphParser(parser.WithLangGraphScriptPath(findShim(t)))
+	if err != nil {
+		t.Fatalf("NewLangGraphParser: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	graph, err := p.ParseFile(filepath.Join(dir, "conditional_router_literal.py"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+
+	hasEdge := func(from, to string) bool {
+		for _, e := range graph.Edges {
+			if e.From == from && e.To == to {
+				return true
+			}
+		}
+		return false
+	}
+
+	// All three destinations from `route_after_triage`'s
+	// `-> Literal["draft", "archive", "notify"]` must materialise as
+	// edges from the conditional source `triage`.
+	for _, dst := range []string{"draft", "archive", "notify"} {
+		if !hasEdge("triage", dst) {
+			t.Errorf("expected router-Literal edge triage → %s; edges: %+v", dst, graph.Edges)
+		}
+	}
+}
+
 // nodeIDList returns the sorted node ID slice for diagnostic messages.
 func nodeIDList(g *domain.WorkflowGraph) []string {
 	out := make([]string, 0, len(g.Nodes))

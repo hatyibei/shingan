@@ -1368,6 +1368,35 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
                 mapping_node = kw.value
                 break
         if mapping_node is None:
+            # No explicit mapping argument. LangGraph still resolves
+            # destinations at runtime by reading the router function's
+            # `-> Literal[...]` return-type annotation. Dogfood
+            # (executive-ai-assistant/eaia/main/graph.py): 13
+            # `unreachable_node` warnings on every node behind a
+            # `add_conditional_edges("triage_input", route_after_triage)`
+            # call where `route_after_triage` returns
+            # `Literal["draft_response", "mark_as_read_node", "notify"]`.
+            # Without this lookup the static graph kept all those
+            # destinations apparently disconnected.
+            if len(node.args) >= 2:
+                router_fn = node.args[1]
+                router_name = ""
+                if isinstance(router_fn, _ast.Name):
+                    router_name = router_fn.id
+                elif isinstance(router_fn, _ast.Attribute):
+                    router_name = router_fn.attr
+                dests = self._command_goto_map.get(router_name) if router_name else None
+                if dests:
+                    graph = self._graphs[graph_id]
+                    for dest in sorted(dests):
+                        if dest in self._SENTINELS or not dest:
+                            continue
+                        self._ensure_node(graph_id, dest, "llm")
+                        graph["edges"].append({
+                            "from":      src,
+                            "to":        dest,
+                            "condition": "router_literal",
+                        })
             return
         graph = self._graphs[graph_id]
         if isinstance(mapping_node, _ast.Dict):
