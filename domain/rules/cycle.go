@@ -69,6 +69,15 @@ func (c *CycleDetector) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
 
 	state := make(map[string]visitState, len(graph.Nodes))
 	var findings []domain.Finding
+	// Dedupe back-edges that close on the same cycle entry: data-enrichment
+	// (LangGraph dogfood) had three distinct conditional branches all
+	// returning to `call_agent_model` (route_after_agent → "tools" |
+	// "reflect" | "call_agent_model"), producing three identical
+	// `cycle_detection` warnings on the same node. Engineers reviewing
+	// the SARIF report scroll past duplicates rather than reading
+	// individual messages, so we collapse to one Finding per cycle
+	// entry node and let the suggestion text describe the bound.
+	seenCycle := make(map[string]bool, len(graph.Nodes))
 
 	// DFS closure — returns findings detected on the path rooted at nodeID.
 	// path holds the current DFS stack (ancestors of nodeID, not including nodeID itself).
@@ -86,10 +95,14 @@ func (c *CycleDetector) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
 				// Back edge: we found a cycle. The target node is the entry
 				// point of the cycle and is the one responsible for bounding it.
 				// Pass currentPath so evaluateCycle can locate a parent Control node.
+				if seenCycle[target] {
+					break
+				}
 				f := c.evaluateCycle(graph, target, currentPath)
 				// evaluateCycle returns a zero-value Finding when the cycle is safe
 				// (Control node with max_iterations < 100). Skip those.
 				if f.RuleName != "" {
+					seenCycle[target] = true
 					findings = append(findings, f)
 				}
 

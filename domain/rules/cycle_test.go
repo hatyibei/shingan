@@ -260,6 +260,43 @@ func TestCycleDetector_NoFinding_SubAgentCycleUnderSafeLoopAgent(t *testing.T) {
 }
 
 // TestCycleDetector_Confidence verifies that all CycleDetector findings have Confidence == 1.0.
+// TestCycleDetector_DedupeBackEdges verifies that when several distinct
+// back-edges close on the same cycle entry node, the detector emits
+// **one** Finding rather than N copies. Real-world repro: LangGraph
+// `add_conditional_edges("agent", route, ...)` where `route` returns
+// any of {"tool", "agent", "reflect"} produces three back-edges to
+// `agent`, all of which are part of the same logical cycle. Engineers
+// reading SARIF reports treat duplicates as report churn.
+//
+// Dogfood: data-enrichment/src/enrichment_agent/graph.py
+// (LangChain-AI examples) — emitted 3 identical cycle_detection
+// warnings on `call_agent_model` before this dedupe.
+func TestCycleDetector_DedupeBackEdges(t *testing.T) {
+	g := mustBuild(t, testutil.NewBuilder().
+		AddNode("agent", domain.NodeTypeLLM).
+		AddNode("tool", domain.NodeTypeLLM).
+		AddNode("reflect", domain.NodeTypeLLM).
+		// All three branches route back to `agent`, closing distinct
+		// back-edges through 3 different ancestor stacks.
+		AddEdge("agent", "tool").
+		AddEdge("agent", "reflect").
+		AddEdge("tool", "agent").
+		AddEdge("reflect", "agent").
+		AddEdge("agent", "agent"). // direct self-loop branch
+		Entry("agent"))
+
+	findings := rules.NewCycleDetector().Analyze(g)
+	cycleFindings := 0
+	for _, f := range findings {
+		if f.RuleName == "cycle_detection" && f.NodeID == "agent" {
+			cycleFindings++
+		}
+	}
+	if cycleFindings != 1 {
+		t.Errorf("expected exactly 1 cycle_detection finding on `agent`, got %d (duplicates leaked through dedupe)", cycleFindings)
+	}
+}
+
 func TestCycleDetector_Confidence(t *testing.T) {
 	// Graph with an unguarded cycle (Loop node, no max_iterations) → Critical finding.
 	g := mustBuild(t, testutil.NewBuilder().
