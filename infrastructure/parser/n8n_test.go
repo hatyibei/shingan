@@ -18,6 +18,48 @@ func TestN8nParser_SupportedFormat(t *testing.T) {
 
 // TestN8nParser_SimpleChain tests a 3-node linear chain.
 // Webhook → ChatGPT → HTTP Request.
+// TestN8nParser_SkipsStickyNotes verifies that `n8n-nodes-base.stickyNote`
+// nodes — visual annotation widgets in the n8n UI, never executed —
+// are dropped from the WorkflowGraph entirely. They are NOT part of
+// the workflow but the JSON export carries them indistinguishably from
+// real nodes; without this skip every sticky note triggers an
+// `unreachable_node` warning.
+//
+// Dogfood: Zie619/n8n-workflows community sweep — most workflows
+// carry 4-12 sticky notes; the random 10-file sample showed each
+// would have produced 4-13 unreachable_node FPs without this fix.
+func TestN8nParser_SkipsStickyNotes(t *testing.T) {
+	input := []byte(`{
+		"name": "Workflow with sticky notes",
+		"nodes": [
+			{"id": "n1", "name": "Webhook",     "type": "n8n-nodes-base.webhook",    "parameters": {}, "position": [0, 0]},
+			{"id": "n2", "name": "Process",     "type": "n8n-nodes-base.code",       "parameters": {}, "position": [200, 0]},
+			{"id": "n3", "name": "Sticky Note", "type": "n8n-nodes-base.stickyNote", "parameters": {}, "position": [-100, -100]},
+			{"id": "n4", "name": "Sticky Note1","type": "n8n-nodes-base.stickyNote", "parameters": {}, "position": [400, 100]}
+		],
+		"connections": {
+			"Webhook": {
+				"main": [[{"node": "Process", "type": "main", "index": 0}]]
+			}
+		}
+	}`)
+
+	p := parser.NewN8nParser()
+	graph, err := p.Parse(input)
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if _, ok := graph.Nodes["Sticky Note"]; ok {
+		t.Errorf("expected Sticky Note to be dropped from WorkflowGraph; nodes=%v", nodeIDList(graph))
+	}
+	if _, ok := graph.Nodes["Sticky Note1"]; ok {
+		t.Errorf("expected Sticky Note1 to be dropped from WorkflowGraph; nodes=%v", nodeIDList(graph))
+	}
+	if len(graph.Nodes) != 2 {
+		t.Errorf("len(Nodes) = %d, want 2 (Webhook + Process); nodes=%v", len(graph.Nodes), nodeIDList(graph))
+	}
+}
+
 func TestN8nParser_SimpleChain(t *testing.T) {
 	input := []byte(`{
 		"name": "Simple Chain",

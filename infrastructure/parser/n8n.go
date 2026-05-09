@@ -140,6 +140,14 @@ func (p *N8nParser) Parse(input []byte) (*domain.WorkflowGraph, error) {
 		if raw.Disabled {
 			continue
 		}
+		// Sticky notes are visual annotation widgets in the n8n UI — not
+		// part of the executable workflow. Skipping them removes a
+		// dominant source of `unreachable_node` noise on real-world
+		// n8n exports (Zie619/n8n-workflows community sweep showed
+		// 4-12 sticky notes per workflow, all flagged unreachable).
+		if strings.Contains(strings.ToLower(raw.Type), "stickynote") {
+			continue
+		}
 		nodeID := raw.Name
 		if nodeID == "" {
 			// Fall back to internal id when n8n drops the name (rare; happens
