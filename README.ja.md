@@ -2,19 +2,62 @@
 
 # Shingan（心眼）
 
-> AI Agent Workflow Static Analyzer
+> **エージェントが金を溶かす前に、構造で止める。**
 
-![Go version](https://img.shields.io/badge/Go-1.23-00ADD8?logo=go) ![License](https://img.shields.io/badge/License-MIT-green) ![CI](https://github.com/hatyibei/shingan/actions/workflows/ci.yml/badge.svg)
+![Go version](https://img.shields.io/badge/Go-1.23-00ADD8?logo=go) ![License](https://img.shields.io/badge/License-MIT-green) ![CI](https://github.com/hatyibei/shingan/actions/workflows/ci.yml/badge.svg) [![npm](https://img.shields.io/npm/v/shingan-lint.svg)](https://www.npmjs.com/package/shingan-lint)
 
-AIエージェントのワークフローを実行前に構造解析し、無限ループ・到達不能ノード・エラーハンドリング欠落・コスト非効率・冗長LLM呼出を検出する Go製静的解析ツール。
+> **ステータス: Beta。** 開発活発、v1.0 は `baseline` / `ignore` / severity policy / PR-bot 完成後の 2026 年後半を目標。**production-critical な CI gating には現状非推奨** — 今は `continue-on-error: true` の informational 統合を推奨。
+
+AI エージェントのワークフローを実行前に構造解析し、危険な構造 — 無限ループ / 到達不能ノード / エラーハンドリング欠落 / コスト爆発経路 / prompt injection sink / PII 漏洩経路 / LLM 出力からのコード実行 — を **実行前** に検出する Go 製静的解析ツール。
 
 ## なぜShinganか
 
-LLM オーケストレーションが普及した現在、ワークフローの「設計時バグ」を検出するカテゴリが空白になっている。FlowLint は n8n 専用、LangSmith はランタイム観測に特化しており、いずれも **実行前** の構造検査には対応していない。
+LLM オーケストレーションが普及した現在、ワークフローの「設計時バグ」を検出するカテゴリが空白になっている。ランタイム観測 (LangSmith / Langfuse) は問題が起きた **後** にしか教えてくれず、n8n 専用 (FlowLint) は他フレームワークを見れない。**Shingan は実行前にワークフローグラフを解析する**、LangGraph / CrewAI / ADK-Go / n8n / 自前 JSON DSL を横断して。
 
 AI agent は一度実行すると副作用が不可逆になる (外部 API 呼出、ブラウザ操作、コード実行)。無限ループ・到達不能ノード・エラーハンドリング欠落・PII漏洩経路・prompt injection sink を **デプロイ前** に機械的に検出できれば、コスト爆発とインシデントの大半を未然に防げる。
 
-LangGraph / ADK-Go / CrewAI / n8n / 自前 JSON DSL — どのフレームワークでも、ワークフロー構造の本質は同じ「nodes と edges の有向グラフ」。Shingan は IR (中間表現) を中心に据えた Onion Architecture で、フレームワーク非依存に設計時バグを 20+ ルールで検出する。
+ワークフローフレームワークはすべて同じ primitive に還元される — nodes と edges の有向グラフ。Shingan はその中間表現 (IR) を中心に据えた Onion Architecture で、フレームワーク非依存に設計時バグを 20+ ルールで検出する。
+
+## 現時点の Shingan の立ち位置
+
+静的解析の勝負は「**運用しやすさ**」(CI を壊さない、開発者が嫌わない) で決まる。ルール数だけではない。正直な現状:
+
+| 運用観点 | Shingan v0.8.3 | CI fail-on-finding に切り替えるのに必要 |
+|---|:---:|---|
+| マルチフレームワーク (LangGraph / CrewAI / n8n / ADK-Go / JSON / Samurai) | ✅ | — |
+| AST フォールバック (factory / instance method / `@CrewBase` / Flow) | ✅ | — |
+| GitHub Action + SARIF + Code Scanning 統合 | ✅ | — |
+| MCP + LSP (Cursor / Claude Code / Neovim / VS Code / LangGraph Studio) | ✅ | — |
+| Severity × Confidence の二軸モデル | ✅ | — |
+| Diff モード (`--since main`) + `--baseline` JSON | ✅ | — |
+| `// shingan:ignore` 行 / ファイル単位コメント | ⏳ v0.9 | 低摩擦採用に必須 |
+| Severity policy as code (ルール / チーム単位) | ⏳ v0.9 | 組織規模での適用に必須 |
+| PR bot (変更ノードへの inline コメント) | ⏳ v0.10 | "informational → blocking" 昇格に必須 |
+| Org dashboard (コスト / PII / cycle メトリクスの時系列) | ⏳ v0.10+ | AppSec / Platform チーム採用に必須 |
+| 公開 false positive rate (≥100 OSS ワークフロー測定) | ⏳ v0.9 | 調達 / ベンダ評価に必須 |
+| OWASP Agentic Top 10 完全マッピング | ⏳ v0.9 | SOC 2 / ISO 42001 / 監査対応に必須 |
+| Plugin SDK (community ルール) | internal-only | v1.0 で公開予定 (ADR-010) |
+
+今おすすめの使い方は **`continue-on-error: true` の informational CI** + LSP 経由の IDE フィードバック。v0.9〜v0.10 で運用ギャップを潰していく。
+
+## OWASP Agentic AI — Top 10 (2025) カバレッジ
+
+[OWASP Agentic AI Top 10 (2025)](https://genai.owasp.org/llmrisk/) が定義する 10 種の障害モードのうち、静的解析でカバーできるのは「**構造系**」のみ (runtime 系は LangSmith / Langfuse 等に委ねる)。今のカバレッジ:
+
+| OWASP Agentic Top 10 (2025) | Class | Shingan rule(s) | Status |
+|---|:---:|---|:---:|
+| AAI01 — Memory poisoning | runtime | (静的解析範囲外) | ❌ runtime-only |
+| AAI02 — Tool misuse | structural | `eval_missing`, `unbounded_tool_arg`, `secret_in_prompt_template` | ✅ partial |
+| AAI03 — Privilege compromise | structural | `circular_dep_agents`, `dynamic_node_construction` | ✅ partial |
+| AAI04 — Resource overload | structural | `loop_guard`, `retry_storm`, `cost_estimation`, `redundant_llm_call` | ✅ |
+| AAI05 — Cascading hallucination amplification | runtime | (静的解析範囲外) | ❌ runtime-only |
+| AAI06 — Intent breaking & goal manipulation | structural | `prompt_injection_sink`, `temperature_misuse` | ✅ partial |
+| AAI07 — Misaligned & deceptive behaviors | runtime | (静的解析範囲外、評価のみ) | ❌ runtime-only |
+| AAI08 — Repudiation & untraceability | structural | `error_handler_checker`, `missing_eval_dataset` | ✅ partial |
+| AAI09 — Identity spoofing & impersonation | runtime / config | `model_card_mismatch`, `deprecated_model` | 🟡 partial |
+| AAI10 — Overwhelming human in the loop | structural | `cycle_detection`, `unreachable_node` | ✅ partial |
+
+完全 structural カバレッジ (AAI01/05/07 を除く全項目) のロードマップは **v0.9** — 詳細は [shingan-adr.md](./shingan-adr.md)。
 
 ## アーキテクチャ
 

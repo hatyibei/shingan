@@ -2,19 +2,62 @@
 
 # Shingan (心眼)
 
-> AI Agent Workflow Static Analyzer
+> **Your agent can spend money, leak data, and call tools before you notice. Shingan catches dangerous workflow structures before runtime.**
 
 ![Go version](https://img.shields.io/badge/Go-1.23-00ADD8?logo=go) ![License](https://img.shields.io/badge/License-MIT-green) ![CI](https://github.com/hatyibei/shingan/actions/workflows/ci.yml/badge.svg) [![npm](https://img.shields.io/npm/v/shingan-lint.svg)](https://www.npmjs.com/package/shingan-lint)
 
-A Go-based static analyzer for AI agent workflows. It catches infinite loops, unreachable nodes, missing error handlers, runaway costs, redundant LLM calls, prompt-injection sinks, and PII leaks **before** the workflow ever runs.
+> **Status: Beta.** Shingan is under active development; v1.0 is targeted for late 2026 once `baseline` / `ignore` / severity-policy / PR-bot land. **Not yet recommended for production-critical CI gating** — informational use (`continue-on-error: true`) is the recommended integration mode today.
+
+A Go-based static analyzer for AI agent workflows. It catches dangerous structures — infinite loops, unreachable nodes, missing error handlers, runaway cost paths, prompt-injection sinks, PII leak paths, code-execution from LLM output — **before the workflow ever runs**.
 
 ## Why Shingan
 
-LLM orchestration is mainstream now, but the "design-time bug" detection layer is missing. FlowLint targets n8n only, LangSmith specializes in runtime observability — neither inspects workflow structure **before execution**.
+LLM orchestration is mainstream now, but the "design-time bug" detection layer is missing. Runtime observability (LangSmith / Langfuse) only tells you a thing happened *after* it cost you money or leaked data. n8n-only linters (FlowLint) miss everything else. **Shingan inspects the workflow graph before execution**, across LangGraph, CrewAI, ADK-Go, n8n, and custom JSON DSLs.
 
 AI agents are unforgiving once they fan out: external API calls, browser automation, and code execution all leave irreversible side effects. Catching infinite loops, unreachable nodes, missing error handlers, PII leak paths, and prompt-injection sinks **before deploy** prevents the majority of cost blowups and incidents.
 
-LangGraph, ADK-Go, CrewAI, n8n, custom JSON DSLs — every workflow framework reduces to the same primitive: a directed graph of nodes and edges. Shingan keeps that intermediate representation (IR) at the center of an Onion Architecture and runs 20+ rules that are framework-agnostic.
+Every workflow framework reduces to the same primitive: a directed graph of nodes and edges. Shingan keeps that intermediate representation (IR) at the center of an Onion Architecture and runs 20+ rules that are framework-agnostic.
+
+## Where Shingan stands today
+
+A static analyzer wins or loses on **operational ergonomics** (how disruptive it is to your CI), not just rule count. Honest current state:
+
+| Operational dimension | Shingan v0.8.3 | What you'd need before flipping CI to fail-on-finding |
+|---|:---:|---|
+| Multi-framework (LangGraph / CrewAI / n8n / ADK-Go / JSON / Samurai) | ✅ | — |
+| AST-based fallback (factory / instance-method / `@CrewBase` / Flow) | ✅ | — |
+| GitHub Action + SARIF + Code Scanning integration | ✅ | — |
+| MCP + LSP (Cursor / Claude Code / Neovim / VS Code / LangGraph Studio) | ✅ | — |
+| Severity × Confidence two-axis model | ✅ | — |
+| Diff mode (`--since main`) + `--baseline` JSON | ✅ | — |
+| `// shingan:ignore` line / file comments | ⏳ v0.9 | required for low-friction adoption |
+| Severity-policy-as-code (per-rule / per-team) | ⏳ v0.9 | required for organisations with mixed risk tolerances |
+| PR bot (inline comments on changed nodes) | ⏳ v0.10 | required for "informational → blocking" promotion |
+| Org dashboard (cost / PII / cycle metrics over time) | ⏳ v0.10+ | required for AppSec / Platform team adoption |
+| Public false-positive rate (measured against ≥100 OSS workflows) | ⏳ v0.9 | required for procurement / vendor evaluation |
+| OWASP Agentic Top 10 — full mapping | ⏳ v0.9 | required for SOC 2 / ISO 42001 / enterprise auditors |
+| Plugin SDK (community rules) | internal-only | will go public at v1.0 (ADR-010) |
+
+So: today's recommended use is **`continue-on-error: true` informational CI** plus IDE feedback via the LSP. v0.9–v0.10 is closing the operational gap.
+
+## OWASP Agentic AI — Top 10 (2025) coverage
+
+The [OWASP Agentic AI Top 10 (2025)](https://genai.owasp.org/llmrisk/) lists ten failure modes specific to agentic LLM systems. Static analysis can only catch the *structural* class of these — runtime observability tools (LangSmith, Langfuse) cover the rest. Today's coverage:
+
+| OWASP Agentic Top 10 (2025) | Class | Shingan rule(s) | Status |
+|---|:---:|---|:---:|
+| AAI01 — Memory poisoning | runtime | (out of static scope) | ❌ runtime-only |
+| AAI02 — Tool misuse | structural | `eval_missing`, `unbounded_tool_arg`, `secret_in_prompt_template` | ✅ partial |
+| AAI03 — Privilege compromise | structural | `circular_dep_agents`, `dynamic_node_construction` | ✅ partial |
+| AAI04 — Resource overload | structural | `loop_guard`, `retry_storm`, `cost_estimation`, `redundant_llm_call` | ✅ |
+| AAI05 — Cascading hallucination amplification | runtime | (out of static scope) | ❌ runtime-only |
+| AAI06 — Intent breaking & goal manipulation | structural | `prompt_injection_sink`, `temperature_misuse` | ✅ partial |
+| AAI07 — Misaligned & deceptive behaviors | runtime | (out of static scope, evaluation-only) | ❌ runtime-only |
+| AAI08 — Repudiation & untraceability | structural | `error_handler_checker`, `missing_eval_dataset` | ✅ partial |
+| AAI09 — Identity spoofing & impersonation | runtime / config | `model_card_mismatch`, `deprecated_model` | 🟡 partial |
+| AAI10 — Overwhelming human in the loop | structural | `cycle_detection`, `unreachable_node` | ✅ partial |
+
+Roadmap to full structural coverage (everything but AAI01 / AAI05 / AAI07, which are runtime-class): **v0.9** — see the [v0.9 plan in shingan-adr.md](./shingan-adr.md).
 
 ## Architecture
 
