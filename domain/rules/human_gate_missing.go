@@ -115,7 +115,7 @@ func evaluateHumanGateMissing(g *domain.WorkflowGraph) (domain.Finding, bool) {
 			"production-deployed graph performs sensitive action via node %q with no Human-in-the-loop approval node anywhere in the workflow",
 			sensitiveID,
 		),
-		Suggestion: "Add a NodeTypeHuman node before sensitive actions (API writes, code execution, payments, data egress) when the graph is deployed to production / staging. Even a single graph-wide approval point is enough to satisfy the governance check; for finer scoping see pii_leak_scanner / eval_missing.",
+		Suggestion:       "Add a NodeTypeHuman node before sensitive actions (API writes, code execution, payments, data egress) when the graph is deployed to production / staging. Even a single graph-wide approval point is enough to satisfy the governance check; for finer scoping see pii_leak_scanner / eval_missing.",
 		Confidence:       0.6,
 		ConfidenceReason: domain.ReasonHeuristicPattern,
 	}, true

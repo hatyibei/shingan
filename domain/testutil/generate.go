@@ -438,13 +438,13 @@ func GenerateDeprecatedModelGraph(seed int64) *domain.WorkflowGraph {
 // GenerateBuggyGraph generates a WorkflowGraph that fires all 7 analysis rules.
 //
 // Rules triggered:
-//   1. cycle_detection: Critical — Loop node in cycle, no max_iterations
-//   2. loop_guard: Critical — Loop node without max_iterations
-//   3. unreachable_node: Warning — dangling LLM node
-//   4. error_handler_checker: Warning — Tool node (api) with only unconditional outgoing edges
-//   5. cost_estimation: Warning — high-cost LLM (gpt-4o) inside a loop
-//   6. redundant_llm_call: Warning — two LLM nodes with identical (model, prompt_template)
-//   7. pii_leak_scanner: Warning — RAG tool → external API without Human gate
+//  1. cycle_detection: Critical — Loop node in cycle, no max_iterations
+//  2. loop_guard: Critical — Loop node without max_iterations
+//  3. unreachable_node: Warning — dangling LLM node
+//  4. error_handler_checker: Warning — Tool node (api) with only unconditional outgoing edges
+//  5. cost_estimation: Warning — high-cost LLM (gpt-4o) inside a loop
+//  6. redundant_llm_call: Warning — two LLM nodes with identical (model, prompt_template)
+//  7. pii_leak_scanner: Warning — RAG tool → external API without Human gate
 func GenerateBuggyGraph(seed int64) *domain.WorkflowGraph {
 	_ = seed // deterministic pattern
 
@@ -496,10 +496,10 @@ func GenerateBuggyGraph(seed int64) *domain.WorkflowGraph {
 
 	// Loop structure: buggy_loop → expensive_llm → api_tool → duplicate_llm → buggy_loop
 	edges = append(edges,
-		domain.Edge{From: "buggy_loop", To: "expensive_llm"},        // unconditional
-		domain.Edge{From: "expensive_llm", To: "api_tool"},           // unconditional
-		domain.Edge{From: "api_tool", To: "duplicate_llm"},           // unconditional (api_tool has only unconditional outgoing → error_handler_checker)
-		domain.Edge{From: "duplicate_llm", To: "buggy_loop"},         // back edge — creates cycle
+		domain.Edge{From: "buggy_loop", To: "expensive_llm"}, // unconditional
+		domain.Edge{From: "expensive_llm", To: "api_tool"},   // unconditional
+		domain.Edge{From: "api_tool", To: "duplicate_llm"},   // unconditional (api_tool has only unconditional outgoing → error_handler_checker)
+		domain.Edge{From: "duplicate_llm", To: "buggy_loop"}, // back edge — creates cycle
 	)
 
 	// === Subgraph 2: PII leak (triggers pii_leak_scanner) ===
@@ -1204,10 +1204,11 @@ func GenerateN8nGraph(seed int64) *domain.WorkflowGraph {
 // research Task. Used for parser smoke tests.
 //
 // Structure:
-//   researcher (LLM) ──executes──► research_task (Tool)
-//                                       │
-//                                       ▼  (sequential edge)
-//   writer     (LLM) ──executes──► write_task    (Tool)
+//
+//	researcher (LLM) ──executes──► research_task (Tool)
+//	                                    │
+//	                                    ▼  (sequential edge)
+//	writer     (LLM) ──executes──► write_task    (Tool)
 //
 // Expected findings: error_handler_checker may fire on each Agent (no
 // conditional outgoing edge) and on the trigger-shaped first Task; the

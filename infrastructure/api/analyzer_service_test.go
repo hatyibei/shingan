@@ -242,4 +242,3 @@ func TestAnalyze_InvalidFormatDirect(t *testing.T) {
 	}
 	t.Logf("got expected error: %v", err)
 }
-

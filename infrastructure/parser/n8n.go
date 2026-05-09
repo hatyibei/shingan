@@ -11,25 +11,25 @@
 //     forbids) we suffix `_<n>` to disambiguate.
 //
 //  2. Entry-node detection — n8n exports do not declare an entry node. We pick:
-//       (a) The first trigger / webhook node (by array order) if any.
-//       (b) Otherwise, the first node with no incoming `main` edges.
-//       (c) Otherwise, the first node in the array.
+//     (a) The first trigger / webhook node (by array order) if any.
+//     (b) Otherwise, the first node with no incoming `main` edges.
+//     (c) Otherwise, the first node in the array.
 //     This matches how the n8n runtime starts a workflow.
 //
 //  3. NodeTypeAction does not exist in domain — per ADR-003 the canonical
 //     NodeType set is fixed (LLM, Tool, Control, Human, Output, Loop, Condition).
 //     We map:
-//       - openAi / chatGpt / anthropic / gemini / langchain.* / *llm* / *agent*  → NodeTypeLLM
-//       - if / switch                                                            → NodeTypeCondition
-//       - code / function / executeCommand                                       → NodeTypeTool with Config["category"]="code_execution"
-//                                                                                  (lets eval_missing fire when reachable from an LLM)
-//       - httpRequest / *http* / *api*                                           → NodeTypeTool with Config["category"]="api"
-//       - webhook / trigger                                                      → NodeTypeTool with Config["category"]="trigger"
-//       - everything else                                                        → NodeTypeTool with Config["category"]="api" (default)
+//     - openAi / chatGpt / anthropic / gemini / langchain.* / *llm* / *agent*  → NodeTypeLLM
+//     - if / switch                                                            → NodeTypeCondition
+//     - code / function / executeCommand                                       → NodeTypeTool with Config["category"]="code_execution"
+//     (lets eval_missing fire when reachable from an LLM)
+//     - httpRequest / *http* / *api*                                           → NodeTypeTool with Config["category"]="api"
+//     - webhook / trigger                                                      → NodeTypeTool with Config["category"]="trigger"
+//     - everything else                                                        → NodeTypeTool with Config["category"]="api" (default)
 //
 //  4. Branching edges — n8n's `connections.<name>.main` is a 2-D array:
-//       outer index = output port (0 = true / pass, 1 = false / fail for `if`),
-//       inner index = parallel destinations from that port.
+//     outer index = output port (0 = true / pass, 1 = false / fail for `if`),
+//     inner index = parallel destinations from that port.
 //     For Condition nodes (if/switch) we tag edges as Condition="true"/"false"
 //     for the first two ports and Condition="branch_<n>" for any extras. For
 //     non-Condition multi-port nodes we leave Condition="" on port 0 and use

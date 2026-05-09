@@ -35,10 +35,10 @@ import (
 )
 
 const (
-	listenPort   = ":8080"
-	projectID    = "axial-mercury-486503-j5"
-	location     = "us-central1"
-	geminiModel  = "gemini-2.0-flash-001"
+	listenPort  = ":8080"
+	projectID   = "axial-mercury-486503-j5"
+	location    = "us-central1"
+	geminiModel = "gemini-2.0-flash-001"
 )
 
 func main() {
@@ -97,7 +97,7 @@ func run(ctx context.Context) error {
 		MemoryService:   config.MemoryService,
 		AgentLoader:     config.AgentLoader,
 		ArtifactService: config.ArtifactService,
-		SSEWriteTimeout: 120 * time.Second, // match api.NewLauncher default; zero causes instant SSE timeout
+		SSEWriteTimeout: 120 * time.Second,               // match api.NewLauncher default; zero causes instant SSE timeout
 		DebugConfig:     &adkrest.DebugTelemetryConfig{}, // avoid nil pointer in ADK v1.1.0
 	})
 	if err != nil {

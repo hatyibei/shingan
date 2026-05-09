@@ -28,11 +28,11 @@ import (
 // heartbeats never overlap with on-demand checks initiated by the server's
 // constructor.
 type PythonHealth struct {
-	mu              sync.RWMutex
-	executable      string        // "python3" by default; injectable for tests
+	mu               sync.RWMutex
+	executable       string        // "python3" by default; injectable for tests
 	requireLangGraph bool          // probe `import langgraph` after the version check
-	cacheDuration   time.Duration // how long Status() may serve a cached verdict
-	checkTimeout    time.Duration // per-probe wall-clock cap
+	cacheDuration    time.Duration // how long Status() may serve a cached verdict
+	checkTimeout     time.Duration // per-probe wall-clock cap
 
 	// Hooks to allow tests to substitute the shell-out without spawning
 	// real subprocesses. exec.Command is the production default.

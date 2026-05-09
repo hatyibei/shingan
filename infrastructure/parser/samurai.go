@@ -24,11 +24,11 @@ import (
 
 // SamuraiWorkflow は SamuraiAI ワークフロー JSON のルート構造体。
 type SamuraiWorkflow struct {
-	Version    string         `json:"version"`
-	WorkflowID string         `json:"workflow_id"`
-	EntryNode  string         `json:"entry_node"`
-	Nodes      []SamuraiNode  `json:"nodes"`
-	Edges      []SamuraiEdge  `json:"edges"`
+	Version    string        `json:"version"`
+	WorkflowID string        `json:"workflow_id"`
+	EntryNode  string        `json:"entry_node"`
+	Nodes      []SamuraiNode `json:"nodes"`
+	Edges      []SamuraiEdge `json:"edges"`
 }
 
 // SamuraiNode は SamuraiAI の単一ノード定義。

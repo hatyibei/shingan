@@ -1,9 +1,9 @@
 // Package runtime contains ADK-Go agent definitions used as Shingan runtime demo targets.
 //
 // These files serve two roles:
-//   1. Static analysis targets — Shingan's ADKGoParser reads them as source.
-//   2. Reference implementations — the patterns here are mirrored in cmd/runner/samples.go
-//      for actual execution against Vertex AI Gemini.
+//  1. Static analysis targets — Shingan's ADKGoParser reads them as source.
+//  2. Reference implementations — the patterns here are mirrored in cmd/runner/samples.go
+//     for actual execution against Vertex AI Gemini.
 //
 // Expected Findings for simple_agent.go:
 //   - none (clean agent, no structural issues)

@@ -409,7 +409,9 @@ func TestMinConfidence_FilterByConfidence_ZeroIncludesAll(t *testing.T) {
 	allData, _ := os.ReadFile(outPathAll)
 
 	var filteredReport, allReport struct {
-		Summary struct{ Total int `json:"total"` } `json:"summary"`
+		Summary struct {
+			Total int `json:"total"`
+		} `json:"summary"`
 	}
 	json.Unmarshal(filteredData, &filteredReport)
 	json.Unmarshal(allData, &allReport)

@@ -127,8 +127,8 @@ func TestSecretInPromptTemplate_GitHubToken_Critical(t *testing.T) {
 
 func TestSecretInPromptTemplate_PEM_Critical(t *testing.T) {
 	g := makePromptSecretGraph(map[string]any{
-		"model":                  "gpt-4o-mini",
-		"user_message_template":  "Sign with:\n-----BEGIN RSA PRIVATE KEY-----\nMIIB...",
+		"model":                 "gpt-4o-mini",
+		"user_message_template": "Sign with:\n-----BEGIN RSA PRIVATE KEY-----\nMIIB...",
 	})
 	findings := NewSecretInPromptTemplate().Analyze(g)
 	if len(findings) != 1 {

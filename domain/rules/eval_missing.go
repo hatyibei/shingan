@@ -26,7 +26,7 @@ import (
 //     → Critical (Confidence 0.9)
 //   - LLM → ... → Condition node → ... → code-exec sink
 //     → Warning  (Confidence 0.6) — operator validates, but content is still
-//       dynamic; flag as elevated-not-resolved.
+//     dynamic; flag as elevated-not-resolved.
 //   - Any path passing through a NodeTypeHuman approver → skip (no finding).
 //
 // The forward-BFS frontier carries a `viaCondition` flag so per-path metadata

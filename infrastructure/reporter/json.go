@@ -36,10 +36,10 @@ type jsonFinding struct {
 
 // jsonSummary holds aggregate counts per severity.
 type jsonSummary struct {
-	Total              int `json:"total"`
-	Critical           int `json:"critical"`
-	Warning            int `json:"warning"`
-	Info               int `json:"info"`
+	Total               int `json:"total"`
+	Critical            int `json:"critical"`
+	Warning             int `json:"warning"`
+	Info                int `json:"info"`
 	HighConfidenceCount int `json:"high_confidence_count"`
 }
 

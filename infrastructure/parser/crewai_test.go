@@ -200,4 +200,3 @@ crew = Crew(agents=[a, b], tasks=[t1, t2], process=Process.sequential)
 		t.Errorf("expected >=2 delegate edges (bidirectional), got %d", delegateEdges)
 	}
 }
-

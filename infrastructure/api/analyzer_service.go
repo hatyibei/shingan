@@ -7,9 +7,9 @@ import (
 	"context"
 	"fmt"
 
-	analyzer "github.com/hatyibei/shingan/gen/analyzer"
 	"github.com/hatyibei/shingan/application"
 	"github.com/hatyibei/shingan/domain"
+	analyzer "github.com/hatyibei/shingan/gen/analyzer"
 	"github.com/hatyibei/shingan/infrastructure/factory"
 )
 

@@ -219,4 +219,3 @@ func nameFor(id string, nt domain.NodeType, idx int) string {
 		return id
 	}
 }
-

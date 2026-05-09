@@ -21,9 +21,9 @@ import (
 //     - "classification" with temp > 0.3 → Warning, 0.7, heuristic_pattern
 //     - "code_generation" with temp > 0  → Warning, 0.7, heuristic_pattern
 //     - "extraction" / "structured_output" task with temp > 0 → Info, 0.5,
-//       heuristic_pattern (already covered by signal #1 if the config flag is
-//       present; this case fires only when the user expressed intent through
-//       `task` alone).
+//     heuristic_pattern (already covered by signal #1 if the config flag is
+//     present; this case fires only when the user expressed intent through
+//     `task` alone).
 //
 // A node with no deterministic signal (creative_writing / unspecified) is
 // silently skipped to keep the false-positive rate low.

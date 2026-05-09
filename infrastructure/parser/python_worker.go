@@ -73,7 +73,7 @@ type PythonWorker struct {
 type PythonWorkerOption func(*PythonWorker)
 
 // WithPythonBinary overrides the python executable used for the worker.
-// Defaults to ``python3`` (PATH lookup).
+// Defaults to “python3“ (PATH lookup).
 func WithPythonBinary(bin string) PythonWorkerOption {
 	return func(w *PythonWorker) {
 		if bin != "" {
@@ -496,4 +496,3 @@ func walkUpForShimNamed(startDir, filename string) (string, bool) {
 		dir = parent
 	}
 }
-

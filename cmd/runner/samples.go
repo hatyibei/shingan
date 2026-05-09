@@ -10,8 +10,8 @@ import (
 	"google.golang.org/adk/agent/workflowagents/loopagent"
 	"google.golang.org/genai"
 
-	adkgemini "google.golang.org/adk/model/gemini"
 	"google.golang.org/adk/model"
+	adkgemini "google.golang.org/adk/model/gemini"
 )
 
 const (

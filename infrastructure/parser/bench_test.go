@@ -81,10 +81,10 @@ func generateJSONSource(n int) []byte {
 // This is used when you need a realistic graph (not just a chain).
 func generateJSONFromDomainGraph(g *domain.WorkflowGraph) []byte {
 	type jsonNode struct {
-		ID     string         `json:"id"`
-		Name   string         `json:"name"`
+		ID     string          `json:"id"`
+		Name   string          `json:"name"`
 		Type   domain.NodeType `json:"type"`
-		Config map[string]any `json:"config,omitempty"`
+		Config map[string]any  `json:"config,omitempty"`
 	}
 	type jsonEdge struct {
 		From      string `json:"from"`

@@ -33,9 +33,9 @@ type baseServer struct{}
 func (baseServer) Initialize(_ context.Context, _ *protocol.InitializeParams) (*protocol.InitializeResult, error) {
 	return &protocol.InitializeResult{}, nil
 }
-func (baseServer) Initialized(_ context.Context, _ *protocol.InitializedParams) error  { return nil }
-func (baseServer) Shutdown(_ context.Context) error                                    { return nil }
-func (baseServer) Exit(_ context.Context) error                                        { return nil }
+func (baseServer) Initialized(_ context.Context, _ *protocol.InitializedParams) error { return nil }
+func (baseServer) Shutdown(_ context.Context) error                                   { return nil }
+func (baseServer) Exit(_ context.Context) error                                       { return nil }
 func (baseServer) WorkDoneProgressCancel(_ context.Context, _ *protocol.WorkDoneProgressCancelParams) error {
 	return nil
 }

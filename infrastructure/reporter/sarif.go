@@ -62,7 +62,7 @@ type sarifRoot struct {
 }
 
 type sarifRun struct {
-	Tool    sarifTool    `json:"tool"`
+	Tool    sarifTool     `json:"tool"`
 	Results []sarifResult `json:"results"`
 }
 
@@ -71,10 +71,10 @@ type sarifTool struct {
 }
 
 type sarifDriver struct {
-	Name           string       `json:"name"`
-	Version        string       `json:"version"`
-	InformationURI string       `json:"informationUri"`
-	Rules          []sarifRule  `json:"rules"`
+	Name           string      `json:"name"`
+	Version        string      `json:"version"`
+	InformationURI string      `json:"informationUri"`
+	Rules          []sarifRule `json:"rules"`
 }
 
 type sarifRule struct {

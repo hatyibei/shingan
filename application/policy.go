@@ -42,8 +42,8 @@ import (
 
 // Policy is the parsed `.shingan.yaml` config.
 type Policy struct {
-	Rules     map[string]RuleConfig  `yaml:"rules,omitempty"`
-	Overrides []OverridePolicy       `yaml:"overrides,omitempty"`
+	Rules     map[string]RuleConfig `yaml:"rules,omitempty"`
+	Overrides []OverridePolicy      `yaml:"overrides,omitempty"`
 }
 
 // RuleConfig overrides one rule's defaults.
