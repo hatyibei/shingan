@@ -571,6 +571,57 @@ func TestLangGraphParser_EndSentinelExit(t *testing.T) {
 	}
 }
 
+// TestLangGraphParser_BareRouterPartial verifies three intersecting
+// extensions land together correctly:
+//
+//  1. Source 3 of `_collect_command_goto`: a function with no return
+//     annotation and ≥2 distinct literal/sentinel return values is
+//     treated as a router and harvested into `_command_goto_map`.
+//  2. `_resolve_router_callable` unwraps `BoolOp` (`a or b`) and
+//     `functools.partial(fn, …)` to find the underlying function name.
+//  3. The visitor's `prepass_collect_dispatch` populates the map for
+//     every function before any builder call is visited, so a router
+//     defined AFTER the conditional that uses it still resolves.
+//
+// Dogfood: langgraph/examples/chatbot-simulation-evaluation/
+// simulation_utils.py — used `add_conditional_edges("user",
+// should_continue or functools.partial(_should_continue, max_turns=6))`
+// where `_should_continue` is defined further down in the module.
+func TestLangGraphParser_BareRouterPartial(t *testing.T) {
+	requirePythonLangGraph(t)
+	dir := findTestdataDir(t)
+
+	p, err := parser.NewLangGraphParser(parser.WithLangGraphScriptPath(findShim(t)))
+	if err != nil {
+		t.Fatalf("NewLangGraphParser: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	graph, err := p.ParseFile(filepath.Join(dir, "bare_router_partial.py"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+
+	hasEdge := func(from, to string) bool {
+		for _, e := range graph.Edges {
+			if e.From == from && e.To == to {
+				return true
+			}
+		}
+		return false
+	}
+	// `_should_continue` returns `"assistant"` (string) and `END`
+	// (sentinel). The string destination must materialise as an edge;
+	// the sentinel must mark `user.HasExitBranch=true` so the
+	// resulting user ↔ assistant cycle classifies as bounded.
+	if !hasEdge("user", "assistant") {
+		t.Errorf("expected bare-router edge user → assistant from `_should_continue` literal returns; edges: %+v", graph.Edges)
+	}
+	if user, ok := graph.Nodes["user"]; !ok || !user.HasExitBranch {
+		t.Errorf("expected user.HasExitBranch=true (END sentinel from `_should_continue`); got node=%+v", user)
+	}
+}
+
 // nodeIDList returns the sorted node ID slice for diagnostic messages.
 func nodeIDList(g *domain.WorkflowGraph) []string {
 	out := make([]string, 0, len(g.Nodes))

@@ -720,33 +720,30 @@ def _augment_runtime_graph_with_command_goto(
     except (OSError, SyntaxError, UnicodeDecodeError):
         return
     visitor = _StateGraphASTVisitor(source_path)
+    visitor.prepass_collect_dispatch(tree)
     visitor.visit(tree)
-    if not visitor._command_goto_map:
-        return
-    # Combine handler maps from every discovered builder var; the
-    # runtime path doesn't tell us which subgraph a node lives in, so
-    # we treat all handler→fn associations as eligible.
+
+    node_ids = {n["id"] for n in payload.get("nodes", [])}
+    nodes_by_id = {n["id"]: n for n in payload.get("nodes", [])}
+    existing_edges = {(e["from"], e["to"]) for e in payload.get("edges", [])}
+    SENTINELS = ("START", "END", "__start__", "__end__")
+    added = 0
+
+    # Source A — `Command(goto=…)` returned from a node's handler.
+    # Combine handler maps from every discovered builder var; runtime
+    # introspection doesn't tell us which subgraph a node lives in.
     handler_to_fn: Dict[str, str] = {}
     for graph_state in visitor._graphs.values():
         for node_name, fn_name in (graph_state.get("handlers") or {}).items():
             handler_to_fn[node_name] = fn_name
-    if not handler_to_fn:
-        return
-    node_ids = {n["id"] for n in payload.get("nodes", [])}
-    nodes_by_id = {n["id"]: n for n in payload.get("nodes", [])}
-    existing_edges = {(e["from"], e["to"]) for e in payload.get("edges", [])}
-    added = 0
-    SENTINELS = ("START", "END", "__start__", "__end__")
-    for node_id in node_ids:
-        fn_name = handler_to_fn.get(node_id)
-        if not fn_name:
+    for node_id, fn_name in handler_to_fn.items():
+        if node_id not in node_ids:
             continue
         dests = visitor._command_goto_map.get(fn_name)
         if not dests:
             continue
         for dest in sorted(dests):
             if dest in SENTINELS:
-                # Sentinel destination → mark source exit, no edge.
                 n = nodes_by_id[node_id]
                 n["has_exit_branch"] = True
                 n.setdefault("config", {})["has_end_branch"] = True
@@ -762,6 +759,38 @@ def _augment_runtime_graph_with_command_goto(
             })
             existing_edges.add((node_id, dest))
             added += 1
+
+    # Source B — edges that the AST visitor recovered (router-Literal
+    # mapping omitted, list/dict path_map, fan-in, etc) but that the
+    # LangGraph runtime didn't know about because the router function
+    # has no return-type annotation. Dogfood: simulation_utils.py's
+    # `_should_continue` (no annotation, multi-return body) leaves
+    # `branches['user']['condition'].ends = None` at runtime; the AST
+    # visitor's bare-return harvest produces the missing user→assistant
+    # edge plus a `has_exit_branch` mark on `user` for the END branch.
+    ast_graph = visitor.build()
+    for e in ast_graph.get("edges", []):
+        src, dst = e.get("from"), e.get("to")
+        if not src or not dst:
+            continue
+        if src not in node_ids or dst not in node_ids:
+            continue
+        if (src, dst) in existing_edges:
+            continue
+        merged = {"from": src, "to": dst}
+        if e.get("condition"):
+            merged["condition"] = e["condition"]
+        payload["edges"].append(merged)
+        existing_edges.add((src, dst))
+        added += 1
+    for ast_node in ast_graph.get("nodes", []):
+        if not ast_node.get("has_exit_branch"):
+            continue
+        runtime_node = nodes_by_id.get(ast_node["id"])
+        if runtime_node is None:
+            continue
+        runtime_node["has_exit_branch"] = True
+
     if added:
         payload["metadata"]["command_goto_edges"] = added
 
@@ -1020,6 +1049,7 @@ def _try_ast_extract(
     except (OSError, SyntaxError, UnicodeDecodeError):
         return None
     visitor = _StateGraphASTVisitor(source_path)
+    visitor.prepass_collect_dispatch(tree)
     visitor.visit(tree)
     return visitor.build()
 
@@ -1098,13 +1128,22 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
 
     # ---- Command(goto=...) discovery -----------------------------------
 
-    def visit_FunctionDef(self, node: _ast.FunctionDef) -> None:
-        self._collect_command_goto(node)
-        self.generic_visit(node)
+    def prepass_collect_dispatch(self, tree: _ast.AST) -> None:
+        """Pre-walk that fills `_command_goto_map` for every function
+        definition in the module BEFORE the main visit() traverses
+        builder calls.
 
-    def visit_AsyncFunctionDef(self, node: _ast.AsyncFunctionDef) -> None:  # type: ignore[override]
-        self._collect_command_goto(node)
-        self.generic_visit(node)
+        Without this pre-pass, `add_conditional_edges("src", router_fn)`
+        visited inside `def make_graph()` (the typical encapsulation
+        pattern) resolves before the visitor reaches `def router_fn(...)`
+        defined further down in the module — `_command_goto_map` is
+        empty at lookup time and the conditional drops its destinations.
+        Dogfood: langgraph/examples/chatbot-simulation-evaluation/
+        simulation_utils.py.
+        """
+        for node in _ast.walk(tree):
+            if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                self._collect_command_goto(node)
 
     def _collect_command_goto(self, fn_node: Any) -> None:
         """Populate _command_goto_map[fn_node.name] = {dest1, dest2, …}.
@@ -1120,10 +1159,23 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
         We scan the function body for `return Command(goto=...)` calls
         and harvest string literals from the goto kwarg.
 
-        Together these handle the two patterns LangGraph examples and
-        production code use: typed Command for static-analysis-friendly
-        helpers (open_deep_research), and bare `Command(goto=...)` for
-        ad-hoc routing logic.
+        Source 3 (bare return router — no annotation, no Command):
+          def _should_continue(state, max_turns=6):
+              if cond: return END
+              elif cond2: return "finish"
+              return "continue"
+        Used by langgraph/examples/chatbot-simulation-evaluation/
+        simulation_utils.py and many older LangGraph idioms predating
+        the typed-Command pattern. To avoid harvesting plain utility
+        functions that incidentally return a string, we require at
+        least TWO distinct literal/sentinel returns — that's the
+        structural fingerprint of a router (multiple branches
+        dispatching to multiple destinations).
+
+        Together these handle the three patterns LangGraph examples
+        and production code use: typed Command (open_deep_research),
+        bare `Command(goto=...)` (ad-hoc routing), and untyped
+        multi-return routers (the simulator pattern).
         """
         dests: set[str] = set()
 
@@ -1140,6 +1192,26 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
             if val is None:
                 continue
             dests.update(self._extract_command_dests_from_return(val))
+
+        # Source 3: bare router — collect string-literal / sentinel
+        # returns and treat as routing destinations only when there
+        # are ≥2 distinct values (single-return utility funcs are
+        # NOT routers and must not pollute the map).
+        bare_returns: list[str] = []
+        for sub in _ast.walk(fn_node):
+            if not isinstance(sub, _ast.Return):
+                continue
+            val = sub.value
+            if val is None:
+                continue
+            if isinstance(val, _ast.Constant) and isinstance(val.value, str):
+                bare_returns.append(val.value)
+            elif isinstance(val, _ast.Name) and val.id in self._SENTINELS:
+                bare_returns.append(val.id)
+            elif isinstance(val, _ast.Attribute) and val.attr in self._SENTINELS:
+                bare_returns.append(val.attr)
+        if len(set(bare_returns)) >= 2:
+            dests.update(bare_returns)
 
         # Sentinels (END / __end__) ARE kept in the map — downstream
         # consumers (router_literal lookup, Command(goto=END) edges)
@@ -1296,6 +1368,55 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
                 elif method == "set_entry_point":
                     self._handle_set_entry(graph_id, node)
         self.generic_visit(node)
+
+    def _resolve_router_callable(self, expr: _ast.expr) -> Optional[str]:
+        """Best-effort resolution of `add_conditional_edges`'s 2nd arg
+        to a function name registered in `_command_goto_map`.
+
+        Handles:
+          fn                                  → "fn"
+          self.fn                             → "fn"
+          a or b                              → first operand whose
+                                                name is in the map
+          functools.partial(fn, ...)          → "fn"
+          partial(fn, max_turns=6)            → "fn"
+
+        Dogfood: langgraph chatbot-simulation-evaluation
+        simulation_utils.py uses
+          add_conditional_edges("user",
+            should_continue or functools.partial(_should_continue, ...))
+        — without this, router_name resolved to "" and the conditional's
+        destinations were dropped.
+        """
+        if isinstance(expr, _ast.Name):
+            return expr.id
+        if isinstance(expr, _ast.Attribute):
+            return expr.attr
+        if isinstance(expr, _ast.BoolOp):
+            # `a or b`, `a and b` — try each operand and prefer the
+            # one whose harvested destination set is non-empty.
+            for v in expr.values:
+                name = self._resolve_router_callable(v)
+                if name and name in self._command_goto_map:
+                    return name
+            # Fall back to the first resolvable name even if not yet
+            # in the map (visit order may register it later).
+            for v in expr.values:
+                name = self._resolve_router_callable(v)
+                if name:
+                    return name
+            return None
+        if isinstance(expr, _ast.Call):
+            # functools.partial(fn, …) / partial(fn, …) — strip the
+            # wrapper and recurse into the first positional argument.
+            callee_name = ""
+            if isinstance(expr.func, _ast.Attribute):
+                callee_name = expr.func.attr
+            elif isinstance(expr.func, _ast.Name):
+                callee_name = expr.func.id
+            if callee_name == "partial" and expr.args:
+                return self._resolve_router_callable(expr.args[0])
+        return None
 
     def _builder_graph_id(self, expr: _ast.expr) -> Optional[str]:
         """Return graph_id when `expr` references a StateGraph builder var.
@@ -1528,11 +1649,7 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
             # destinations apparently disconnected.
             if len(node.args) >= 2:
                 router_fn = node.args[1]
-                router_name = ""
-                if isinstance(router_fn, _ast.Name):
-                    router_name = router_fn.id
-                elif isinstance(router_fn, _ast.Attribute):
-                    router_name = router_fn.attr
+                router_name = self._resolve_router_callable(router_fn)
                 dests = self._command_goto_map.get(router_name) if router_name else None
                 if dests:
                     graph = self._graphs[graph_id]
