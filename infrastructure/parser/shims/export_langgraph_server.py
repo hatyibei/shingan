@@ -130,7 +130,10 @@ def _import_user_module(path: str) -> types.ModuleType:
         immediate-parent dir, and
       * absolute self-imports (`from <package_name> import Y`) resolve
         via the package root.
-    Both entries are removed on exit so subsequent parses don't leak.
+    The current working directory is also temporarily switched to the
+    file's parent so user-side relative file I/O (`open('config/x.yaml')`)
+    finds files alongside the script — a common AI-agent-framework pattern.
+    All overrides are removed on exit so subsequent parses don't leak.
     """
     abs_path = os.path.abspath(path)
     src_dir = os.path.dirname(abs_path)
@@ -140,7 +143,10 @@ def _import_user_module(path: str) -> types.ModuleType:
         if d and d not in sys.path:
             sys.path.insert(0, d)
             inserted.append(d)
+    prev_cwd = os.getcwd()
     try:
+        if src_dir and os.path.isdir(src_dir):
+            os.chdir(src_dir)
         spec = importlib.util.spec_from_file_location(
             f"_shingan_user_{abs_path.replace(os.sep, '_')}", abs_path
         )
@@ -150,6 +156,10 @@ def _import_user_module(path: str) -> types.ModuleType:
         spec.loader.exec_module(module)  # type: ignore[union-attr]
         return module
     finally:
+        try:
+            os.chdir(prev_cwd)
+        except OSError:
+            pass
         for d in inserted:
             try:
                 sys.path.remove(d)
@@ -601,13 +611,19 @@ def _has_only_optional_args(fn: Any) -> bool:
     Used by `_find_state_graphs` to skip factories that require config
     (LLM model, API key, etc.) — calling those without args would just
     raise TypeError without producing useful structure for the analysis.
+
+    Note: `self` / `cls` are skipped so methods (and class `__init__`s
+    with only `*args, **kwargs`) are correctly recognised.
     """
     try:
         import inspect as _inspect
         sig = _inspect.signature(fn)
     except (TypeError, ValueError):
         return False
-    for p in sig.parameters.values():
+    params = list(sig.parameters.values())
+    if params and params[0].name in ("self", "cls"):
+        params = params[1:]
+    for p in params:
         if p.kind in (_inspect.Parameter.VAR_POSITIONAL,
                       _inspect.Parameter.VAR_KEYWORD):
             continue

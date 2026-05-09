@@ -88,7 +88,57 @@ def _load_crewai() -> Tuple[Optional[types.ModuleType], Optional[str]]:
         mod = importlib.import_module("crewai")
     except Exception as exc:  # noqa: BLE001 — any import failure
         return None, f"{type(exc).__name__}: {exc}"
+    _stub_runtime_methods(mod)
     return mod, None
+
+
+_RUNTIME_STUBS_INSTALLED = False
+
+
+def _stub_runtime_methods(crewai_mod: types.ModuleType) -> None:
+    """Monkey-patch Crew.kickoff / Task.execute / Agent.execute_task with
+    no-op stubs so user modules whose top-level code does
+    `crew.kickoff()` or `task.execute()` (a common production pattern)
+    don't crash analysis. The stubs return an empty string and have no
+    side effects (no API calls, no network, no disk writes).
+
+    Idempotent — only patches once per worker lifetime. The original
+    methods aren't restored: this worker only ever loads the module
+    once, then exits, so leaking the stubs is fine.
+    """
+    global _RUNTIME_STUBS_INSTALLED
+    if _RUNTIME_STUBS_INSTALLED:
+        return
+    _RUNTIME_STUBS_INSTALLED = True
+
+    def _noop(self, *args, **kwargs):
+        return ""
+
+    # Stub these unconditionally — even if a method doesn't exist in the
+    # currently-installed CrewAI version, user code written against an
+    # older / newer API may call it (`task.execute()` is the classic case
+    # — removed in CrewAI 1.x, but still present in legacy examples like
+    # crewAI-examples/crews/screenplay_writer/screenplay_writer.py).
+    for attr_path in (
+        ("Crew", "kickoff"),
+        ("Crew", "kickoff_for_each"),
+        ("Crew", "kickoff_async"),
+        ("Crew", "train"),
+        ("Crew", "test"),
+        ("Crew", "replay"),
+        ("Task", "execute"),
+        ("Task", "execute_sync"),
+        ("Task", "execute_async"),
+        ("Agent", "execute_task"),
+        ("Agent", "kickoff"),
+    ):
+        cls_name, method = attr_path
+        cls = getattr(crewai_mod, cls_name, None)
+        if cls is not None:
+            try:
+                setattr(cls, method, _noop)
+            except (AttributeError, TypeError):
+                pass
 
 
 def _crewai_version() -> str:
@@ -125,8 +175,12 @@ def _package_root(path: str) -> str:
 
 def _import_user_module(path: str) -> types.ModuleType:
     """Both the immediate file directory AND the package root go on sys.path
-    so absolute self-imports (`from <pkg> import …`) resolve. See
-    docstring on the LangGraph shim's _import_user_module for the rationale.
+    so absolute self-imports (`from <pkg> import …`) resolve. The current
+    working directory is also temporarily switched to the file's parent so
+    that user-side relative file I/O (`open('config/agents.yaml')` —
+    common with CrewAI's @CrewBase decorator and similar config-loading
+    patterns) finds files alongside the script. See the LangGraph shim's
+    `_import_user_module` for additional rationale.
     """
     abs_path = os.path.abspath(path)
     src_dir = os.path.dirname(abs_path)
@@ -136,7 +190,11 @@ def _import_user_module(path: str) -> types.ModuleType:
         if d and d not in sys.path:
             sys.path.insert(0, d)
             inserted.append(d)
+    prev_cwd = os.getcwd()
+    chdir_to = src_dir
     try:
+        if chdir_to and os.path.isdir(chdir_to):
+            os.chdir(chdir_to)
         spec = importlib.util.spec_from_file_location(
             f"_shingan_user_{abs_path.replace(os.sep, '_')}", abs_path
         )
@@ -146,6 +204,10 @@ def _import_user_module(path: str) -> types.ModuleType:
         spec.loader.exec_module(module)  # type: ignore[union-attr]
         return module
     finally:
+        try:
+            os.chdir(prev_cwd)
+        except OSError:
+            pass
         for d in inserted:
             try:
                 sys.path.remove(d)
@@ -710,8 +772,7 @@ def _find_crew(module: types.ModuleType) -> Any:
         if attr is not None and _is_crew(attr):
             return attr
 
-    # Pass 2: zero-arg factory functions (Codex iter+ via dogfood:
-    # crewAI-examples uses `def crew()` decorator pattern almost universally).
+    # Pass 2: zero-arg factory functions (e.g. `def crew(): return Crew(...)`).
     for name, value in vars(module).items():
         if not callable(value) or isinstance(value, type):
             continue
@@ -735,6 +796,40 @@ def _find_crew(module: types.ModuleType) -> Any:
         if attr is not None and _is_crew(attr):
             return attr
 
+    # Pass 3: @CrewBase-decorated classes (the dominant modern pattern in
+    # crewAI-examples). The class needs to be instantiated, then its
+    # `crew()` method called, to produce the actual Crew. We guard with
+    # try/except per step so missing config files / API keys don't kill
+    # the worker.
+    for name, value in vars(module).items():
+        if not isinstance(value, type):
+            continue
+        try:
+            value_module = getattr(value, "__module__", None)
+            if value_module and value_module != module.__name__:
+                continue
+        except Exception:  # noqa: BLE001
+            continue
+        if not _has_only_optional_args(value.__init__):
+            # Class needs constructor args we can't synthesise.
+            continue
+        try:
+            instance = value()
+        except Exception:  # noqa: BLE001
+            continue
+        # Try instance.crew() first (CrewBase pattern).
+        crew_method = getattr(instance, "crew", None)
+        if callable(crew_method):
+            try:
+                produced = crew_method()
+            except Exception:  # noqa: BLE001
+                produced = None
+            if _is_crew(produced):
+                return produced
+        # Otherwise, instance.crew may already be the Crew instance.
+        if _is_crew(crew_method):
+            return crew_method
+
     return None
 
 
@@ -744,13 +839,23 @@ def _has_only_optional_args(fn: Any) -> bool:
     Used by `_find_crew` to skip factories that require config (LLM
     model, API key, etc.) — calling those without args would just raise
     TypeError without producing useful structure for the analysis.
+
+    Note: `self` (in unbound `__init__` methods) and `cls` (classmethods)
+    aren't real "required arguments" — Python supplies them via the
+    instance/class binding. We skip the first positional parameter when
+    its name is one of these standard placeholders so @CrewBase classes
+    with `def __init__(self, *args, **kwargs)` are correctly recognised
+    as zero-argument-instantiable.
     """
     try:
         import inspect as _inspect
         sig = _inspect.signature(fn)
     except (TypeError, ValueError):
         return False
-    for p in sig.parameters.values():
+    params = list(sig.parameters.values())
+    if params and params[0].name in ("self", "cls"):
+        params = params[1:]
+    for p in params:
         if p.kind in (_inspect.Parameter.VAR_POSITIONAL,
                       _inspect.Parameter.VAR_KEYWORD):
             continue
