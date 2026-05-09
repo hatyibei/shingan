@@ -21,6 +21,9 @@ vendor/
 /shingan-runner
 /shingan-cli
 /shingan-api
+/shingan-mcp
+/shingan-lsp
+/shingan-gen
 
 # IDE
 .idea/
