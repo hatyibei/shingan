@@ -1,0 +1,1179 @@
+[
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/game-builder-crew/src/game_builder_crew/crew.py",
+    "format": "crewai",
+    "summary": {
+      "total": 3,
+      "critical": 0,
+      "warning": 3,
+      "info": 0,
+      "high_confidence_count": 0
+    },
+    "by_rule": {
+      "error_handler_checker": 3
+    },
+    "by_sev": {
+      "warning": 3
+    }
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/game-builder-crew/src/game_builder_crew/main.py",
+    "format": "crewai",
+    "summary": {
+      "total": 0,
+      "critical": 0,
+      "warning": 0,
+      "info": 0,
+      "high_confidence_count": 0
+    },
+    "by_rule": {},
+    "by_sev": {}
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/instagram_post/agents.py",
+    "format": "crewai",
+    "summary": {
+      "total": 4,
+      "critical": 0,
+      "warning": 4,
+      "info": 0,
+      "high_confidence_count": 4
+    },
+    "by_rule": {
+      "unreachable_node": 4
+    },
+    "by_sev": {
+      "warning": 4
+    }
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/instagram_post/main.py",
+    "format": "crewai",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/instagram_post/tasks.py",
+    "format": "crewai",
+    "summary": {
+      "total": 5,
+      "critical": 0,
+      "warning": 5,
+      "info": 0,
+      "high_confidence_count": 0
+    },
+    "by_rule": {
+      "error_handler_checker": 5
+    },
+    "by_sev": {
+      "warning": 5
+    }
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/instagram_post/tools/browser_tools.py",
+    "format": "crewai",
+    "summary": {
+      "total": 1,
+      "critical": 0,
+      "warning": 1,
+      "info": 0,
+      "high_confidence_count": 1
+    },
+    "by_rule": {
+      "unreachable_node": 1
+    },
+    "by_sev": {
+      "warning": 1
+    }
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/job-posting/src/job_posting/crew.py",
+    "format": "crewai",
+    "summary": {
+      "total": 4,
+      "critical": 0,
+      "warning": 4,
+      "info": 0,
+      "high_confidence_count": 0
+    },
+    "by_rule": {
+      "error_handler_checker": 4
+    },
+    "by_sev": {
+      "warning": 4
+    }
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/job-posting/src/job_posting/main.py",
+    "format": "crewai",
+    "summary": {
+      "total": 0,
+      "critical": 0,
+      "warning": 0,
+      "info": 0,
+      "high_confidence_count": 0
+    },
+    "by_rule": {},
+    "by_sev": {}
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/landing_page_generator/src/landing_page_generator/crew.py",
+    "format": "crewai",
+    "summary": {
+      "total": 6,
+      "critical": 0,
+      "warning": 6,
+      "info": 0,
+      "high_confidence_count": 0
+    },
+    "by_rule": {
+      "error_handler_checker": 6
+    },
+    "by_sev": {
+      "warning": 6
+    }
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/landing_page_generator/src/landing_page_generator/main.py",
+    "format": "crewai",
+    "summary": {
+      "total": 0,
+      "critical": 0,
+      "warning": 0,
+      "info": 0,
+      "high_confidence_count": 0
+    },
+    "by_rule": {},
+    "by_sev": {}
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/landing_page_generator/src/landing_page_generator/tools/browser_tools.py",
+    "format": "crewai",
+    "summary": {
+      "total": 1,
+      "critical": 0,
+      "warning": 1,
+      "info": 0,
+      "high_confidence_count": 1
+    },
+    "by_rule": {
+      "unreachable_node": 1
+    },
+    "by_sev": {
+      "warning": 1
+    }
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/markdown_validator/src/markdown_validator/crew.py",
+    "format": "crewai",
+    "summary": {
+      "total": 0,
+      "critical": 0,
+      "warning": 0,
+      "info": 0,
+      "high_confidence_count": 0
+    },
+    "by_rule": {},
+    "by_sev": {}
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/markdown_validator/src/markdown_validator/main.py",
+    "format": "crewai",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/marketing_strategy/src/marketing_posts/crew.py",
+    "format": "crewai",
+    "summary": {
+      "total": 9,
+      "critical": 0,
+      "warning": 9,
+      "info": 0,
+      "high_confidence_count": 0
+    },
+    "by_rule": {
+      "error_handler_checker": 7,
+      "unbounded_tool_arg": 2
+    },
+    "by_sev": {
+      "warning": 9
+    }
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/marketing_strategy/src/marketing_posts/main.py",
+    "format": "crewai",
+    "summary": {
+      "total": 0,
+      "critical": 0,
+      "warning": 0,
+      "info": 0,
+      "high_confidence_count": 0
+    },
+    "by_rule": {},
+    "by_sev": {}
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/match_profile_to_positions/src/match_to_proposal/crew.py",
+    "format": "crewai",
+    "summary": {
+      "total": 1,
+      "critical": 0,
+      "warning": 1,
+      "info": 0,
+      "high_confidence_count": 0
+    },
+    "by_rule": {
+      "error_handler_checker": 1
+    },
+    "by_sev": {
+      "warning": 1
+    }
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/match_profile_to_positions/src/match_to_proposal/main.py",
+    "format": "crewai",
+    "summary": {
+      "total": 0,
+      "critical": 0,
+      "warning": 0,
+      "info": 0,
+      "high_confidence_count": 0
+    },
+    "by_rule": {},
+    "by_sev": {}
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/meta_quest_knowledge/src/meta_quest_knowledge/crew.py",
+    "format": "crewai",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/prep-for-a-meeting/agents.py",
+    "format": "crewai",
+    "summary": {
+      "total": 3,
+      "critical": 0,
+      "warning": 3,
+      "info": 0,
+      "high_confidence_count": 3
+    },
+    "by_rule": {
+      "unreachable_node": 3
+    },
+    "by_sev": {
+      "warning": 3
+    }
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/prep-for-a-meeting/main.py",
+    "format": "crewai",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/prep-for-a-meeting/tasks.py",
+    "format": "crewai",
+    "summary": {
+      "total": 3,
+      "critical": 0,
+      "warning": 3,
+      "info": 0,
+      "high_confidence_count": 0
+    },
+    "by_rule": {
+      "error_handler_checker": 3
+    },
+    "by_sev": {
+      "warning": 3
+    }
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/recruitment/src/recruitment/crew.py",
+    "format": "crewai",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/recruitment/src/recruitment/main.py",
+    "format": "crewai",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/screenplay_writer/screenplay_writer.py",
+    "format": "crewai",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/starter_template/agents.py",
+    "format": "crewai",
+    "summary": {
+      "total": 1,
+      "critical": 0,
+      "warning": 1,
+      "info": 0,
+      "high_confidence_count": 1
+    },
+    "by_rule": {
+      "unreachable_node": 1
+    },
+    "by_sev": {
+      "warning": 1
+    }
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/starter_template/main.py",
+    "format": "crewai",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/starter_template/tasks.py",
+    "format": "crewai",
+    "summary": {
+      "total": 1,
+      "critical": 0,
+      "warning": 1,
+      "info": 0,
+      "high_confidence_count": 0
+    },
+    "by_rule": {
+      "error_handler_checker": 1
+    },
+    "by_sev": {
+      "warning": 1
+    }
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/stock_analysis/src/stock_analysis/crew.py",
+    "format": "crewai",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/stock_analysis/src/stock_analysis/main.py",
+    "format": "crewai",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "crewAIInc/crewAI-examples",
+    "file": "crews/surprise_trip/src/surprise_travel/crew.py",
+    "format": "crewai",
+    "summary": {
+      "total": 2,
+      "critical": 0,
+      "warning": 2,
+      "info": 0,
+      "high_confidence_count": 0
+    },
+    "by_rule": {
+      "error_handler_checker": 2
+    },
+    "by_sev": {
+      "warning": 2
+    }
+  },
+  {
+    "repo": "langchain-ai/langchain-academy",
+    "file": "module-1/studio/agent.py",
+    "format": "langgraph",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "langchain-ai/langchain-academy",
+    "file": "module-1/studio/router.py",
+    "format": "langgraph",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "langchain-ai/langchain-academy",
+    "file": "module-1/studio/simple.py",
+    "format": "langgraph",
+    "summary": {
+      "total": 0,
+      "critical": 0,
+      "warning": 0,
+      "info": 0,
+      "high_confidence_count": 0
+    },
+    "by_rule": {},
+    "by_sev": {}
+  },
+  {
+    "repo": "langchain-ai/langchain-academy",
+    "file": "module-2/studio/chatbot.py",
+    "format": "langgraph",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "langchain-ai/langchain-academy",
+    "file": "module-3/studio/agent.py",
+    "format": "langgraph",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "langchain-ai/langchain-academy",
+    "file": "module-3/studio/dynamic_breakpoints.py",
+    "format": "langgraph",
+    "summary": {
+      "total": 0,
+      "critical": 0,
+      "warning": 0,
+      "info": 0,
+      "high_confidence_count": 0
+    },
+    "by_rule": {},
+    "by_sev": {}
+  },
+  {
+    "repo": "langchain-ai/langchain-academy",
+    "file": "module-4/studio/map_reduce.py",
+    "format": "langgraph",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "langchain-ai/langchain-academy",
+    "file": "module-4/studio/parallelization.py",
+    "format": "langgraph",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "langchain-ai/langchain-academy",
+    "file": "module-4/studio/research_assistant.py",
+    "format": "langgraph",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "langchain-ai/langchain-academy",
+    "file": "module-4/studio/sub_graphs.py",
+    "format": "langgraph",
+    "summary": {
+      "total": 0,
+      "critical": 0,
+      "warning": 0,
+      "info": 0,
+      "high_confidence_count": 0
+    },
+    "by_rule": {},
+    "by_sev": {}
+  },
+  {
+    "repo": "langchain-ai/langchain-academy",
+    "file": "module-5/studio/memory_agent.py",
+    "format": "langgraph",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "langchain-ai/langchain-academy",
+    "file": "module-5/studio/memory_store.py",
+    "format": "langgraph",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "langchain-ai/langchain-academy",
+    "file": "module-5/studio/memoryschema_collection.py",
+    "format": "langgraph",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "langchain-ai/langchain-academy",
+    "file": "module-5/studio/memoryschema_profile.py",
+    "format": "langgraph",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "langchain-ai/langchain-academy",
+    "file": "module-6/deployment/task_maistro.py",
+    "format": "langgraph",
+    "summary": null,
+    "error": "parse_failed"
+  },
+  {
+    "repo": "assafelovic/gpt-researcher",
+    "file": "multi_agents/agents/editor.py",
+    "format": "langgraph",
+    "summary": {
+      "total": 2,
+      "critical": 1,
+      "warning": 1,
+      "info": 0,
+      "high_confidence_count": 1
+    },
+    "by_rule": {
+      "cycle_detection": 1,
+      "error_handler_checker": 1
+    },
+    "by_sev": {
+      "critical": 1,
+      "warning": 1
+    }
+  },
+  {
+    "repo": "assafelovic/gpt-researcher",
+    "file": "multi_agents/agents/orchestrator.py",
+    "format": "langgraph",
+    "summary": {
+      "total": 4,
+      "critical": 1,
+      "warning": 3,
+      "info": 0,
+      "high_confidence_count": 1
+    },
+    "by_rule": {
+      "cycle_detection": 1,
+      "error_handler_checker": 3
+    },
+    "by_sev": {
+      "critical": 1,
+      "warning": 3
+    }
+  },
+  {
+    "repo": "langchain-ai/open_deep_research",
+    "file": "src/legacy/graph.py",
+    "format": "langgraph",
+    "summary": {
+      "total": 8,
+      "critical": 0,
+      "warning": 8,
+      "info": 0,
+      "high_confidence_count": 6
+    },
+    "by_rule": {
+      "unreachable_node": 6,
+      "error_handler_checker": 2
+    },
+    "by_sev": {
+      "warning": 8
+    }
+  },
+  {
+    "repo": "langchain-ai/open_deep_research",
+    "file": "src/legacy/multi_agent.py",
+    "format": "langgraph",
+    "summary": {
+      "total": 5,
+      "critical": 0,
+      "warning": 5,
+      "info": 0,
+      "high_confidence_count": 4
+    },
+    "by_rule": {
+      "unreachable_node": 4,
+      "error_handler_checker": 1
+    },
+    "by_sev": {
+      "warning": 5
+    }
+  },
+  {
+    "repo": "langchain-ai/open_deep_research",
+    "file": "src/open_deep_research/deep_researcher.py",
+    "format": "langgraph",
+    "summary": {
+      "total": 8,
+      "critical": 0,
+      "warning": 8,
+      "info": 0,
+      "high_confidence_count": 8
+    },
+    "by_rule": {
+      "unreachable_node": 8
+    },
+    "by_sev": {
+      "warning": 8
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Activecampaign/0057_Activecampaign_Create_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 1,
+      "critical": 0,
+      "warning": 1,
+      "info": 0,
+      "high_confidence_count": 1
+    },
+    "by_rule": {
+      "unreachable_node": 1
+    },
+    "by_sev": {
+      "warning": 1
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Acuityscheduling/1002_Acuityscheduling_Automate_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 1,
+      "critical": 0,
+      "warning": 1,
+      "info": 0,
+      "high_confidence_count": 1
+    },
+    "by_rule": {
+      "unreachable_node": 1
+    },
+    "by_sev": {
+      "warning": 1
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Affinity/1085_Affinity_Create_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 1,
+      "critical": 0,
+      "warning": 1,
+      "info": 0,
+      "high_confidence_count": 1
+    },
+    "by_rule": {
+      "unreachable_node": 1
+    },
+    "by_sev": {
+      "warning": 1
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Aggregate/0472_Aggregate_Gmail_Create_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 19,
+      "critical": 0,
+      "warning": 19,
+      "info": 0,
+      "high_confidence_count": 19
+    },
+    "by_rule": {
+      "unreachable_node": 19
+    },
+    "by_sev": {
+      "warning": 19
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Aggregate/0480_Aggregate_Telegram_Automate_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 12,
+      "critical": 0,
+      "warning": 12,
+      "info": 0,
+      "high_confidence_count": 12
+    },
+    "by_rule": {
+      "unreachable_node": 12
+    },
+    "by_sev": {
+      "warning": 12
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Aggregate/0681_Aggregate_HTTP_Create_Webhook.json",
+    "format": "n8n",
+    "summary": {
+      "total": 40,
+      "critical": 0,
+      "warning": 37,
+      "info": 3,
+      "high_confidence_count": 40
+    },
+    "by_rule": {
+      "unreachable_node": 40
+    },
+    "by_sev": {
+      "warning": 37,
+      "info": 3
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Aggregate/0691_Aggregate_Jotform_Create_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 14,
+      "critical": 0,
+      "warning": 13,
+      "info": 1,
+      "high_confidence_count": 14
+    },
+    "by_rule": {
+      "unreachable_node": 14
+    },
+    "by_sev": {
+      "warning": 13,
+      "info": 1
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Aggregate/0695_Aggregate_Stickynote_Create_Webhook.json",
+    "format": "n8n",
+    "summary": {
+      "total": 13,
+      "critical": 0,
+      "warning": 12,
+      "info": 1,
+      "high_confidence_count": 13
+    },
+    "by_rule": {
+      "unreachable_node": 13
+    },
+    "by_sev": {
+      "warning": 12,
+      "info": 1
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Aggregate/0697_Aggregate_Typeform_Create_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 14,
+      "critical": 0,
+      "warning": 13,
+      "info": 1,
+      "high_confidence_count": 14
+    },
+    "by_rule": {
+      "unreachable_node": 14
+    },
+    "by_sev": {
+      "warning": 13,
+      "info": 1
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Aggregate/0800_Aggregate_Telegram_Automate_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 10,
+      "critical": 0,
+      "warning": 10,
+      "info": 0,
+      "high_confidence_count": 10
+    },
+    "by_rule": {
+      "unreachable_node": 10
+    },
+    "by_sev": {
+      "warning": 10
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Aggregate/1324_Aggregate_Gmail_Send_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 19,
+      "critical": 0,
+      "warning": 19,
+      "info": 0,
+      "high_confidence_count": 19
+    },
+    "by_rule": {
+      "unreachable_node": 19
+    },
+    "by_sev": {
+      "warning": 19
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Aggregate/1374_Aggregate_Stickynote_Create_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 15,
+      "critical": 0,
+      "warning": 15,
+      "info": 0,
+      "high_confidence_count": 15
+    },
+    "by_rule": {
+      "unreachable_node": 15
+    },
+    "by_sev": {
+      "warning": 15
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Aggregate/1404_Aggregate_Telegram_Automation_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 17,
+      "critical": 0,
+      "warning": 16,
+      "info": 1,
+      "high_confidence_count": 17
+    },
+    "by_rule": {
+      "unreachable_node": 17
+    },
+    "by_sev": {
+      "warning": 16,
+      "info": 1
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Aggregate/1413_Aggregate_Telegram_Automation_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 18,
+      "critical": 0,
+      "warning": 17,
+      "info": 1,
+      "high_confidence_count": 18
+    },
+    "by_rule": {
+      "unreachable_node": 18
+    },
+    "by_sev": {
+      "warning": 17,
+      "info": 1
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Aggregate/1430_Aggregate_Schedule_Send_Scheduled.json",
+    "format": "n8n",
+    "summary": {
+      "total": 9,
+      "critical": 0,
+      "warning": 9,
+      "info": 0,
+      "high_confidence_count": 9
+    },
+    "by_rule": {
+      "unreachable_node": 9
+    },
+    "by_sev": {
+      "warning": 9
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Aggregate/1506_Aggregate_Telegram_Automation_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 12,
+      "critical": 0,
+      "warning": 12,
+      "info": 0,
+      "high_confidence_count": 12
+    },
+    "by_rule": {
+      "unreachable_node": 12
+    },
+    "by_sev": {
+      "warning": 12
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Aggregate/1544_Aggregate_Schedule_Send_Scheduled.json",
+    "format": "n8n",
+    "summary": {
+      "total": 9,
+      "critical": 0,
+      "warning": 9,
+      "info": 0,
+      "high_confidence_count": 9
+    },
+    "by_rule": {
+      "unreachable_node": 9
+    },
+    "by_sev": {
+      "warning": 9
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Aggregate/1576_Aggregate_Stickynote_Automate_Webhook.json",
+    "format": "n8n",
+    "summary": {
+      "total": 14,
+      "critical": 0,
+      "warning": 14,
+      "info": 0,
+      "high_confidence_count": 14
+    },
+    "by_rule": {
+      "unreachable_node": 14
+    },
+    "by_sev": {
+      "warning": 14
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Airtable/0756_Airtable_Create_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 12,
+      "critical": 0,
+      "warning": 12,
+      "info": 0,
+      "high_confidence_count": 12
+    },
+    "by_rule": {
+      "unreachable_node": 12
+    },
+    "by_sev": {
+      "warning": 12
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Airtable/1120_Airtable_Mindee_Automate_Webhook.json",
+    "format": "n8n",
+    "summary": {
+      "total": 4,
+      "critical": 0,
+      "warning": 4,
+      "info": 0,
+      "high_confidence_count": 4
+    },
+    "by_rule": {
+      "unreachable_node": 4
+    },
+    "by_sev": {
+      "warning": 4
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Airtable/1138_Airtable_Vonage_Automation_Scheduled.json",
+    "format": "n8n",
+    "summary": {
+      "total": 8,
+      "critical": 0,
+      "warning": 8,
+      "info": 0,
+      "high_confidence_count": 8
+    },
+    "by_rule": {
+      "unreachable_node": 8
+    },
+    "by_sev": {
+      "warning": 8
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Airtable/1220_Airtable_Lemlist_Automate.json",
+    "format": "n8n",
+    "summary": {
+      "total": 4,
+      "critical": 0,
+      "warning": 4,
+      "info": 0,
+      "high_confidence_count": 4
+    },
+    "by_rule": {
+      "unreachable_node": 4
+    },
+    "by_sev": {
+      "warning": 4
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Airtabletool/1261_Airtabletool_Stickynote_Automation_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 10,
+      "critical": 0,
+      "warning": 10,
+      "info": 0,
+      "high_confidence_count": 10
+    },
+    "by_rule": {
+      "unreachable_node": 10
+    },
+    "by_sev": {
+      "warning": 10
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Airtabletool/1723_Airtabletool_Stickynote_Automation_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 10,
+      "critical": 0,
+      "warning": 10,
+      "info": 0,
+      "high_confidence_count": 10
+    },
+    "by_rule": {
+      "unreachable_node": 10
+    },
+    "by_sev": {
+      "warning": 10
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Airtoptool/1681_Airtoptool_Slack_Automation_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 19,
+      "critical": 0,
+      "warning": 19,
+      "info": 0,
+      "high_confidence_count": 18
+    },
+    "by_rule": {
+      "unreachable_node": 18,
+      "error_handler_checker": 1
+    },
+    "by_sev": {
+      "warning": 19
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Amqp/0138_Amqp_Send_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 1,
+      "critical": 0,
+      "warning": 1,
+      "info": 0,
+      "high_confidence_count": 1
+    },
+    "by_rule": {
+      "unreachable_node": 1
+    },
+    "by_sev": {
+      "warning": 1
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Apitemplateio/1224_Apitemplateio_Typeform_Automation_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 2,
+      "critical": 0,
+      "warning": 2,
+      "info": 0,
+      "high_confidence_count": 2
+    },
+    "by_rule": {
+      "unreachable_node": 2
+    },
+    "by_sev": {
+      "warning": 2
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Asana/0241_Asana_Notion_Create_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 10,
+      "critical": 0,
+      "warning": 8,
+      "info": 2,
+      "high_confidence_count": 10
+    },
+    "by_rule": {
+      "unreachable_node": 10
+    },
+    "by_sev": {
+      "warning": 8,
+      "info": 2
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Asana/0967_Asana_Update_Triggered.json",
+    "format": "n8n",
+    "summary": {
+      "total": 1,
+      "critical": 0,
+      "warning": 1,
+      "info": 0,
+      "high_confidence_count": 1
+    },
+    "by_rule": {
+      "unreachable_node": 1
+    },
+    "by_sev": {
+      "warning": 1
+    }
+  },
+  {
+    "repo": "Zie619/n8n-workflows",
+    "file": "Asana/1223_Asana_Webhook_Automate_Webhook.json",
+    "format": "n8n",
+    "summary": {
+      "total": 3,
+      "critical": 0,
+      "warning": 3,
+      "info": 0,
+      "high_confidence_count": 3
+    },
+    "by_rule": {
+      "unreachable_node": 3
+    },
+    "by_sev": {
+      "warning": 3
+    }
+  }
+]

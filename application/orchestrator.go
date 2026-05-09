@@ -177,17 +177,42 @@ func (o *AnalysisOrchestrator) AnalyzeMulti(inputs []GraphWithSource, rules []do
 		return []domain.Finding{}
 	}
 
+	// Build a per-source-file PosResolver as we go so the ignore-comment
+	// filter can map (sourceFile, nodeID) → (file, line) without re-walking
+	// the inputs.
+	graphsBySource := make(map[string]*domain.WorkflowGraph, len(inputs))
+
 	combined := make([]domain.Finding, 0, len(inputs)*8)
 	for _, in := range inputs {
 		if in.Graph == nil {
 			continue
 		}
+		graphsBySource[in.SourceFile] = in.Graph
 		findings := o.Analyze(in.Graph, rules)
 		for i := range findings {
 			findings[i].SourceFile = in.SourceFile
 		}
 		combined = append(combined, findings...)
 	}
+
+	// Apply `# shingan: ignore` markers (line / next-line / file scope).
+	// Operational-trust feature: developers opt out of specific findings
+	// without touching CI policy.
+	combined = FilterIgnoredFindings(combined, func(sourceFile, nodeID string) (string, int) {
+		g := graphsBySource[sourceFile]
+		if g == nil || g.Nodes == nil {
+			return sourceFile, 0
+		}
+		n, ok := g.Nodes[nodeID]
+		if !ok || n == nil {
+			return sourceFile, 0
+		}
+		file := n.Pos.File
+		if file == "" {
+			file = sourceFile
+		}
+		return file, n.Pos.Line
+	})
 
 	sort.SliceStable(combined, func(i, j int) bool {
 		if combined[i].Severity != combined[j].Severity {
