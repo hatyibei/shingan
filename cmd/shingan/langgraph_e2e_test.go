@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -18,11 +19,22 @@ func langgraphTestdataPath(name string) string {
 	return filepath.Join(root, "testdata", "langgraph", name)
 }
 
-// shimPath returns the absolute path to scripts/export_langgraph_server.py.
+// shimPath returns the absolute path to the LangGraph shim. v0.8.1 moved
+// the canonical location from scripts/ to infrastructure/parser/shims/;
+// we check both for compat with vendored / forked checkouts.
 func shimPath() string {
 	_, file, _, _ := runtime.Caller(0)
 	root := filepath.Join(filepath.Dir(file), "..", "..")
-	return filepath.Join(root, "scripts", "export_langgraph_server.py")
+	for _, rel := range []string{
+		filepath.Join("infrastructure", "parser", "shims", "export_langgraph_server.py"),
+		filepath.Join("scripts", "export_langgraph_server.py"),
+	} {
+		p := filepath.Join(root, rel)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return filepath.Join(root, "infrastructure", "parser", "shims", "export_langgraph_server.py")
 }
 
 // requirePythonLangGraphE2E skips when python3 + langgraph aren't both

@@ -16,18 +16,24 @@ import (
 // keeps the failure message friendlier when the worktree is malformed.
 func findCrewAIShim(t *testing.T) string {
 	t.Helper()
+	candidates := []string{
+		filepath.Join("infrastructure", "parser", "shims", "export_crewai_server.py"),
+		filepath.Join("scripts", "export_crewai_server.py"),
+	}
 	dir, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
 	for {
-		p := filepath.Join(dir, "scripts", "export_crewai_server.py")
-		if _, err := os.Stat(p); err == nil {
-			return p
+		for _, rel := range candidates {
+			p := filepath.Join(dir, rel)
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Fatalf("could not locate scripts/export_crewai_server.py from %q", dir)
+			t.Fatalf("could not locate export_crewai_server.py from %q (looked in %v)", dir, candidates)
 		}
 		dir = parent
 	}
@@ -102,8 +108,9 @@ func TestCrewAIParser_LocateShimNamed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LocateShimNamed: %v", err)
 	}
-	if !strings.HasSuffix(path, "scripts/export_crewai_server.py") {
-		t.Errorf("path %q does not end in scripts/export_crewai_server.py", path)
+	if !strings.HasSuffix(path, "shims/export_crewai_server.py") &&
+		!strings.HasSuffix(path, "scripts/export_crewai_server.py") {
+		t.Errorf("path %q does not end in shims/ or scripts/ export_crewai_server.py", path)
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("located path does not exist: %v", err)

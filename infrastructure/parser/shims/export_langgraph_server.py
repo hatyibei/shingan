@@ -537,7 +537,10 @@ def _handle_parse_file(params: Dict[str, Any]) -> Dict[str, Any]:
     mod, err = _load_langgraph()
     if mod is None:
         raise RuntimeError(f"langgraph is not importable: {err}")
-    user_module = _import_user_module(path)
+    try:
+        user_module = _import_user_module(path)
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(_missing_dep_message(path, exc))
     graph_obj = _find_state_graphs(user_module)
     if graph_obj is None:
         # Empty but valid graph — keeps Shingan rules working without exploding.
@@ -553,11 +556,33 @@ def _handle_parse_content(params: Dict[str, Any]) -> Dict[str, Any]:
     mod, err = _load_langgraph()
     if mod is None:
         raise RuntimeError(f"langgraph is not importable: {err}")
-    user_module = _import_user_source(content, filename)
+    try:
+        user_module = _import_user_source(content, filename)
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(_missing_dep_message(filename, exc))
     graph_obj = _find_state_graphs(user_module)
     if graph_obj is None:
         return _build_graph(types.SimpleNamespace(), filename)
     return _build_graph(graph_obj, filename)
+
+
+def _missing_dep_message(source: str, exc: ModuleNotFoundError) -> str:
+    """Format a friendlier error pointing the user at `pip install <name>`.
+
+    The LangGraph parser executes the user's module to introspect the
+    StateGraph instance at runtime. When the module imports a
+    third-party library that isn't installed in the analysis environment,
+    Python raises ModuleNotFoundError; the default message buries it in
+    a stack trace. This wraps it with the package name + suggested fix.
+    """
+    name = getattr(exc, "name", None) or str(exc)
+    return (
+        f"missing python dependency while parsing {source!r}: "
+        f"`import {name}` failed. Run `pip install {name}` (or use a "
+        f"virtualenv that has all of the workflow's runtime deps). "
+        f"Shingan executes the module to introspect StateGraph objects, "
+        f"so every transitive import must be installed."
+    )
 
 
 _HANDLERS = {

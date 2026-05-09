@@ -4,6 +4,18 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-05-09
+
+### Fixed
+- **P0: LangGraph and CrewAI parsers now work in the npm-distributed `shingan-lint` binary** (silent breakage since v0.6.1). The `scripts/export_*_server.py` Python shims were not bundled in the npm tarball — `npm install -g shingan-lint && shingan analyze --format=langgraph workflow.py` would fail with `could not locate scripts/export_langgraph_server.py`. Discovered via dogfooding `shingan` against the public `crewAIInc/crewAI-examples` repo.
+  - Moved canonical shim location: `scripts/export_*.py` → `infrastructure/parser/shims/export_*.py`.
+  - Added `infrastructure/parser/shims_embed.go`: embeds both shims into the Go binary via `//go:embed shims/*.py`.
+  - Resolution order in `LocateShim` / `LocateShimNamed` now: env-var override → walk-up search (`infrastructure/parser/shims/` then legacy `scripts/`) → **embedded extraction to user cache (`~/.cache/shingan-shims/v<version>/`)**. The embedded fallback is what makes the npm distribution work.
+  - Tests + `cmd/shingan/langgraph_e2e_test.go::shimPath()` updated to find the shim in either location.
+
+### Improved
+- **`ModuleNotFoundError` UX in Python shims** — when a user's workflow imports a third-party library that isn't in the analysis env (e.g. CrewAI examples that use `unstructured`, `langchain-community`, `exa_py`, `decouple`), the parser now surfaces a friendly `RuntimeError: missing python dependency while parsing X: import Y failed. Run pip install Y` instead of a stack-trace dump. Both `export_langgraph_server.py` and `export_crewai_server.py` carry this.
+
 ## [0.8.0] - 2026-05-07
 
 ### Added

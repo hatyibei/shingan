@@ -701,7 +701,10 @@ def _handle_parse_file(params: Dict[str, Any]) -> Dict[str, Any]:
     mod, err = _load_crewai()
     if mod is None:
         raise RuntimeError(f"crewai is not importable: {err}")
-    user_module = _import_user_module(path)
+    try:
+        user_module = _import_user_module(path)
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(_missing_dep_message(path, exc))
     crew = _find_crew(user_module)
     if crew is None:
         return _build_graph(types.SimpleNamespace(agents=[], tasks=[]), path)
@@ -716,11 +719,34 @@ def _handle_parse_content(params: Dict[str, Any]) -> Dict[str, Any]:
     mod, err = _load_crewai()
     if mod is None:
         raise RuntimeError(f"crewai is not importable: {err}")
-    user_module = _import_user_source(content, filename)
+    try:
+        user_module = _import_user_source(content, filename)
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(_missing_dep_message(filename, exc))
     crew = _find_crew(user_module)
     if crew is None:
         return _build_graph(types.SimpleNamespace(agents=[], tasks=[]), filename)
     return _build_graph(crew, filename)
+
+
+def _missing_dep_message(source: str, exc: ModuleNotFoundError) -> str:
+    """Format a friendlier error pointing the user at `pip install <name>`.
+
+    The CrewAI parser executes the user's module to introspect Crew/Agent/
+    Task instances at runtime (per ADR-013). When the module imports a
+    third-party library that isn't installed in the analysis environment,
+    Python raises ModuleNotFoundError; the default message points at the
+    shim's stack trace which isn't actionable. This wraps it with the
+    package name + suggested fix.
+    """
+    name = getattr(exc, "name", None) or str(exc)
+    return (
+        f"missing python dependency while parsing {source!r}: "
+        f"`import {name}` failed. Run `pip install {name}` (or use a "
+        f"virtualenv that has all of the workflow's runtime deps). "
+        f"Shingan executes the module to introspect Crew/Agent/Task "
+        f"objects, so every transitive import must be installed."
+    )
 
 
 _HANDLERS = {

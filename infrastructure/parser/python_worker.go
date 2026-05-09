@@ -378,36 +378,49 @@ func (w *PythonWorker) HealthCheck() (healthCheckResult, error) {
 
 // Resolve the bundled shim path relative to the parser package directory at
 // runtime. We accept an explicit override (env var) for unit tests / vendored
-// installs; otherwise we walk up to the repo root.
+// installs; otherwise we walk up to the repo root, and finally fall back to
+// extracting the embedded shim shipped inside the binary itself.
+//
+// shimSearchPaths lists the relative directories where dev / vendored
+// installs can ship the shim source. The embedded fallback (shims_embed.go)
+// catches the npm-distribution case where neither path exists on disk.
 const (
-	envOverride = "SHINGAN_LANGGRAPH_SHIM"
-	shimRel     = "scripts/export_langgraph_server.py"
+	envOverride         = "SHINGAN_LANGGRAPH_SHIM"
+	shimFilenameDefault = "export_langgraph_server.py"
 )
+
+var shimSearchDirs = []string{
+	"infrastructure/parser/shims", // canonical location after v0.8.1
+	"scripts",                     // legacy / fallback for forks tracking older trees
+}
 
 // LocateShim returns the absolute path to the LangGraph shim script.
 //
 // Resolution order:
 //  1. `SHINGAN_LANGGRAPH_SHIM` environment variable (if set and exists).
-//  2. The first existing `scripts/export_langgraph_server.py` walking up from
-//     the current working directory (covers `go test` and CLI runs).
+//  2. The first existing copy of the shim under any of `shimSearchDirs`,
+//     walking up from the current working directory (covers `go test` and
+//     dev CLI runs from inside the repo).
 //  3. The first existing copy under the executable's directory tree (covers
-//     vendored installs where binaries ship alongside `scripts/`).
+//     vendored installs where binaries ship alongside the source tree).
+//  4. The shim bundled inside the binary via `//go:embed`, extracted to
+//     the user cache (covers the npm `shingan-lint` distribution where
+//     no source tree exists at runtime, ADR-013 Codex iter follow-up).
 //
 // When nothing is found a descriptive error is returned so callers can produce
 // actionable diagnostics.
 func LocateShim() (string, error) {
-	return locateShimNamed(shimRel, envOverride, "langgraph shim")
+	return locateShimNamed(shimFilenameDefault, envOverride, "langgraph shim")
 }
 
-// LocateShimNamed returns the absolute path to a named shim script under
-// `scripts/`. Used by parsers other than LangGraph (e.g. CrewAI) that ship
-// their own Python worker. The lookup follows the same walk-up logic as
-// LocateShim but with a per-shim env-var override derived from the script
-// name (e.g. SHINGAN_CREWAI_SHIM for export_crewai_server.py).
+// LocateShimNamed returns the absolute path to a named shim script.
+// Used by parsers other than LangGraph (e.g. CrewAI) that ship their own
+// Python worker. The lookup follows the same logic as LocateShim but
+// with a per-shim env-var override derived from the script name
+// (e.g. SHINGAN_CREWAI_SHIM for export_crewai_server.py).
 func LocateShimNamed(scriptFilename string) (string, error) {
-	rel := filepath.Join("scripts", scriptFilename)
 	envName := "SHINGAN_" + envSuffixFromShim(scriptFilename) + "_SHIM"
-	return locateShimNamed(rel, envName, scriptFilename)
+	return locateShimNamed(scriptFilename, envName, scriptFilename)
 }
 
 // envSuffixFromShim derives the uppercase token between "export_" and
@@ -426,7 +439,7 @@ func envSuffixFromShim(name string) string {
 	return strings.ToUpper(strings.ReplaceAll(trim, ".", "_"))
 }
 
-func locateShimNamed(rel, envName, label string) (string, error) {
+func locateShimNamed(filename, envName, label string) (string, error) {
 	if env := os.Getenv(envName); env != "" {
 		if _, err := os.Stat(env); err == nil {
 			return env, nil
@@ -435,36 +448,46 @@ func locateShimNamed(rel, envName, label string) (string, error) {
 	}
 
 	if cwd, err := os.Getwd(); err == nil {
-		if found, ok := walkUpForShimRel(cwd, rel); ok {
+		if found, ok := walkUpForShimNamed(cwd, filename); ok {
 			return found, nil
 		}
 	}
 
 	if exe, err := os.Executable(); err == nil {
-		if found, ok := walkUpForShimRel(filepath.Dir(exe), rel); ok {
+		if found, ok := walkUpForShimNamed(filepath.Dir(exe), filename); ok {
 			return found, nil
 		}
 	}
 
+	// Final fallback: extract the embedded shim. This is the path used
+	// by the npm-distributed binary (shingan-lint) where neither the
+	// source tree nor a vendored scripts/ directory exists.
+	if path, err := extractEmbeddedShim(filename); err == nil {
+		return path, nil
+	}
+
 	return "", fmt.Errorf(
-		"%s: could not locate %s; set %s to point at it",
-		label, rel, envName,
+		"%s: could not locate %s in any of %v; set %s to point at it",
+		label, filename, shimSearchDirs, envName,
 	)
 }
 
 // walkUpForShim returns the absolute path to the LangGraph shim if any
-// ancestor of startDir contains scripts/export_langgraph_server.py.
+// ancestor of startDir contains the canonical shim location.
 func walkUpForShim(startDir string) (string, bool) {
-	return walkUpForShimRel(startDir, shimRel)
+	return walkUpForShimNamed(startDir, shimFilenameDefault)
 }
 
-// walkUpForShimRel walks ancestors of startDir looking for `<dir>/<rel>`.
-func walkUpForShimRel(startDir, rel string) (string, bool) {
+// walkUpForShimNamed walks ancestors of startDir looking for any of the
+// configured search directories containing `<filename>`.
+func walkUpForShimNamed(startDir, filename string) (string, bool) {
 	dir := startDir
 	for {
-		candidate := filepath.Join(dir, rel)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, true
+		for _, sub := range shimSearchDirs {
+			candidate := filepath.Join(dir, sub, filename)
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate, true
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -473,3 +496,4 @@ func walkUpForShimRel(startDir, rel string) (string, bool) {
 		dir = parent
 	}
 }
+

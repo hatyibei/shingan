@@ -18,19 +18,27 @@ import (
 // exist — failing here means the worktree is broken.
 func findShim(t *testing.T) string {
 	t.Helper()
-	// Walk up from this test file's directory looking for scripts/.
+	// Walk up from this test file's directory looking for the shim.
+	// v0.8.1 moved shims from scripts/ to infrastructure/parser/shims/;
+	// we check both for forward-compat with vendored / forked checkouts.
+	candidates := []string{
+		filepath.Join("infrastructure", "parser", "shims", "export_langgraph_server.py"),
+		filepath.Join("scripts", "export_langgraph_server.py"),
+	}
 	dir, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
 	for {
-		p := filepath.Join(dir, "scripts", "export_langgraph_server.py")
-		if _, err := os.Stat(p); err == nil {
-			return p
+		for _, rel := range candidates {
+			p := filepath.Join(dir, rel)
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Fatalf("could not locate scripts/export_langgraph_server.py from %q", dir)
+			t.Fatalf("could not locate export_langgraph_server.py from %q (looked in %v)", dir, candidates)
 		}
 		dir = parent
 	}
