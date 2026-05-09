@@ -51,6 +51,26 @@ sys.stdout = sys.stderr  # any stray print() now lands on stderr.
 os.environ.setdefault("OTEL_SDK_DISABLED", "true")
 os.environ.setdefault("CREWAI_TELEMETRY_OPT_OUT", "true")
 
+# Provide dummy LLM provider credentials so user modules whose top-level
+# code constructs OpenAI / Anthropic / Google clients at import time
+# (the dominant CrewAI Flow pattern) don't raise `OpenAIError: Missing
+# credentials` before the analysis can run. Validation happens at
+# request time, and we monkey-patch all kickoff/execute paths to no-op
+# stubs anyway, so no real API call is ever issued.
+for _key in (
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GOOGLE_API_KEY",
+    "GEMINI_API_KEY",
+    "AZURE_OPENAI_API_KEY",
+    "GROQ_API_KEY",
+    "MISTRAL_API_KEY",
+    "COHERE_API_KEY",
+    "TOGETHER_API_KEY",
+    "REPLICATE_API_TOKEN",
+):
+    os.environ.setdefault(_key, "shingan-static-analysis-stub")
+
 # Redirect CrewAI's SQLite task-output storage away from $HOME so the worker
 # still functions in read-only-HOME CI sandboxes (Codex iter2 P2). CrewAI
 # follows XDG_DATA_HOME; pointing it at a writable temp dir avoids
