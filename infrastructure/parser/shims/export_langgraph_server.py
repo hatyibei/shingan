@@ -750,16 +750,39 @@ def _handle_parse_file(params: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("parse_file: 'path' is required")
     mod, err = _load_langgraph()
     if mod is None:
+        # Even without langgraph installed we can still try AST extraction —
+        # it never imports langgraph itself, just walks the syntax tree.
+        ast_graph = _try_ast_extract(path=path, source_path=path)
+        if ast_graph is not None and ast_graph["nodes"]:
+            return ast_graph
         raise RuntimeError(f"langgraph is not importable: {err}")
     try:
         user_module = _import_user_module(path)
     except ModuleNotFoundError as exc:
+        # Try AST fallback before giving up — the user file may import a
+        # third-party dep we can't install but the graph definition is
+        # static and inspectable from source.
+        ast_graph = _try_ast_extract(path=path, source_path=path)
+        if ast_graph is not None and ast_graph["nodes"]:
+            return ast_graph
         raise RuntimeError(_missing_dep_message(path, exc))
     graph_obj = _find_state_graphs(user_module)
     if graph_obj is None:
-        # Empty but valid graph — keeps Shingan rules working without exploding.
+        # Pass-3 AST fallback: the user constructed the graph inside an
+        # instance method or factory we can't safely call. Walk the
+        # syntax tree for `StateGraph(...).add_node(...).add_edge(...)`
+        # patterns instead. ADR-014 (AST hybrid strategy).
+        ast_graph = _try_ast_extract(path=path, source_path=path)
+        if ast_graph is not None and ast_graph["nodes"]:
+            return ast_graph
         return _build_graph(types.SimpleNamespace(), path)
-    return _build_graph(graph_obj, path)
+    runtime_graph = _build_graph(graph_obj, path)
+    if not runtime_graph["nodes"]:
+        # Runtime extraction yielded nothing usable — try AST.
+        ast_graph = _try_ast_extract(path=path, source_path=path)
+        if ast_graph is not None and ast_graph["nodes"]:
+            return ast_graph
+    return runtime_graph
 
 
 def _handle_parse_content(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -769,15 +792,299 @@ def _handle_parse_content(params: Dict[str, Any]) -> Dict[str, Any]:
     filename = params.get("filename") or "<inline.py>"
     mod, err = _load_langgraph()
     if mod is None:
+        ast_graph = _try_ast_extract(content=content, source_path=filename)
+        if ast_graph is not None and ast_graph["nodes"]:
+            return ast_graph
         raise RuntimeError(f"langgraph is not importable: {err}")
     try:
         user_module = _import_user_source(content, filename)
     except ModuleNotFoundError as exc:
+        ast_graph = _try_ast_extract(content=content, source_path=filename)
+        if ast_graph is not None and ast_graph["nodes"]:
+            return ast_graph
         raise RuntimeError(_missing_dep_message(filename, exc))
     graph_obj = _find_state_graphs(user_module)
     if graph_obj is None:
+        ast_graph = _try_ast_extract(content=content, source_path=filename)
+        if ast_graph is not None and ast_graph["nodes"]:
+            return ast_graph
         return _build_graph(types.SimpleNamespace(), filename)
-    return _build_graph(graph_obj, filename)
+    runtime_graph = _build_graph(graph_obj, filename)
+    if not runtime_graph["nodes"]:
+        ast_graph = _try_ast_extract(content=content, source_path=filename)
+        if ast_graph is not None and ast_graph["nodes"]:
+            return ast_graph
+    return runtime_graph
+
+
+# ----- AST-based fallback parser (ADR-014) ----------------------------------
+# Real-world LangGraph code overwhelmingly constructs graphs inside instance
+# methods (`class.X._create_workflow(self, agents)`) or factories with
+# required arguments. The runtime introspection path can't safely call those.
+# This AST walker recognises:
+#
+#   builder = StateGraph(<anything>)
+#   builder.add_node("name", fn)
+#   builder.add_edge("a", "b")
+#   builder.add_edge(START, "x")           # entry sentinel
+#   builder.add_edge("y", END)             # dropped
+#   builder.add_conditional_edges("z", fn, {"k1": "a", "k2": "b"})
+#   builder.set_entry_point("x")
+#
+# regardless of where they live in the AST. String-literal arguments are
+# extracted; non-literal arguments (variables, expressions) become a synthetic
+# placeholder so reachability rules still see SOMETHING (over-approximation
+# per ADR-008).
+
+import ast as _ast  # placed here so the runtime path doesn't pay for it
+
+
+def _try_ast_extract(
+    *,
+    path: Optional[str] = None,
+    content: Optional[str] = None,
+    source_path: str,
+) -> Optional[Dict[str, Any]]:
+    """Walk the AST of `path` or `content` extracting StateGraph patterns.
+
+    Returns a WorkflowGraph dict on success, None on parse error. Never
+    raises so the runtime path can fall through cleanly.
+    """
+    try:
+        if content is None:
+            with open(path, encoding="utf-8") as fp:
+                content = fp.read()
+        tree = _ast.parse(content, filename=source_path)
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return None
+    visitor = _StateGraphASTVisitor(source_path)
+    visitor.visit(tree)
+    return visitor.build()
+
+
+class _StateGraphASTVisitor(_ast.NodeVisitor):
+    """Walks a Python AST collecting StateGraph builder calls."""
+
+    # Constructor names that produce a StateGraph-like instance.
+    _GRAPH_CTORS = ("StateGraph", "MessageGraph", "Graph")
+    # Sentinels used by langgraph for entry/exit; never become real nodes.
+    _SENTINELS = ("START", "END", "__start__", "__end__")
+
+    def __init__(self, source_path: str) -> None:
+        # name → True for variables that hold a StateGraph instance.
+        self._builder_vars: Dict[str, bool] = {}
+        self._nodes: Dict[str, Dict[str, Any]] = {}
+        self._edges: list[Dict[str, Any]] = []
+        self._entry: str = ""
+        self._source_path = source_path
+
+    def visit_Assign(self, node: _ast.Assign) -> None:
+        # Detect `<name> = StateGraph(...)`.
+        if (
+            isinstance(node.value, _ast.Call)
+            and self._call_name(node.value) in self._GRAPH_CTORS
+        ):
+            for target in node.targets:
+                if isinstance(target, _ast.Name):
+                    self._builder_vars[target.id] = True
+                elif isinstance(target, _ast.Attribute):
+                    # `self.builder = StateGraph(...)` — track the
+                    # attribute name (informationally).
+                    self._builder_vars[target.attr] = True
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: _ast.AnnAssign) -> None:
+        if (
+            node.value is not None
+            and isinstance(node.value, _ast.Call)
+            and self._call_name(node.value) in self._GRAPH_CTORS
+        ):
+            if isinstance(node.target, _ast.Name):
+                self._builder_vars[node.target.id] = True
+            elif isinstance(node.target, _ast.Attribute):
+                self._builder_vars[node.target.attr] = True
+        self.generic_visit(node)
+
+    def visit_Call(self, node: _ast.Call) -> None:
+        if isinstance(node.func, _ast.Attribute):
+            method = node.func.attr
+            if self._is_builder_call(node.func.value):
+                if method == "add_node":
+                    self._handle_add_node(node)
+                elif method == "add_edge":
+                    self._handle_add_edge(node)
+                elif method == "add_conditional_edges":
+                    self._handle_add_conditional(node)
+                elif method == "set_entry_point":
+                    self._handle_set_entry(node)
+        self.generic_visit(node)
+
+    def _is_builder_call(self, expr: _ast.expr) -> bool:
+        """Return True when `expr` references a StateGraph builder var.
+
+        Handles `builder.add_node(...)`, `self.workflow.add_node(...)`,
+        `self.builder.compile().add_node(...)` (we just check the
+        immediate name/attr).
+        """
+        if isinstance(expr, _ast.Name):
+            return expr.id in self._builder_vars
+        if isinstance(expr, _ast.Attribute):
+            return expr.attr in self._builder_vars
+        if isinstance(expr, _ast.Call):
+            # Chained: `builder.compile().add_node(...)` — recurse.
+            return self._is_builder_call(expr.func) if isinstance(
+                expr.func, (_ast.Attribute, _ast.Name)
+            ) else False
+        return False
+
+    @staticmethod
+    def _call_name(call: _ast.Call) -> str:
+        if isinstance(call.func, _ast.Name):
+            return call.func.id
+        if isinstance(call.func, _ast.Attribute):
+            return call.func.attr
+        return ""
+
+    @staticmethod
+    def _str_arg(node: _ast.expr) -> Optional[str]:
+        """Extract a string literal value, or None for non-literal args."""
+        if isinstance(node, _ast.Constant) and isinstance(node.value, str):
+            return node.value
+        return None
+
+    @staticmethod
+    def _sentinel_arg(node: _ast.expr) -> Optional[str]:
+        """Detect START / END references regardless of import alias."""
+        if isinstance(node, _ast.Name) and node.id in _StateGraphASTVisitor._SENTINELS:
+            return node.id
+        if isinstance(node, _ast.Attribute) and node.attr in _StateGraphASTVisitor._SENTINELS:
+            return node.attr
+        if isinstance(node, _ast.Constant) and node.value in _StateGraphASTVisitor._SENTINELS:
+            return str(node.value)
+        return None
+
+    def _ensure_node(self, name: str, ntype: str = "llm") -> None:
+        if name in self._nodes:
+            return
+        self._nodes[name] = {
+            "id":     name,
+            "name":   name,
+            "type":   ntype,
+            "config": {},
+            "pos":    {"file": self._source_path, "line": 0, "col": 0},
+        }
+
+    def _node_type_for(self, fn: _ast.expr) -> str:
+        """Heuristic: handler argument's name → tool/llm classification."""
+        name = ""
+        if isinstance(fn, _ast.Name):
+            name = fn.id
+        elif isinstance(fn, _ast.Attribute):
+            name = fn.attr
+        elif isinstance(fn, _ast.Lambda):
+            name = "lambda"
+        lower = name.lower()
+        if any(t in lower for t in ("tool", "retriev", "search", "fetch", "browser")):
+            return "tool"
+        return "llm"
+
+    def _handle_add_node(self, node: _ast.Call) -> None:
+        if not node.args:
+            return
+        # add_node("name", fn) OR add_node(fn) (1-arg sugar where fn.__name__
+        # is the name in newer langgraph).
+        if len(node.args) >= 2:
+            name = self._str_arg(node.args[0]) or "<dynamic>"
+            ntype = self._node_type_for(node.args[1])
+            self._ensure_node(name, ntype)
+        else:
+            # Single-arg form: callable's name.
+            fn = node.args[0]
+            name = ""
+            if isinstance(fn, _ast.Name):
+                name = fn.id
+            elif isinstance(fn, _ast.Attribute):
+                name = fn.attr
+            self._ensure_node(name or "<dynamic>", self._node_type_for(fn))
+
+    def _handle_add_edge(self, node: _ast.Call) -> None:
+        if len(node.args) < 2:
+            return
+        src_arg, dst_arg = node.args[0], node.args[1]
+        src = self._sentinel_arg(src_arg) or self._str_arg(src_arg) or "<dynamic>"
+        dst = self._sentinel_arg(dst_arg) or self._str_arg(dst_arg) or "<dynamic>"
+        if src in self._SENTINELS:
+            # START → user-node: the user-node becomes the entry. Drop the edge.
+            if dst not in self._SENTINELS and not self._entry:
+                self._entry = dst
+                self._ensure_node(dst, "llm")
+            return
+        if dst in self._SENTINELS:
+            # User-node → END: drop the edge entirely.
+            self._ensure_node(src, "llm")
+            return
+        self._ensure_node(src, "llm")
+        self._ensure_node(dst, "llm")
+        self._edges.append({"from": src, "to": dst})
+
+    def _handle_add_conditional(self, node: _ast.Call) -> None:
+        if len(node.args) < 2:
+            return
+        src_arg = node.args[0]
+        src = self._sentinel_arg(src_arg) or self._str_arg(src_arg) or "<dynamic>"
+        if src in self._SENTINELS:
+            return
+        self._ensure_node(src, "llm")
+        # Try to extract the {key: target_name} mapping from the third positional
+        # arg (or `path_map`/`mapping` keyword).
+        mapping = None
+        if len(node.args) >= 3 and isinstance(node.args[2], _ast.Dict):
+            mapping = node.args[2]
+        for kw in node.keywords:
+            if kw.arg in ("path_map", "mapping") and isinstance(kw.value, _ast.Dict):
+                mapping = kw.value
+                break
+        if mapping is None:
+            return
+        for key, value in zip(mapping.keys, mapping.values):
+            cond = self._str_arg(key) if key is not None else ""
+            target = self._sentinel_arg(value) or self._str_arg(value)
+            if not target:
+                continue
+            if target in self._SENTINELS:
+                continue
+            self._ensure_node(target, "llm")
+            edge = {"from": src, "to": target}
+            if cond:
+                edge["condition"] = cond
+            self._edges.append(edge)
+
+    def _handle_set_entry(self, node: _ast.Call) -> None:
+        if not node.args:
+            return
+        name = self._str_arg(node.args[0])
+        if name and not self._entry:
+            self._entry = name
+            self._ensure_node(name, "llm")
+
+    def build(self) -> Dict[str, Any]:
+        # Drop synthetic placeholder nodes if a real entry exists; otherwise
+        # keep them so over-approximation surfaces.
+        out_nodes = list(self._nodes.values())
+        entry = self._entry
+        if not entry and out_nodes:
+            entry = out_nodes[0]["id"]
+        return {
+            "nodes": out_nodes,
+            "edges": self._edges,
+            "entry_node_id": entry,
+            "metadata": {
+                "source_format":           "langgraph",
+                "source_file":             self._source_path,
+                "extraction":              "ast_fallback",
+                "conditional_edge_reason": "over_approximated_dynamic",
+            },
+        }
 
 
 def _missing_dep_message(source: str, exc: ModuleNotFoundError) -> str:
