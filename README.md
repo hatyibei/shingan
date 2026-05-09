@@ -236,14 +236,15 @@ When adding a new rule, see [docs/rule-authoring.md](./docs/rule-authoring.md).
 
 - [Architecture](./docs/architecture.md)
 - [Rule authoring guide (internal)](./docs/rule-authoring.md)
-- [LangGraph parser](./docs/langgraph.md)
+- **Framework parsers**: [LangGraph](./docs/langgraph.md) · [CrewAI](./docs/crewai.md) · [n8n](./docs/n8n.md)
+- **Case studies (real OSS dogfood)**: [crewAI-examples](./docs/case-studies/crewAI-examples.md) · [n8n community workflows](./docs/case-studies/n8n-community-workflows.md) · [gpt-researcher](./docs/case-studies/gpt-researcher.md) — [index](./docs/case-studies/README.md)
 - [LSP server (`shingan-lsp`) — VS Code / Neovim / Helix / Zed setup](./docs/lsp.md)
 - [MCP server (`shingan-mcp`) — Claude Desktop / Cursor / LangGraph Studio setup](./docs/mcp-server.md)
 - [SARIF output + GitHub Code Scanning integration](./docs/sarif-output.md)
 - [diff mode + baseline (`--since` / `--baseline`)](./docs/diff-mode.md)
 - [Confidence scoring](./docs/confidence-scoring.md)
 - [cycle_detection technical note](./docs/cycle-detection-note.md)
-- [All ADRs (001〜012)](./shingan-adr.md)
+- [All ADRs (001〜013)](./shingan-adr.md)
 
 ### Contributing → New rules
 

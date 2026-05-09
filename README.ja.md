@@ -229,14 +229,15 @@ make lint        # check_confidence_reason + go vet
 
 - [アーキテクチャ詳細](./docs/architecture.md)
 - [ルール作成ガイド (内部)](./docs/rule-authoring.md)
-- [LangGraph parser](./docs/langgraph.md)
+- **フレームワーク parser**: [LangGraph](./docs/langgraph.md) · [CrewAI](./docs/crewai.md) · [n8n](./docs/n8n.md)
+- **ケーススタディ (実 OSS dogfood)**: [crewAI-examples](./docs/case-studies/crewAI-examples.md) · [n8n community workflows](./docs/case-studies/n8n-community-workflows.md) · [gpt-researcher](./docs/case-studies/gpt-researcher.md) — [index](./docs/case-studies/README.md)
 - [LSP server (`shingan-lsp`) — VS Code / Neovim / Helix / Zed setup](./docs/lsp.md)
 - [MCP server (`shingan-mcp`) — Claude Desktop / Cursor / LangGraph Studio setup](./docs/mcp-server.md)
 - [SARIF 出力 + GitHub Code Scanning 統合](./docs/sarif-output.md)
 - [diff モード + baseline (`--since` / `--baseline`)](./docs/diff-mode.md)
 - [Confidence scoring](./docs/confidence-scoring.md)
 - [cycle_detection の技術ノート](./docs/cycle-detection-note.md)
-- [全 ADR (001〜012)](./shingan-adr.md)
+- [全 ADR (001〜013)](./shingan-adr.md)
 
 ### Contributing → New rules
 
