@@ -867,6 +867,19 @@ def _handle_parse_file(params: Dict[str, Any]) -> Dict[str, Any]:
         if ast_graph is not None and ast_graph["nodes"]:
             return ast_graph
         raise RuntimeError(_missing_dep_message(path, exc))
+    except Exception:  # noqa: BLE001 — any other import-time failure
+        # Modules with side-effects at import (langchain_openai
+        # initialising a client, langgraph studio modules instantiating
+        # API connectors, etc.) raise non-ModuleNotFound exceptions
+        # before the StateGraph is in scope. Dogfood: langchain-academy
+        # module-1 emits OpenAIError("Missing credentials") at import
+        # because `ChatOpenAI()` runs at module scope. AST fallback
+        # ignores all of that — it walks the syntax tree without
+        # executing the module — so route through it before giving up.
+        ast_graph = _try_ast_extract(path=path, source_path=path)
+        if ast_graph is not None and ast_graph["nodes"]:
+            return ast_graph
+        raise
     graph_obj = _find_state_graphs(user_module)
     if graph_obj is None:
         # Pass-3 AST fallback: the user constructed the graph inside an
@@ -904,6 +917,11 @@ def _handle_parse_content(params: Dict[str, Any]) -> Dict[str, Any]:
         if ast_graph is not None and ast_graph["nodes"]:
             return ast_graph
         raise RuntimeError(_missing_dep_message(filename, exc))
+    except Exception:  # noqa: BLE001 — symmetry with parse_file
+        ast_graph = _try_ast_extract(content=content, source_path=filename)
+        if ast_graph is not None and ast_graph["nodes"]:
+            return ast_graph
+        raise
     graph_obj = _find_state_graphs(user_module)
     if graph_obj is None:
         ast_graph = _try_ast_extract(content=content, source_path=filename)
@@ -985,6 +1003,18 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
     _GRAPH_CTORS = ("StateGraph", "MessageGraph", "Graph")
     # Sentinels used by langgraph for entry/exit; never become real nodes.
     _SENTINELS = ("START", "END", "__start__", "__end__")
+    # Built-in router functions imported from `langgraph.prebuilt` etc.
+    # Their `-> Literal[...]` annotation lives in the library, not in
+    # the user's source, so the AST visitor can't see it via
+    # visit_FunctionDef. We hard-code the destination set so that
+    # `add_conditional_edges("agent", tools_condition)` correctly
+    # surfaces the {tools, END} branches. Dogfood: langchain-academy
+    # module-1 / module-4 — every tool-calling agent in the official
+    # course produced a `tools` `unreachable_node` warning before this.
+    _BUILTIN_ROUTER_LITERALS: Dict[str, set[str]] = {
+        # tools_condition returns Literal["tools", "__end__"]
+        "tools_condition": {"tools", "__end__"},
+    }
 
     def __init__(self, source_path: str) -> None:
         self._source_path = source_path
@@ -1017,7 +1047,11 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
         # in the static graph because its outgoing edges were dynamic
         # (return-value driven), producing 4 false-positive
         # `unreachable_node` warnings on every node it could reach.
-        self._command_goto_map: Dict[str, set[str]] = {}
+        # Pre-populated with builtin router literal annotations
+        # (tools_condition etc) — see _BUILTIN_ROUTER_LITERALS.
+        self._command_goto_map: Dict[str, set[str]] = {
+            name: set(dests) for name, dests in self._BUILTIN_ROUTER_LITERALS.items()
+        }
 
     # ---- Command(goto=...) discovery -----------------------------------
 
