@@ -113,6 +113,13 @@ func (p *N8nParser) Parse(input []byte) (*domain.WorkflowGraph, error) {
 	// nameToID maps the original n8n name to the resolved Shingan Node.ID,
 	// so the connection resolver can find it even after suffixing.
 	nameToID := make(map[string]string, len(wf.Nodes))
+	// uuidToID maps the n8n internal UUID (`id` field) to the resolved
+	// Shingan Node.ID. Modern n8n exports key the `connections` map by
+	// UUID rather than name; without this fallback every connection
+	// silently fails to resolve and the resulting graph appears almost
+	// fully disconnected (dogfood: Zie619/n8n-workflows Deep Research,
+	// 38-node workflow → 4 reachable, 34 false-positive unreachable).
+	uuidToID := make(map[string]string, len(wf.Nodes))
 	// nodeOrder preserves array order so entry-node detection is deterministic.
 	nodeOrder := make([]string, 0, len(wf.Nodes))
 
@@ -156,7 +163,22 @@ func (p *N8nParser) Parse(input []byte) (*domain.WorkflowGraph, error) {
 			Config: cfg,
 		}
 		nameToID[raw.Name] = nodeID
+		if raw.ID != "" {
+			uuidToID[raw.ID] = nodeID
+		}
 		nodeOrder = append(nodeOrder, nodeID)
+	}
+
+	// resolveRef accepts either an n8n node name OR its internal UUID
+	// and returns the Shingan Node.ID, or "" if neither matches.
+	resolveRef := func(ref string) string {
+		if id, ok := nameToID[ref]; ok {
+			return id
+		}
+		if id, ok := uuidToID[ref]; ok {
+			return id
+		}
+		return ""
 	}
 
 	// ── Pass 2: resolve edges ─────────────────────────────────────────────
@@ -169,25 +191,23 @@ func (p *N8nParser) Parse(input []byte) (*domain.WorkflowGraph, error) {
 
 	var edges []domain.Edge
 	for _, srcName := range srcNames {
-		fromID, ok := nameToID[srcName]
-		if !ok {
-			// Source name refers to a disabled / missing node — skip silently.
+		fromID := resolveRef(srcName)
+		if fromID == "" {
+			// Source ref refers to a disabled / missing node — skip silently.
 			continue
 		}
 		ports := wf.Connections[srcName]
-		// Only "main" connections are part of the data flow; n8n's "ai_*"
-		// connections (langchain sub-tools, memory, output parsers) are
-		// langchain-specific scaffolding that don't move data along the
-		// workflow. We expose them in the future when we ship langchain-
-		// aware rules; for now we treat them as decorations.
-		main := ports["main"]
 		fromNode := nodes[fromID]
 		isCondition := fromNode != nil && fromNode.Type == domain.NodeTypeCondition
+
+		// "main" connections — primary data flow. Tagged with branch
+		// conditions for if/switch nodes; everything else is unconditional.
+		main := ports["main"]
 		for portIdx, conns := range main {
 			condition := branchCondition(isCondition, portIdx)
 			for _, c := range conns {
-				toID, ok := nameToID[c.Node]
-				if !ok {
+				toID := resolveRef(c.Node)
+				if toID == "" {
 					// Destination is disabled / missing — drop.
 					continue
 				}
@@ -198,16 +218,95 @@ func (p *N8nParser) Parse(input []byte) (*domain.WorkflowGraph, error) {
 				})
 			}
 		}
+
+		// "ai_*" connections — langchain AI Agent sub-resources
+		// (ai_languageModel, ai_tool, ai_memory, ai_outputParser, …).
+		// In n8n's runtime these are accessed by the AI Agent during
+		// execution; structurally they're real edges, just not "primary"
+		// data flow. Emit them with a non-empty Condition so:
+		//   - unreachable_node sees them (no spurious 30+ FPs on
+		//     langchain-heavy workflows like the Deep Research /
+		//     handbook-generation flows)
+		//   - error_handler_checker treats the non-empty Condition as
+		//     a conditional branch, NOT a missing-fallback signal — the
+		//     AI Agent isn't responsible for fault-handling its
+		//     sub-resources, the runtime is.
+		for portName, portConns := range ports {
+			if portName == "main" || !strings.HasPrefix(portName, "ai_") {
+				continue
+			}
+			for _, conns := range portConns {
+				for _, c := range conns {
+					toID, ok := nameToID[c.Node]
+					if !ok {
+						continue
+					}
+					edges = append(edges, domain.Edge{
+						From:      fromID,
+						To:        toID,
+						Condition: portName, // e.g. "ai_languageModel"
+					})
+				}
+			}
+		}
 	}
 
-	// ── Pass 3: pick entry node ────────────────────────────────────────────
-	entryID := pickEntryNode(nodes, nodeOrder, edges)
+	// ── Pass 3: pick entry node (or synthesise a multi-trigger root) ───────
+	// Real n8n workflows often declare multiple triggers (Webhook +
+	// Telegram + Schedule, plus standalone "Respond to Webhook" nodes
+	// that act as response-only entries). Treating only one as the entry
+	// caused dogfood reports of 37+ unreachable_node false positives on
+	// the Deep Research / Multi-Agent workflows in Zie619/n8n-workflows.
+	// When >1 entry candidate exists we synthesise a virtual root node
+	// connected to each so reachability rules see the full union.
+	triggerIDs := allTriggerNodeIDs(nodes, nodeOrder, edges)
+	var entryID string
+	if len(triggerIDs) >= 2 {
+		const virtualRoot = "__n8n_multi_trigger_root__"
+		nodes[virtualRoot] = &domain.Node{
+			ID:   virtualRoot,
+			Name: "(virtual multi-trigger root)",
+			Type: domain.NodeTypeTool,
+			Config: map[string]any{
+				"category": "trigger",
+				"virtual":  true,
+			},
+		}
+		for _, tid := range triggerIDs {
+			edges = append(edges, domain.Edge{From: virtualRoot, To: tid})
+		}
+		entryID = virtualRoot
+	} else {
+		entryID = pickEntryNode(nodes, nodeOrder, edges)
+	}
 
 	return &domain.WorkflowGraph{
 		Nodes:       nodes,
 		Edges:       edges,
 		EntryNodeID: entryID,
 	}, nil
+}
+
+// allTriggerNodeIDs returns every node ID whose `Config["category"]`
+// is "trigger" — the substring-matched `webhook` / `*Trigger` /
+// `manualTrigger` / `respondToWebhook` family. We deliberately exclude
+// "orphaned" non-trigger nodes (no incoming edge) because those are
+// exactly the case `unreachable_node` is supposed to flag.
+//
+// Returns the IDs in declaration order so the synthesised virtual root
+// is deterministic.
+func allTriggerNodeIDs(nodes map[string]*domain.Node, order []string, _ []domain.Edge) []string {
+	out := make([]string, 0, 4)
+	for _, id := range order {
+		n, ok := nodes[id]
+		if !ok || n == nil {
+			continue
+		}
+		if cat, _ := n.Config["category"].(string); cat == "trigger" {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // branchCondition returns the Edge.Condition string for the given output port
