@@ -650,27 +650,42 @@ def _find_state_graphs(module: types.ModuleType) -> Any:
          zero-argument top-level callables and inspect the return value;
          exceptions / side effects are caught so the worker stays alive.
 
+    Multi-graph priority (matches AST-fallback `_StateGraphASTVisitor`):
+      • A CompiledStateGraph at module level (`graph = builder.compile()`)
+        is the highest-confidence "main" — the user explicitly chose to
+        compile that one. We keep the *last* such variable seen so that
+        files defining several subgraphs followed by a compiled outer
+        graph (e.g. open_deep_research/legacy/graph.py) resolve to the
+        outer one rather than the first inner subgraph.
+      • Otherwise fall back to the last bare StateGraph instance.
+
     Returns the underlying StateGraph object or None.
     """
-    candidate: Any = None
+    last_compiled: Any = None
+    last_bare: Any = None
 
-    # Pass 1: top-level instances (existing behaviour).
+    # Pass 1: top-level instances. Iterate globals fully (Python 3.7+ dict
+    # preserves insertion order) so we end up with the *latest* candidate
+    # rather than the first match.
     for _name, value in vars(module).items():
         if value is module:
             continue
-        if _is_state_graph(value):
-            return value
         # Compiled graphs expose .builder (the StateGraph) in recent langgraph.
         builder = getattr(value, "builder", None)
         if builder is not None and _is_state_graph(builder):
-            candidate = builder
-            return candidate
-        # Older API: .graph attribute.
-        graph = getattr(value, "graph", None)
-        if graph is not None and _is_state_graph(graph):
-            return graph
-    if candidate is not None:
-        return candidate
+            last_compiled = builder
+            continue
+        # Older API: .graph attribute on the compiled wrapper.
+        compiled_inner = getattr(value, "graph", None)
+        if compiled_inner is not None and _is_state_graph(compiled_inner):
+            last_compiled = compiled_inner
+            continue
+        if _is_state_graph(value):
+            last_bare = value
+    if last_compiled is not None:
+        return last_compiled
+    if last_bare is not None:
+        return last_bare
 
     # Pass 2: zero-arg factory functions. We only try functions defined in
     # the user module itself (skip imports), with no required parameters,
@@ -863,7 +878,22 @@ def _try_ast_extract(
 
 
 class _StateGraphASTVisitor(_ast.NodeVisitor):
-    """Walks a Python AST collecting StateGraph builder calls."""
+    """Walks a Python AST collecting StateGraph builder calls.
+
+    Multi-graph aware (dogfood: open_deep_research/legacy/graph.py
+    constructed two independent StateGraphs in one module — a subgraph
+    `section_builder` and the main graph `builder`. The previous
+    flat-merge implementation produced six false-positive
+    `unreachable_node` warnings because nodes from `builder` got merged
+    into `section_builder`'s reachability computation under the latter's
+    entry point.)
+
+    Each `<var> = StateGraph(...)` assignment owns its own
+    nodes/edges/entry state, and all subsequent `<var>.add_node(...)`
+    calls are routed to that graph. The `build()` method picks **one**
+    graph to return: prefer the last variable that was passed to
+    `<var>.compile()`, otherwise fall back to the largest graph.
+    """
 
     # Constructor names that produce a StateGraph-like instance.
     _GRAPH_CTORS = ("StateGraph", "MessageGraph", "Graph")
@@ -871,18 +901,25 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
     _SENTINELS = ("START", "END", "__start__", "__end__")
 
     def __init__(self, source_path: str) -> None:
-        # name → True for variables that hold a StateGraph instance.
-        self._builder_vars: Dict[str, bool] = {}
-        self._nodes: Dict[str, Dict[str, Any]] = {}
-        self._edges: list[Dict[str, Any]] = []
-        self._entry: str = ""
         self._source_path = source_path
+        # var name → graph_id (graph_id IS the var name; class kept this
+        # explicit so future work can disambiguate `self.builder` vs
+        # global `builder`).
+        self._builder_vars: Dict[str, str] = {}
+        # graph_id → {"nodes": {...}, "edges": [...], "entry": "..."}
+        self._graphs: Dict[str, Dict[str, Any]] = {}
+        # Variables that received a `<var>.compile()` result. The last
+        # one wins as the "main" graph (matches the LangGraph idiom
+        # `graph = builder.compile()` at the bottom of a module).
+        self._compile_order: list[str] = []
         # Per-call unique counter so multiple `add_node(<runtime_var>, …)`
         # calls in the same file don't all collapse to a single
         # `<dynamic>` ID — that produced false-positive cycle_detection
         # findings on langchain's own factory.py (dogfood) where the
         # collapsed self-loop wasn't real.
         self._dyn_counter: int = 0
+
+    # ---- builder discovery ---------------------------------------------
 
     def visit_Assign(self, node: _ast.Assign) -> None:
         # Detect `<name> = StateGraph(...)`.
@@ -891,12 +928,15 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
             and self._call_name(node.value) in self._GRAPH_CTORS
         ):
             for target in node.targets:
-                if isinstance(target, _ast.Name):
-                    self._builder_vars[target.id] = True
-                elif isinstance(target, _ast.Attribute):
-                    # `self.builder = StateGraph(...)` — track the
-                    # attribute name (informationally).
-                    self._builder_vars[target.attr] = True
+                self._register_builder_target(target)
+        # Detect `<name> = <existing_builder>.compile()` — used to mark
+        # which graph is the "main" one when multiple StateGraphs live
+        # in the same file (e.g. open_deep_research subgraph
+        # composition).
+        if isinstance(node.value, _ast.Call):
+            compiled_var = self._compile_target(node.value)
+            if compiled_var is not None:
+                self._compile_order.append(compiled_var)
         self.generic_visit(node)
 
     def visit_AnnAssign(self, node: _ast.AnnAssign) -> None:
@@ -905,43 +945,72 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
             and isinstance(node.value, _ast.Call)
             and self._call_name(node.value) in self._GRAPH_CTORS
         ):
-            if isinstance(node.target, _ast.Name):
-                self._builder_vars[node.target.id] = True
-            elif isinstance(node.target, _ast.Attribute):
-                self._builder_vars[node.target.attr] = True
+            self._register_builder_target(node.target)
+        if node.value is not None and isinstance(node.value, _ast.Call):
+            compiled_var = self._compile_target(node.value)
+            if compiled_var is not None:
+                self._compile_order.append(compiled_var)
         self.generic_visit(node)
+
+    def _register_builder_target(self, target: _ast.expr) -> None:
+        if isinstance(target, _ast.Name):
+            self._builder_vars[target.id] = target.id
+            self._ensure_graph(target.id)
+        elif isinstance(target, _ast.Attribute):
+            # `self.builder = StateGraph(...)` — graph_id = attr name.
+            self._builder_vars[target.attr] = target.attr
+            self._ensure_graph(target.attr)
+
+    def _compile_target(self, call: _ast.Call) -> Optional[str]:
+        """If `call` is `<builder_var>.compile(...)`, return the var name."""
+        if not isinstance(call.func, _ast.Attribute):
+            return None
+        if call.func.attr != "compile":
+            return None
+        receiver = call.func.value
+        if isinstance(receiver, _ast.Name) and receiver.id in self._builder_vars:
+            return receiver.id
+        if isinstance(receiver, _ast.Attribute) and receiver.attr in self._builder_vars:
+            return receiver.attr
+        return None
+
+    def _ensure_graph(self, graph_id: str) -> None:
+        if graph_id not in self._graphs:
+            self._graphs[graph_id] = {"nodes": {}, "edges": [], "entry": ""}
+
+    # ---- builder method dispatch ---------------------------------------
 
     def visit_Call(self, node: _ast.Call) -> None:
         if isinstance(node.func, _ast.Attribute):
             method = node.func.attr
-            if self._is_builder_call(node.func.value):
+            graph_id = self._builder_graph_id(node.func.value)
+            if graph_id is not None:
                 if method == "add_node":
-                    self._handle_add_node(node)
+                    self._handle_add_node(graph_id, node)
                 elif method == "add_edge":
-                    self._handle_add_edge(node)
+                    self._handle_add_edge(graph_id, node)
                 elif method == "add_conditional_edges":
-                    self._handle_add_conditional(node)
+                    self._handle_add_conditional(graph_id, node)
                 elif method == "set_entry_point":
-                    self._handle_set_entry(node)
+                    self._handle_set_entry(graph_id, node)
         self.generic_visit(node)
 
-    def _is_builder_call(self, expr: _ast.expr) -> bool:
-        """Return True when `expr` references a StateGraph builder var.
+    def _builder_graph_id(self, expr: _ast.expr) -> Optional[str]:
+        """Return graph_id when `expr` references a StateGraph builder var.
 
         Handles `builder.add_node(...)`, `self.workflow.add_node(...)`,
-        `self.builder.compile().add_node(...)` (we just check the
-        immediate name/attr).
+        `self.builder.compile().add_node(...)` (we recurse and look up
+        the underlying name).
         """
         if isinstance(expr, _ast.Name):
-            return expr.id in self._builder_vars
+            return self._builder_vars.get(expr.id)
         if isinstance(expr, _ast.Attribute):
-            return expr.attr in self._builder_vars
+            return self._builder_vars.get(expr.attr)
         if isinstance(expr, _ast.Call):
             # Chained: `builder.compile().add_node(...)` — recurse.
-            return self._is_builder_call(expr.func) if isinstance(
-                expr.func, (_ast.Attribute, _ast.Name)
-            ) else False
-        return False
+            if isinstance(expr.func, (_ast.Attribute, _ast.Name)):
+                return self._builder_graph_id(expr.func)
+        return None
 
     @staticmethod
     def _call_name(call: _ast.Call) -> str:
@@ -969,10 +1038,11 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
             return str(node.value)
         return None
 
-    def _ensure_node(self, name: str, ntype: str = "llm") -> None:
-        if name in self._nodes:
+    def _ensure_node(self, graph_id: str, name: str, ntype: str = "llm") -> None:
+        nodes = self._graphs[graph_id]["nodes"]
+        if name in nodes:
             return
-        self._nodes[name] = {
+        nodes[name] = {
             "id":     name,
             "name":   name,
             "type":   ntype,
@@ -994,7 +1064,7 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
             return "tool"
         return "llm"
 
-    def _handle_add_node(self, node: _ast.Call) -> None:
+    def _handle_add_node(self, graph_id: str, node: _ast.Call) -> None:
         if not node.args:
             return
         # add_node("name", fn) OR add_node(fn) (1-arg sugar where fn.__name__
@@ -1005,7 +1075,7 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
         if len(node.args) >= 2:
             name = self._str_arg(node.args[0]) or self._next_dynamic_name()
             ntype = self._node_type_for(node.args[1])
-            self._ensure_node(name, ntype)
+            self._ensure_node(graph_id, name, ntype)
         else:
             # Single-arg form: callable's name.
             fn = node.args[0]
@@ -1016,13 +1086,13 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
                 name = fn.attr
             if not name:
                 name = self._next_dynamic_name()
-            self._ensure_node(name, self._node_type_for(fn))
+            self._ensure_node(graph_id, name, self._node_type_for(fn))
 
     def _next_dynamic_name(self) -> str:
         self._dyn_counter += 1
         return f"<dynamic_{self._dyn_counter}>"
 
-    def _handle_add_edge(self, node: _ast.Call) -> None:
+    def _handle_add_edge(self, graph_id: str, node: _ast.Call) -> None:
         if len(node.args) < 2:
             return
         src_arg, dst_arg = node.args[0], node.args[1]
@@ -1033,21 +1103,22 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
         # creates false-positive cycles (langchain factory.py dogfood).
         if src is None or dst is None:
             return
+        graph = self._graphs[graph_id]
         if src in self._SENTINELS:
             # START → user-node: the user-node becomes the entry. Drop the edge.
-            if dst not in self._SENTINELS and not self._entry:
-                self._entry = dst
-                self._ensure_node(dst, "llm")
+            if dst not in self._SENTINELS and not graph["entry"]:
+                graph["entry"] = dst
+                self._ensure_node(graph_id, dst, "llm")
             return
         if dst in self._SENTINELS:
             # User-node → END: drop the edge entirely.
-            self._ensure_node(src, "llm")
+            self._ensure_node(graph_id, src, "llm")
             return
-        self._ensure_node(src, "llm")
-        self._ensure_node(dst, "llm")
-        self._edges.append({"from": src, "to": dst})
+        self._ensure_node(graph_id, src, "llm")
+        self._ensure_node(graph_id, dst, "llm")
+        graph["edges"].append({"from": src, "to": dst})
 
-    def _handle_add_conditional(self, node: _ast.Call) -> None:
+    def _handle_add_conditional(self, graph_id: str, node: _ast.Call) -> None:
         if len(node.args) < 2:
             return
         src_arg = node.args[0]
@@ -1058,7 +1129,7 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
             return
         if src in self._SENTINELS:
             return
-        self._ensure_node(src, "llm")
+        self._ensure_node(graph_id, src, "llm")
         # Try to extract the {key: target_name} mapping from the third positional
         # arg (or `path_map`/`mapping` keyword).
         mapping = None
@@ -1070,6 +1141,7 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
                 break
         if mapping is None:
             return
+        graph = self._graphs[graph_id]
         for key, value in zip(mapping.keys, mapping.values):
             cond = self._str_arg(key) if key is not None else ""
             target = self._sentinel_arg(value) or self._str_arg(value)
@@ -1077,37 +1149,66 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
                 continue
             if target in self._SENTINELS:
                 continue
-            self._ensure_node(target, "llm")
+            self._ensure_node(graph_id, target, "llm")
             edge = {"from": src, "to": target}
             if cond:
                 edge["condition"] = cond
-            self._edges.append(edge)
+            graph["edges"].append(edge)
 
-    def _handle_set_entry(self, node: _ast.Call) -> None:
+    def _handle_set_entry(self, graph_id: str, node: _ast.Call) -> None:
         if not node.args:
             return
         name = self._str_arg(node.args[0])
-        if name and not self._entry:
-            self._entry = name
-            self._ensure_node(name, "llm")
+        graph = self._graphs[graph_id]
+        if name and not graph["entry"]:
+            graph["entry"] = name
+            self._ensure_node(graph_id, name, "llm")
 
     def build(self) -> Dict[str, Any]:
-        # Drop synthetic placeholder nodes if a real entry exists; otherwise
-        # keep them so over-approximation surfaces.
-        out_nodes = list(self._nodes.values())
-        entry = self._entry
+        # Pick the "main" graph among potentially many StateGraphs in the
+        # same module: prefer the last one passed to `<var>.compile()`
+        # (idiomatic `graph = builder.compile()` at module bottom).
+        # Otherwise fall back to the largest graph by node count.
+        chosen_id = ""
+        for cid in reversed(self._compile_order):
+            if cid in self._graphs:
+                chosen_id = cid
+                break
+        if not chosen_id and self._graphs:
+            chosen_id = max(
+                self._graphs.keys(),
+                key=lambda gid: len(self._graphs[gid]["nodes"]),
+            )
+        if not chosen_id:
+            return {
+                "nodes": [],
+                "edges": [],
+                "entry_node_id": "",
+                "metadata": {
+                    "source_format":           "langgraph",
+                    "source_file":             self._source_path,
+                    "extraction":              "ast_fallback",
+                    "conditional_edge_reason": "over_approximated_dynamic",
+                },
+            }
+        graph = self._graphs[chosen_id]
+        out_nodes = list(graph["nodes"].values())
+        entry = graph["entry"]
         if not entry and out_nodes:
             entry = out_nodes[0]["id"]
+        meta = {
+            "source_format":           "langgraph",
+            "source_file":             self._source_path,
+            "extraction":              "ast_fallback",
+            "conditional_edge_reason": "over_approximated_dynamic",
+            "selected_graph":          chosen_id,
+            "discovered_graph_count":  len(self._graphs),
+        }
         return {
             "nodes": out_nodes,
-            "edges": self._edges,
+            "edges": graph["edges"],
             "entry_node_id": entry,
-            "metadata": {
-                "source_format":           "langgraph",
-                "source_file":             self._source_path,
-                "extraction":              "ast_fallback",
-                "conditional_edge_reason": "over_approximated_dynamic",
-            },
+            "metadata": meta,
         }
 
 

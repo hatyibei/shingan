@@ -342,6 +342,50 @@ graph = g.compile()
 	}
 }
 
+// TestLangGraphParser_MultiGraphSubgraph verifies that when a module
+// defines two independent StateGraph instances (subgraph composition,
+// the LangGraph-recommended pattern for `open_deep_research`-style
+// pipelines), the AST visitor returns the OUTER graph — the variable
+// the user's `graph = builder.compile()` actually exposed — not a
+// flat-merge of both.
+//
+// Regression: an earlier visitor merged both StateGraphs into a single
+// node set under the inner graph's entry point, producing six
+// false-positive unreachable_node warnings on every outer-graph node.
+func TestLangGraphParser_MultiGraphSubgraph(t *testing.T) {
+	requirePythonLangGraph(t)
+	dir := findTestdataDir(t)
+
+	p, err := parser.NewLangGraphParser(parser.WithLangGraphScriptPath(findShim(t)))
+	if err != nil {
+		t.Fatalf("NewLangGraphParser: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	graph, err := p.ParseFile(filepath.Join(dir, "multi_graph_subgraph.py"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+
+	// Outer-graph nodes (must all be present): plan, section, gather, finalize.
+	for _, want := range []string{"plan", "section", "gather", "finalize"} {
+		if _, ok := graph.Nodes[want]; !ok {
+			t.Errorf("expected outer-graph node %q in result; got %v", want, nodeIDList(graph))
+		}
+	}
+	// Inner-only nodes must NOT bleed into the outer graph: gen_query,
+	// web_search, write_section live exclusively on the inner subgraph
+	// and would only appear if the visitor flat-merged.
+	for _, leak := range []string{"gen_query", "web_search", "write_section"} {
+		if _, ok := graph.Nodes[leak]; ok {
+			t.Errorf("inner subgraph node %q leaked into outer graph result; got %v", leak, nodeIDList(graph))
+		}
+	}
+	if got := graph.EntryNodeID; got != "plan" {
+		t.Errorf("EntryNodeID = %q, want %q (outer graph's START → plan edge)", got, "plan")
+	}
+}
+
 // nodeIDList returns the sorted node ID slice for diagnostic messages.
 func nodeIDList(g *domain.WorkflowGraph) []string {
 	out := make([]string, 0, len(g.Nodes))
