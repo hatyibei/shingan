@@ -4,6 +4,130 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-05-09
+
+Continuation of the dogfood-driven brushup loop started in v0.8.5.
+Twelve commits' worth of FP elimination across all three Python
+parsers, plus a security fix and an architectural cleanup.
+
+### Security
+
+- **🔴 GHA shell-injection fix** (`action.yml`). Eight `${{ inputs.* }}`
+  expressions previously template-substituted directly into a
+  `bash run:` block. Values containing `"`, `$()`, backticks, or
+  newlines would be interpreted as live shell tokens, executing
+  under the runner's permissions with access to GITHUB_TOKEN. All
+  inputs now route through the step's `env:` block as `INPUT_*`
+  vars; the `run:` block references them as `$INPUT_*` (opaque
+  strings, no template-time substitution).
+- **🟠 Go stdlib vuln upgrade** (govulncheck baseline). Bumped
+  `go` directive 1.25.0 → 1.25.3, refreshed `golang.org/x/net`,
+  pinned `go-version: 1.25.3` in action.yml + ci.yml + codeql.yml +
+  release.yml. 24 reachable vulns → 16 (remaining are stdlib without
+  fixed versions yet — close as the next 1.25.x patch ships).
+
+### Architecture
+
+- **`Node.HasExitBranch` typed field** replaces the
+  `Config["has_end_branch"]=true` cross-layer key introduced in
+  v0.8.5. The Onion violation flagged by review (rules/cycle.go
+  reading parser-private string keys from a map) is closed:
+  parsers now write a typed `domain.Node` field, the cycle rule
+  reads the typed field, the Config map remains as a wire-format
+  detail at the shim level only. Integration test
+  `TestLangGraphParser_EndSentinelExit` runs the full shim → wire
+  → Go parser → domain pipeline so a future change to the
+  parser-side JSON key fails loudly instead of silently
+  zero-valuing the typed field.
+
+### Fixed — LangGraph parser
+
+- **Router-Literal mapping omitted**: `add_conditional_edges("src",
+  router_fn)` (no third arg) now reads `router_fn`'s
+  `-> Literal[...]` return annotation to discover destinations.
+  Dogfood: executive-ai-assistant cleared 11 false-positive
+  `unreachable_node` warnings on `route_after_triage`-style routers.
+- **END-sentinel exit recognition**: routers returning
+  `Literal[END, "back_to_loop"]`, `Command(goto=END)`, or list/dict
+  path_maps containing `END` now mark the source as having a
+  structural exit (`Node.HasExitBranch=true`). `cycle_detection`
+  uses the flag to downgrade Critical → Warning when the only exit
+  is a sentinel. Dogfood: company-researcher's
+  `route_from_reflection` (Literal[END, "research_company"]) — the
+  first false-positive Critical from v0.8.5+ to be reclassified.
+- **Generic-exception fallback**: modules with import-time side
+  effects (`OpenAIError`, network calls, deprecated module shims)
+  now fall back to AST extraction instead of bubbling the
+  exception as an RPC error. Dogfood: langchain-academy module-1
+  agent.py used to fail on `OpenAIError("Missing credentials")`.
+- **`tools_condition` builtin**: `add_conditional_edges("agent",
+  tools_condition)` now resolves correctly even though the function
+  lives in `langgraph.prebuilt`. Hard-coded as
+  `_BUILTIN_ROUTER_LITERALS = {"tools_condition": {"tools",
+  "__end__"}}`. Hooks for adding more builtins (e.g.
+  `forward_message`) follow the same pattern.
+- **Fan-in `add_edge([a, b], c)`**: LangGraph stores fan-in joins
+  in `waiting_edges` separately from `edges`; the shim now merges
+  them and `_normalise_edge` expands `((a, b), c)` to
+  `[(a, c), (b, c)]` instead of producing a single bogus edge with
+  src `"('a', 'b')"`. Dogfood: langgraph/libs/langgraph/bench/
+  wide_state.py.
+- **Bare-return router (Source 3)**: functions with no return
+  annotation but ≥2 distinct literal/sentinel return values are
+  now treated as routers. Avoids polluting the dispatch map with
+  plain utility funcs (single literal return). Dogfood:
+  langgraph/examples/chatbot-simulation-evaluation/
+  simulation_utils.py's `_should_continue`.
+- **`_resolve_router_callable`**: the second argument to
+  `add_conditional_edges` no longer needs to be a bare `Name`/
+  `Attribute`. The resolver also unwraps `a or b` (`_ast.BoolOp`)
+  and `functools.partial(fn, …)` to recover the underlying
+  function name.
+- **Two-pass visit (`prepass_collect_dispatch`)**: pre-walks every
+  `FunctionDef` to populate `_command_goto_map` BEFORE the main
+  visit traverses builder calls. Modules whose `make_graph()`
+  factory is defined ABOVE the router function (the most common
+  layout) no longer hit a visit-order race that drops conditional
+  destinations.
+
+### Fixed — CrewAI parser
+
+- **Generic-exception fallback** (symmetric with the LangGraph
+  v0.8.5+ fix). Modules with import-time side-effects (deprecated
+  module shims like `langchain.llms`'s re-export wrappers) now
+  route through AST extraction instead of crashing the worker.
+  Dogfood: crewAI-examples/crews/screenplay_writer/
+  screenplay_writer.py 0 → 9 findings.
+
+### Fixed — n8n parser
+
+- **Sticky-note skip**: `n8n-nodes-base.stickyNote` (visual
+  annotation widgets, never executed) now drops out of the
+  WorkflowGraph entirely. Dogfood: random 10-file sample from
+  Zie619/n8n-workflows had 4-12 sticky notes per workflow, all
+  emitting false-positive `unreachable_node` warnings before this
+  fix.
+
+### Net dogfood signal
+
+| OSS file | v0.8.4 / earlier | v0.8.6 |
+|---|---|---|
+| open_deep_research/legacy/graph.py | 9 (1C/8W) | 1 W (legit) |
+| executive-ai-assistant graph.py | 14 (13W/1I) | 3 (legit) |
+| company-researcher graph.py | 1 Critical FP | 0 Critical |
+| langchain-academy module-1 agent.py | parse error | 1 W (legit) |
+| langgraph bench/wide_state.py | 2 W FP | 0 |
+| n8n 0393 community workflow | 20 (12W/8I) | 12 (8W real / 4I) |
+| crewAI-examples screenplay_writer | parse error | 9 (4W/5I) |
+
+### Docs
+
+- README new "Real-world LangGraph dogfood (v0.8.5+)" section with
+  finding counts on seven production LangGraph repos.
+- `docs/langgraph.md` syntax coverage table expanded from 8 rows
+  to 15, each new row marked `(v0.8.5+)`. Functional API
+  (`@entrypoint`/`@task`) flagged as the next concrete gap.
+
 ## [0.8.5] - 2026-05-09
 
 ### Fixed — Dogfood-driven LangGraph FP elimination
