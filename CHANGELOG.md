@@ -4,6 +4,21 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-05-09
+
+### Added
+- **AST-based fallback parser (ADR-014)** — runtime introspection couldn't reach graphs constructed inside instance methods or decorator-driven factories (the dominant real-world pattern in `gpt-researcher.ChiefEditorAgent._create_workflow(self, agents)`, `crewAI-examples` agents.py / tasks.py / @CrewBase classes, etc.). Both Python shims now fall through to a pure-AST visitor when:
+  - `_load_*` says the framework isn't importable, OR
+  - the user file's transitive imports raise `ModuleNotFoundError`, OR
+  - the runtime path returns 0 nodes.
+  The visitor walks the syntax tree for `StateGraph(...).add_node(...).add_edge(...).add_conditional_edges(...).set_entry_point(...)` (LangGraph) and `Agent(role=...)` / `Task(description=...)` / `Crew(...)` constructor calls (CrewAI), with `allow_delegation=True` bidirectional edges + Process.sequential head-to-tail Task chaining. String-literal arguments are extracted; non-literal arguments become a synthetic placeholder so reachability rules still see the structure (over-approximation per ADR-008). Metadata `extraction: "ast_fallback"` distinguishes from runtime path.
+- **First Critical finding in real OSS via AST fallback**: `cycle_detection` (100%) on `planner` node in `assafelovic/gpt-researcher` `multi_agents/agents/orchestrator.py` (StateGraph cycle in instance method without a Loop guard).
+- Real-OSS sweep across `crewAIInc/crewAI-examples`: 15 / 40 files (37.5%) now produce ≥1 finding (was 3% pre-AST), 43 total findings across the corpus — primarily `error_handler_checker` Warnings on Task / Agent nodes lacking conditional fallback edges.
+
+### Notes
+- AST-extracted graphs use `metadata.extraction = "ast_fallback"` and lower confidence (over-approximation) for non-literal node names (`<dynamic>`).
+- No regression on existing testdata fixtures: runtime path still wins when the user file constructs the graph at module top level or in a zero-arg factory function (existing v0.8.2 behaviour preserved).
+
 ## [0.8.2] - 2026-05-09
 
 ### Fixed (n8n parser dogfood round 2)

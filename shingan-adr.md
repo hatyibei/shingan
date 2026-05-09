@@ -5,7 +5,7 @@
 ```
 作成者:    hatyibei
 リポジトリ: github.com/hatyibei/shingan
-ステータス: v0.8.2 Released (6 frameworks: ADK-Go/JSON/Samurai/LangGraph/n8n/CrewAI、OSS dogfood で n8n parser に UUID-keyed connections + multi-trigger root + ai_* edges を追加)
+ステータス: v0.8.3 Released (6 frameworks + AST-based fallback parser、ADR-014 確定。実 OSS hit 率 3% → 37.5%)
 ```
 
 > **注 (2026-05-05)**: ADR-001 と ADR-002 は v0.1 (2026-04) 当時の判断記録です。当初は特定エンタープライズ製品 (GUI ワークフローエディタ) を念頭に置いた narrative で書かれていますが、Shingan は v0.6 で **汎用 AI agent linter** として再ポジショニングされ、LangGraph (Phase 1 主戦場、ADR-011) / ADK-Go / Generic JSON workflow / 任意 GUI ワークフローエディタを横並びでサポートします。当時の specific 文言は context として残しますが、最新方針は **ADR-006〜012** を参照してください。
@@ -1606,3 +1606,4 @@ CrewAI で発火する builtin rule:
 | 2026-05-04 | ADR-006〜011 追加。「使える静的解析ツール」化方針への転換に伴い、ESLint方式 visitor pattern (006) / Local-Path-Global 3層分離 (007) / ConfidenceReason 二次元化 (008) / LSP差分実行+degraded mode (009) / Plugin SDK internal-first (010) / 主戦場 LangGraph シフト (011, ADR-002 補正) を確定。別AI壁打ちレビューの6盲点指摘を反映。Appendix A に新用語追加 | hatyibei |
 | 2026-05-05 | ADR-012 追加。self-dogfood で `testdata/agents` の `unreachable_node` 偽陽性 7件を発見し、multi-file directory analysis の per-file independent graph 化を確定 (#9 解決案、Phase 2 着手の前提条件) | hatyibei |
 | 2026-05-06 | ADR-013 追加。v0.7.0 出荷後に CrewAI parser を v0.8 主目標と確定。LangGraph で確立した PythonWorker インフラを framework-agnostic 化して再利用、CrewAI 専用シム `scripts/export_crewai_server.py` を新規追加する戦略を明文化 | hatyibei |
+| 2026-05-09 | ADR-014 追加。OSS dogfood (gpt-researcher / crewAI-examples) で実コードの大半が instance method / decorator-driven factory 内構築だと判明 → runtime introspection だけではカバー率 3% 程度。AST-based fallback parser を hybrid 戦略として導入し、LangGraph (StateGraph + add_node/add_edge/add_conditional_edges/set_entry_point) と CrewAI (Agent/Task/Crew constructor + allow_delegation) の両方で AST 抽出を採用。実 OSS hit 率 3% → 37.5% に。 | hatyibei |

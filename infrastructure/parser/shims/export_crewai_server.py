@@ -953,15 +953,29 @@ def _handle_parse_file(params: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("parse_file: 'path' is required")
     mod, err = _load_crewai()
     if mod is None:
+        ast_graph = _try_ast_extract(path=path, source_path=path)
+        if ast_graph is not None and ast_graph["nodes"]:
+            return ast_graph
         raise RuntimeError(f"crewai is not importable: {err}")
     try:
         user_module = _import_user_module(path)
     except ModuleNotFoundError as exc:
+        ast_graph = _try_ast_extract(path=path, source_path=path)
+        if ast_graph is not None and ast_graph["nodes"]:
+            return ast_graph
         raise RuntimeError(_missing_dep_message(path, exc))
     crew = _find_crew(user_module)
     if crew is None:
+        ast_graph = _try_ast_extract(path=path, source_path=path)
+        if ast_graph is not None and ast_graph["nodes"]:
+            return ast_graph
         return _build_graph(types.SimpleNamespace(agents=[], tasks=[]), path)
-    return _build_graph(crew, path)
+    runtime_graph = _build_graph(crew, path)
+    if not runtime_graph["nodes"]:
+        ast_graph = _try_ast_extract(path=path, source_path=path)
+        if ast_graph is not None and ast_graph["nodes"]:
+            return ast_graph
+    return runtime_graph
 
 
 def _handle_parse_content(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -971,15 +985,174 @@ def _handle_parse_content(params: Dict[str, Any]) -> Dict[str, Any]:
     filename = params.get("filename") or "<inline.py>"
     mod, err = _load_crewai()
     if mod is None:
+        ast_graph = _try_ast_extract(content=content, source_path=filename)
+        if ast_graph is not None and ast_graph["nodes"]:
+            return ast_graph
         raise RuntimeError(f"crewai is not importable: {err}")
     try:
         user_module = _import_user_source(content, filename)
     except ModuleNotFoundError as exc:
+        ast_graph = _try_ast_extract(content=content, source_path=filename)
+        if ast_graph is not None and ast_graph["nodes"]:
+            return ast_graph
         raise RuntimeError(_missing_dep_message(filename, exc))
     crew = _find_crew(user_module)
     if crew is None:
+        ast_graph = _try_ast_extract(content=content, source_path=filename)
+        if ast_graph is not None and ast_graph["nodes"]:
+            return ast_graph
         return _build_graph(types.SimpleNamespace(agents=[], tasks=[]), filename)
-    return _build_graph(crew, filename)
+    runtime_graph = _build_graph(crew, filename)
+    if not runtime_graph["nodes"]:
+        ast_graph = _try_ast_extract(content=content, source_path=filename)
+        if ast_graph is not None and ast_graph["nodes"]:
+            return ast_graph
+    return runtime_graph
+
+
+# ----- AST-based fallback parser (ADR-014) ----------------------------------
+# CrewAI's modern @CrewBase + @start/@listen Flow patterns construct Crew /
+# Agent / Task instances inside instance methods. The runtime path captures
+# class instantiation, but Flow files often build at @start/@listen
+# boundaries which are too dynamic to safely call. AST fallback walks the
+# syntax tree for Agent(role="...") / Task(description="...") / Crew(...)
+# constructor calls regardless of containing function.
+
+import ast as _ast
+
+
+def _try_ast_extract(
+    *,
+    path: Optional[str] = None,
+    content: Optional[str] = None,
+    source_path: str,
+) -> Optional[Dict[str, Any]]:
+    try:
+        if content is None:
+            with open(path, encoding="utf-8") as fp:
+                content = fp.read()
+        tree = _ast.parse(content, filename=source_path)
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return None
+    visitor = _CrewASTVisitor(source_path)
+    visitor.visit(tree)
+    return visitor.build()
+
+
+class _CrewASTVisitor(_ast.NodeVisitor):
+    """Walks a Python AST collecting Crew/Agent/Task constructor calls."""
+
+    def __init__(self, source_path: str) -> None:
+        self._agents: Dict[str, Dict[str, Any]] = {}   # role → node dict
+        self._tasks: list[Dict[str, Any]] = []          # ordered list
+        self._tools: Dict[str, Dict[str, Any]] = {}     # tool_name → node
+        self._edges: list[Dict[str, Any]] = []
+        self._source_path = source_path
+
+    @staticmethod
+    def _str_arg(node: _ast.expr) -> Optional[str]:
+        if isinstance(node, _ast.Constant) and isinstance(node.value, str):
+            return node.value
+        return None
+
+    @staticmethod
+    def _kw_str(call: _ast.Call, *names: str) -> Optional[str]:
+        for kw in call.keywords:
+            if kw.arg in names:
+                v = _CrewASTVisitor._str_arg(kw.value)
+                if v is not None:
+                    return v
+        return None
+
+    @staticmethod
+    def _call_name(call: _ast.Call) -> str:
+        if isinstance(call.func, _ast.Name):
+            return call.func.id
+        if isinstance(call.func, _ast.Attribute):
+            return call.func.attr
+        return ""
+
+    def visit_Call(self, node: _ast.Call) -> None:
+        name = self._call_name(node)
+        if name == "Agent":
+            self._handle_agent(node)
+        elif name == "Task":
+            self._handle_task(node)
+        # Crew(...) itself: we let agents/tasks accumulate; the
+        # final graph is assembled in build().
+        self.generic_visit(node)
+
+    def _handle_agent(self, node: _ast.Call) -> None:
+        role = self._kw_str(node, "role") or ""
+        if not role:
+            return
+        agent_id = "crew::agent::" + _safe_id(role)
+        if agent_id in self._agents:
+            return
+        cfg: Dict[str, Any] = {"agent_role": role}
+        # Optional metadata.
+        for n in ("goal", "backstory"):
+            v = self._kw_str(node, n)
+            if v:
+                cfg[n] = v
+        # Detect allow_delegation=True → mark for circular_dep_agents
+        for kw in node.keywords:
+            if kw.arg == "allow_delegation" and isinstance(kw.value, _ast.Constant):
+                cfg["allow_delegation"] = bool(kw.value.value)
+        self._agents[agent_id] = {
+            "id":     agent_id,
+            "name":   role,
+            "type":   "llm",
+            "config": cfg,
+            "pos":    {"file": self._source_path, "line": getattr(node, "lineno", 0), "col": 0},
+        }
+
+    def _handle_task(self, node: _ast.Call) -> None:
+        desc = self._kw_str(node, "description") or f"task_{len(self._tasks)}"
+        idx = len(self._tasks)
+        label = f"{desc[:60]}-{idx}"
+        task_id = "crew::task::" + _safe_id(label)
+        cfg: Dict[str, Any] = {"description": desc}
+        v = self._kw_str(node, "expected_output")
+        if v:
+            cfg["expected_output"] = v
+        node_dict = {
+            "id":     task_id,
+            "name":   label[:80],
+            "type":   "tool",
+            "config": cfg,
+            "pos":    {"file": self._source_path, "line": getattr(node, "lineno", 0), "col": 0},
+        }
+        self._tasks.append(node_dict)
+
+    def build(self) -> Dict[str, Any]:
+        out_nodes = list(self._agents.values()) + self._tasks
+        edges: list[Dict[str, Any]] = []
+        # Sequential link Tasks head-to-tail (default Process for AST mode).
+        for i in range(len(self._tasks) - 1):
+            edges.append({"from": self._tasks[i]["id"], "to": self._tasks[i + 1]["id"]})
+        # If multiple agents have allow_delegation=True, emit bidirectional
+        # delegate edges so circular_dep_agents fires.
+        delegating = [a["id"] for a in self._agents.values()
+                      if a["config"].get("allow_delegation")]
+        for i, src in enumerate(delegating):
+            for dst in delegating[i + 1:]:
+                edges.append({"from": src, "to": dst, "condition": "delegate"})
+                edges.append({"from": dst, "to": src, "condition": "delegate"})
+        entry = self._tasks[0]["id"] if self._tasks else (
+            next(iter(self._agents.values()))["id"] if self._agents else ""
+        )
+        return {
+            "nodes": out_nodes,
+            "edges": edges,
+            "entry_node_id": entry,
+            "metadata": {
+                "source_format":           "crewai",
+                "source_file":             self._source_path,
+                "extraction":              "ast_fallback",
+                "conditional_edge_reason": "exact_static_match",
+            },
+        }
 
 
 def _missing_dep_message(source: str, exc: ModuleNotFoundError) -> str:
