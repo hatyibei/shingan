@@ -4,6 +4,13 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-05-09
+
+### Fixed (n8n parser dogfood round 2)
+- **P0: UUID-keyed `connections` silently dropped** — modern n8n exports key the connection map by node UUID rather than name. The parser only matched by name, so almost every modern workflow looked nearly disconnected and `unreachable_node` produced massive false positives (Zie619/n8n-workflows Deep Research: 38-node workflow → 4 reachable, 34 FPs). Add `uuidToID` map + `resolveRef` helper that tries name first, UUID fallback.
+- **Multi-trigger workflows treated as single-entry** — workflows with >1 `category="trigger"` node (Telegram + Webhook + Schedule + Respond-to-Webhook) only had one entry picked by `pickEntryNode`, so other triggers' sub-flows reported as unreachable. Synthesise a virtual `__n8n_multi_trigger_root__` node connected to all triggers when ≥2 exist; single-trigger workflows keep the original behaviour.
+- **`ai_*` port edges now emitted** — n8n's langchain AI Agent nodes route sub-resources (LLM, tools, memory, output parsers) via `ai_languageModel` / `ai_tool` / `ai_memory` / `ai_outputParser` ports, not `main`. These were skipped as "decoration", causing langchain-heavy workflows to show mass `unreachable_node` FPs. Now emitted as edges with `Condition=portName` so reachability rules count them while `error_handler_checker` correctly treats them as runtime-managed sub-resources (non-empty Condition = conditional branch, not missing fallback).
+
 ## [0.8.1] - 2026-05-09
 
 ### Fixed
