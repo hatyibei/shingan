@@ -29,6 +29,11 @@ type AnalysisOrchestrator struct {
 	walker  *GraphWalker
 	pathW   *PathWalker
 	globalW *GlobalWalker
+	// Policy is an optional `.shingan.yaml`-style override applied after
+	// rules run and ignore-comments are processed. nil = use rule
+	// defaults. CLI / LSP / MCP layers populate this from a file path
+	// or via DiscoverPolicy().
+	Policy *Policy
 }
 
 // NewAnalysisOrchestrator returns a ready-to-use AnalysisOrchestrator.
@@ -213,6 +218,10 @@ func (o *AnalysisOrchestrator) AnalyzeMulti(inputs []GraphWithSource, rules []do
 		}
 		return file, n.Pos.Line
 	})
+
+	// Apply organization-level severity policy (.shingan.yaml).
+	// Phase 0.5: per-rule severity overrides + per-path disable.
+	combined = ApplyPolicy(combined, o.Policy)
 
 	sort.SliceStable(combined, func(i, j int) bool {
 		if combined[i].Severity != combined[j].Severity {

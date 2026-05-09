@@ -28,6 +28,9 @@ type analyzeFlags struct {
 	since        string // --since=<git-ref>: analyze only files changed since this ref
 	baseline     string // --baseline=<path>: suppress findings already in this baseline
 	saveBaseline string // --save-baseline=<path>: write current findings as a new baseline
+
+	// Phase 0.5 — operational trust.
+	policy string // --policy=<path>: load .shingan.yaml severity policy; "" = auto-discover
 }
 
 // newAnalyzeCmd builds and returns the cobra.Command for "shingan analyze".
@@ -62,6 +65,7 @@ Exit codes:
 	cmd.Flags().StringVar(&flags.since, "since", "", "Git ref (e.g. main, v0.4.0); analyze only files changed since this ref")
 	cmd.Flags().StringVar(&flags.baseline, "baseline", "", "Path to baseline JSON; findings already present are suppressed")
 	cmd.Flags().StringVar(&flags.saveBaseline, "save-baseline", "", "Path to write current findings as a new baseline JSON")
+	cmd.Flags().StringVar(&flags.policy, "policy", "", "Path to .shingan.yaml policy file (severity overrides + per-path disable). Default: walk up from CWD looking for .shingan.yaml")
 
 	_ = cmd.MarkFlagRequired("input")
 
@@ -142,6 +146,24 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 	rules := analyzerFactory.CreateAll()
 
 	orchestrator := application.NewAnalysisOrchestrator()
+
+	// Load policy: explicit --policy flag wins; otherwise walk up from
+	// CWD looking for .shingan.yaml. Failures are non-fatal — analysis
+	// proceeds with rule defaults if the policy file is malformed.
+	policyPath := flags.policy
+	if policyPath == "" {
+		if discovered, _ := application.DiscoverPolicy(""); discovered != "" {
+			policyPath = discovered
+		}
+	}
+	if policyPath != "" {
+		if loaded, err := application.LoadPolicy(policyPath); err == nil && loaded != nil {
+			orchestrator.Policy = loaded
+		} else if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not load policy %q: %v\n", policyPath, err)
+		}
+	}
+
 	findings := orchestrator.AnalyzeMulti(inputs, rules)
 
 	// 4a. Apply --since at the FINDING level. With per-file graphs we now
