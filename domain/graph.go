@@ -127,6 +127,16 @@ type Node struct {
 	// parsers preserve the "pos" field from input if present. Consumers should
 	// use SourcePos.IsZero to gate position-aware behavior.
 	Pos SourcePos `json:"pos,omitempty"`
+	// HasExitBranch is set by parsers when the source code structurally
+	// declares an exit from this node — e.g. a LangGraph
+	// `add_edge(node, END)`, a `Literal[END, …]` router return, or a
+	// `Command(goto=END)` body return. The flag carries
+	// framework-agnostic meaning ("the framework will exit the workflow
+	// from here under at least one branch") so cycle_detection and
+	// similar rules can downgrade structural cycles whose only exit is
+	// via a sentinel. Typed field rather than a Config map key so domain
+	// rules don't depend on a parser-private string contract.
+	HasExitBranch bool `json:"has_exit_branch,omitempty"`
 }
 
 // Edge represents a directed connection between two nodes.

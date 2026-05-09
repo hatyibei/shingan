@@ -597,6 +597,7 @@ def _build_graph(graph_obj: Any, source_path: str) -> Dict[str, Any]:
         recognise the cycle as bounded — see AST visitor's `_mark_end_branch`."""
         for n in out_nodes:
             if n["id"] == src_id:
+                n["has_exit_branch"] = True
                 n.setdefault("config", {})["has_end_branch"] = True
                 return
 
@@ -746,7 +747,9 @@ def _augment_runtime_graph_with_command_goto(
         for dest in sorted(dests):
             if dest in SENTINELS:
                 # Sentinel destination → mark source exit, no edge.
-                nodes_by_id[node_id].setdefault("config", {})["has_end_branch"] = True
+                n = nodes_by_id[node_id]
+                n["has_exit_branch"] = True
+                n.setdefault("config", {})["has_end_branch"] = True
                 continue
             if dest not in node_ids:
                 continue
@@ -1356,16 +1359,22 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
         nodes (they would falsely satisfy `loop_guard` etc), so any
         source-of-truth for "this node has an exit branch" must live
         on the source node itself. The cycle_detection rule reads
-        `config.has_end_branch` to recognise bounded cycles whose only
+        `Node.HasExitBranch` to recognise bounded cycles whose only
         exit is via END — without this, conditionals that route to
         `Literal[END, "back_to_loop"]` (the most common LangGraph
         human-in-the-loop / reflection idiom) get classified Critical
         despite a structural exit. Dogfood: company-researcher's
         `route_from_reflection`.
+
+        We emit BOTH the typed top-level `has_exit_branch` field
+        (consumed by the Go domain layer) and a `config.has_end_branch`
+        legacy key for ANY downstream tool that may already key on it.
+        Domain rules read the typed field only.
         """
         node_obj = self._graphs[graph_id]["nodes"].get(src)
         if node_obj is None:
             return
+        node_obj["has_exit_branch"] = True
         cfg = node_obj.setdefault("config", {})
         cfg["has_end_branch"] = True
 
@@ -1601,8 +1610,9 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
                 # the source rather than synthesising a fake edge.
                 if dest in self._SENTINELS:
                     if node_name in graph["nodes"]:
-                        cfg = graph["nodes"][node_name].setdefault("config", {})
-                        cfg["has_end_branch"] = True
+                        n = graph["nodes"][node_name]
+                        n["has_exit_branch"] = True
+                        n.setdefault("config", {})["has_end_branch"] = True
                     continue
                 if dest not in graph["nodes"]:
                     continue

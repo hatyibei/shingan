@@ -298,7 +298,7 @@ func TestCycleDetector_DedupeBackEdges(t *testing.T) {
 }
 
 // TestCycleDetector_HasEndBranchExit verifies that a cycle whose source
-// node carries `config.has_end_branch=true` is recognised as bounded
+// node carries `Node.HasExitBranch=true` is recognised as bounded
 // (Warning) rather than structural (Critical). The flag is set by the
 // LangGraph parser when a router function declares `Literal[END, ...]`
 // as its return type — `END` is a sentinel rather than a real node, so
@@ -309,11 +309,9 @@ func TestCycleDetector_DedupeBackEdges(t *testing.T) {
 func TestCycleDetector_HasEndBranchExit(t *testing.T) {
 	g := mustBuild(t, testutil.NewBuilder().
 		AddNode("a", domain.NodeTypeLLM).
-		AddNodeWithConfig("b", domain.NodeTypeLLM, map[string]any{
-			// `b`'s router returns Literal[END, "a"] — the parser sets
-			// has_end_branch=true to surface the sentinel exit.
-			"has_end_branch": true,
-		}).
+		// `b`'s router returns Literal[END, "a"] — the parser sets
+		// HasExitBranch=true to surface the sentinel exit.
+		AddExitNode("b", domain.NodeTypeLLM).
 		AddEdge("a", "b").
 		AddEdge("b", "a").
 		Entry("a"))

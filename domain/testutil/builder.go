@@ -64,6 +64,18 @@ func (b *Builder) AddLoopNode(id string, maxIter int) *Builder {
 	return b.AddNodeWithConfig(id, domain.NodeTypeLoop, map[string]any{"max_iterations": maxIter})
 }
 
+// AddExitNode registers a node and flags it as having a structural exit
+// branch (e.g. a parser-detected `add_edge(node, END)` or
+// `Literal[END, …]` router return). Used by cycle_detection tests to
+// simulate bounded-cycle paths without the parser.
+func (b *Builder) AddExitNode(id string, nodeType domain.NodeType) *Builder {
+	b.AddNode(id, nodeType)
+	if n, ok := b.nodes[id]; ok {
+		n.HasExitBranch = true
+	}
+	return b
+}
+
 // AddConditionNode registers a Condition node with an expression config value.
 func (b *Builder) AddConditionNode(id string, expression string) *Builder {
 	return b.AddNodeWithConfig(id, domain.NodeTypeCondition, map[string]any{"expression": expression})

@@ -229,11 +229,12 @@ type shimGraph struct {
 // shimNode mirrors a single node entry. We keep `pos` as the canonical struct
 // from the domain layer so SourcePos handling stays consistent across parsers.
 type shimNode struct {
-	ID     string            `json:"id"`
-	Name   string            `json:"name"`
-	Type   domain.NodeType   `json:"type"`
-	Config map[string]any    `json:"config"`
-	Pos    *domain.SourcePos `json:"pos"`
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	Type          domain.NodeType   `json:"type"`
+	Config        map[string]any    `json:"config"`
+	Pos           *domain.SourcePos `json:"pos"`
+	HasExitBranch bool              `json:"has_exit_branch"`
 }
 
 // decodeShimGraph converts the raw JSON RPC result from the shim into a
@@ -262,10 +263,11 @@ func decodeShimGraph(raw json.RawMessage) (*domain.WorkflowGraph, error) {
 	}
 	for _, n := range rawNodes {
 		dn := &domain.Node{
-			ID:     n.ID,
-			Name:   n.Name,
-			Type:   n.Type,
-			Config: n.Config,
+			ID:            n.ID,
+			Name:          n.Name,
+			Type:          n.Type,
+			Config:        n.Config,
+			HasExitBranch: n.HasExitBranch,
 		}
 		if n.Pos != nil {
 			dn.Pos = *n.Pos

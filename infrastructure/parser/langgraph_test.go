@@ -532,6 +532,45 @@ graph = g.compile()
 	}
 }
 
+// TestLangGraphParser_EndSentinelExit verifies the full
+// shim → JSON wire → Go parser → domain.Node.HasExitBranch pipeline.
+//
+// The cycle planner ↔ reviewer has its only structural exit through
+// the END sentinel. The Python shim must emit `has_exit_branch=true`
+// on `reviewer`, the Go parser must deserialise that into
+// `domain.Node.HasExitBranch`, and the cycle_detection rule must
+// honour it as a bounded-cycle exit. Without any one link in this
+// chain the cycle gets misclassified as a Critical structural cycle.
+//
+// This is the integration test the unit test
+// `TestCycleDetector_HasEndBranchExit` cannot provide on its own —
+// the unit test sets the field directly via Builder, so a regression
+// in the wire-format key (e.g. shim writes a different JSON name)
+// would silently leave the typed field zero-valued.
+func TestLangGraphParser_EndSentinelExit(t *testing.T) {
+	requirePythonLangGraph(t)
+	dir := findTestdataDir(t)
+
+	p, err := parser.NewLangGraphParser(parser.WithLangGraphScriptPath(findShim(t)))
+	if err != nil {
+		t.Fatalf("NewLangGraphParser: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	graph, err := p.ParseFile(filepath.Join(dir, "end_sentinel_exit.py"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+
+	reviewer, ok := graph.Nodes["reviewer"]
+	if !ok {
+		t.Fatalf("expected `reviewer` node; got: %v", nodeIDList(graph))
+	}
+	if !reviewer.HasExitBranch {
+		t.Errorf("expected reviewer.HasExitBranch=true (END sentinel exit must propagate from shim through wire to typed field)")
+	}
+}
+
 // nodeIDList returns the sorted node ID slice for diagnostic messages.
 func nodeIDList(g *domain.WorkflowGraph) []string {
 	out := make([]string, 0, len(g.Nodes))
