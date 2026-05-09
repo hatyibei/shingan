@@ -198,8 +198,13 @@ func TestGenerateCycleGraph_ReturnsValidGraph(t *testing.T) {
 func TestGenerateCycleGraph_TriggersCycleDetection(t *testing.T) {
 	g := testutil.GenerateCycleGraph(4, 42)
 	findings := runAllRules(g)
-	if !hasFinding(findings, "cycle_detection", domain.Critical) {
-		t.Error("expected cycle_detection Critical finding")
+	// GenerateCycleGraph creates a cycle PLUS an exit edge to an output
+	// sink (matching the canonical LangGraph "tool-calling agent" shape).
+	// Per the v0.8.5 cycle_detection refinement (langchain factory.py +
+	// agno cookbook dogfood), bounded cycles with an exit branch
+	// downgrade Critical → Warning.
+	if !hasFinding(findings, "cycle_detection", domain.Warning) {
+		t.Error("expected cycle_detection Warning finding (cycle has an exit edge)")
 	}
 }
 

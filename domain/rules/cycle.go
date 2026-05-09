@@ -137,6 +137,52 @@ func (c *CycleDetector) findParentControl(graph *domain.WorkflowGraph, path []st
 	return nil
 }
 
+// cycleHasExit reports whether the cycle reachable from cycleNodeID has
+// any outgoing edge that leaves the cycle's strongly-connected
+// component. The set of "in-cycle" nodes is approximated by the
+// segment of `path` from cycleNodeID's first occurrence onward —
+// these are the nodes on the current DFS ancestor stack that close
+// back to cycleNodeID.
+//
+// An exit exists when any in-cycle node has an outgoing edge whose
+// destination is NOT also in-cycle. This is the structural shape of
+// a "tool-calling agent" pattern: chatbot → conditional({tools, END})
+// → tools → chatbot, where the conditional's "END" branch is the
+// exit. The cycle is bounded at runtime by the conditional's
+// decision plus the framework's `recursion_limit` default.
+func (c *CycleDetector) cycleHasExit(graph *domain.WorkflowGraph, cycleNodeID string, path []string) bool {
+	if graph == nil {
+		return false
+	}
+	cycleSet := make(map[string]bool)
+	startIdx := -1
+	for i, id := range path {
+		if id == cycleNodeID {
+			startIdx = i
+			break
+		}
+	}
+	if startIdx < 0 {
+		// Self-loop — cycleNodeID points at itself. Single-node "cycle".
+		cycleSet[cycleNodeID] = true
+	} else {
+		for i := startIdx; i < len(path); i++ {
+			cycleSet[path[i]] = true
+		}
+		// The cycle closes back to cycleNodeID; ensure it's in the set.
+		cycleSet[cycleNodeID] = true
+	}
+	for _, e := range graph.Edges {
+		if !cycleSet[e.From] {
+			continue
+		}
+		if !cycleSet[e.To] {
+			return true
+		}
+	}
+	return false
+}
+
 // evaluateCycle inspects the cycle-entry node and produces an appropriate Finding.
 // path is the DFS ancestor stack at the point the back-edge was discovered.
 func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID string, path []string) domain.Finding {
@@ -195,7 +241,30 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 			// max_iterations is set and < 100 — safe loop, no finding.
 			return domain.Finding{}
 		}
-		// No parent Loop/Control found — genuine graph definition error.
+		// No parent Loop/Control found. Check whether the cycle has an
+		// exit branch — i.e. some node in the cycle has an outgoing edge
+		// to a target outside the cycle (typically a conditional `END`
+		// branch in LangGraph's tool-calling agent pattern). If so, the
+		// cycle is bounded by runtime (the conditional eventually picks
+		// the exit branch, plus framework `recursion_limit` defaults), so
+		// downgrade Critical → Warning. Without an exit, the cycle is
+		// genuinely unbounded → keep Critical.
+		if hasExit := c.cycleHasExit(graph, cycleNodeID, path); hasExit {
+			return domain.Finding{
+				RuleName: c.Name(),
+				Severity: domain.Warning,
+				NodeID:   cycleNodeID,
+				Message: fmt.Sprintf(
+					"bounded cycle through non-Loop node %q (type=%v): the cycle has an exit branch, but no explicit max_iterations / recursion_limit guard",
+					cycleNodeID, node.Type,
+				),
+				Suggestion: "The cycle is bounded by a conditional exit (typical LangGraph tool-calling agent pattern). " +
+					"Consider explicit `max_iterations` on a Loop wrapper or `graph.compile(recursion_limit=...)` " +
+					"to surface the bound at the graph level rather than relying on the framework default.",
+				Confidence:       0.9,
+				ConfidenceReason: domain.ReasonExactStaticMatch,
+			}
+		}
 		return domain.Finding{
 			RuleName: c.Name(),
 			Severity: domain.Critical,
