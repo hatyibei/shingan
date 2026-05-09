@@ -60,7 +60,11 @@ runs:
     - name: Setup Go
       uses: actions/setup-go@v5
       with:
-        go-version: "1.25"
+        # Pin to a patch level that includes the most recent
+        # security fixes. `1.25` floats to whatever setup-go decides;
+        # `1.25.3` enforces the patched build that ships with the
+        # x509 / html/template / net/url fixes (govulncheck baseline).
+        go-version: "1.25.3"
         cache: true
 
     - name: Install Shingan
@@ -71,34 +75,49 @@ runs:
     - name: Run Shingan analyze
       id: analyze
       shell: bash
+      # All `${{ inputs.* }}` values are routed through the env block so
+      # an attacker-controlled value (e.g. `input: foo.py"; curl evil$IFS`)
+      # cannot break out of the shell context. Direct `${{ }}` expansion
+      # inside `run:` is template-time substitution — values with `"`,
+      # `$()`, backticks etc. become live shell tokens. Threading them
+      # through `env:` keeps the values as opaque strings.
+      env:
+        INPUT_FORMAT:        ${{ inputs.format }}
+        INPUT_INPUT:         ${{ inputs.input }}
+        INPUT_OUTPUT:        ${{ inputs.output }}
+        INPUT_OUTPUT_FILE:   ${{ inputs.output-file }}
+        INPUT_BASELINE_FILE: ${{ inputs.baseline-file }}
+        INPUT_SINCE:         ${{ inputs.since }}
+        INPUT_POLICY_FILE:   ${{ inputs.policy-file }}
+        INPUT_FAIL_ON:       ${{ inputs.fail-on }}
       run: |
-        OUT="${{ inputs.output-file }}"
-        if [ -z "$OUT" ] && [ "${{ inputs.output }}" = "sarif" ]; then
+        OUT="$INPUT_OUTPUT_FILE"
+        if [ -z "$OUT" ] && [ "$INPUT_OUTPUT" = "sarif" ]; then
           OUT="shingan.sarif"
         fi
 
-        FLAGS=(--format "${{ inputs.format }}" --input "${{ inputs.input }}" --output "${{ inputs.output }}")
+        FLAGS=(--format "$INPUT_FORMAT" --input "$INPUT_INPUT" --output "$INPUT_OUTPUT")
         if [ -n "$OUT" ]; then
           FLAGS+=(--output-file "$OUT")
         fi
-        if [ -n "${{ inputs.baseline-file }}" ]; then
-          FLAGS+=(--baseline "${{ inputs.baseline-file }}")
+        if [ -n "$INPUT_BASELINE_FILE" ]; then
+          FLAGS+=(--baseline "$INPUT_BASELINE_FILE")
         fi
-        if [ -n "${{ inputs.since }}" ]; then
-          FLAGS+=(--since "${{ inputs.since }}")
+        if [ -n "$INPUT_SINCE" ]; then
+          FLAGS+=(--since "$INPUT_SINCE")
         fi
-        if [ -n "${{ inputs.policy-file }}" ]; then
-          FLAGS+=(--policy "${{ inputs.policy-file }}")
+        if [ -n "$INPUT_POLICY_FILE" ]; then
+          FLAGS+=(--policy "$INPUT_POLICY_FILE")
         fi
 
         # Always also produce a JSON copy so the PR-comment formatter
         # downstream has structured input regardless of the user's
         # primary --output choice.
         JSON_OUT="$RUNNER_TEMP/shingan-findings.json"
-        JSON_FLAGS=(--format "${{ inputs.format }}" --input "${{ inputs.input }}" --output json --output-file "$JSON_OUT")
-        if [ -n "${{ inputs.baseline-file }}" ]; then JSON_FLAGS+=(--baseline "${{ inputs.baseline-file }}"); fi
-        if [ -n "${{ inputs.since }}" ]; then JSON_FLAGS+=(--since "${{ inputs.since }}"); fi
-        if [ -n "${{ inputs.policy-file }}" ]; then JSON_FLAGS+=(--policy "${{ inputs.policy-file }}"); fi
+        JSON_FLAGS=(--format "$INPUT_FORMAT" --input "$INPUT_INPUT" --output json --output-file "$JSON_OUT")
+        if [ -n "$INPUT_BASELINE_FILE" ]; then JSON_FLAGS+=(--baseline "$INPUT_BASELINE_FILE"); fi
+        if [ -n "$INPUT_SINCE" ]; then JSON_FLAGS+=(--since "$INPUT_SINCE"); fi
+        if [ -n "$INPUT_POLICY_FILE" ]; then JSON_FLAGS+=(--policy "$INPUT_POLICY_FILE"); fi
         shingan analyze "${JSON_FLAGS[@]}" >/dev/null 2>&1 || true
 
         set +e
@@ -110,19 +129,23 @@ runs:
         echo "json-output=$JSON_OUT" >> "$GITHUB_OUTPUT"
 
         if [ -f "$JSON_OUT" ]; then
-          COUNT=$(python3 -c "import json;d=json.load(open('$JSON_OUT'));print(d.get('summary',{}).get('total',0))" 2>/dev/null || echo 0)
+          # Python script reads $JSON_OUT via os.environ to avoid string
+          # interpolation injection — even though $JSON_OUT is a fixed
+          # $RUNNER_TEMP path right now, this hardens the call against
+          # accidental future changes.
+          COUNT=$(JSON_OUT="$JSON_OUT" python3 -c 'import json,os;d=json.load(open(os.environ["JSON_OUT"]));print(d.get("summary",{}).get("total",0))' 2>/dev/null || echo 0)
         else
           COUNT=0
         fi
         echo "findings-count=$COUNT" >> "$GITHUB_OUTPUT"
 
         # Fail behavior
-        case "${{ inputs.fail-on }}" in
+        case "$INPUT_FAIL_ON" in
           critical) [ $EC -ge 2 ] && exit 2 || exit 0 ;;
           warning)  [ $EC -ge 1 ] && exit $EC || exit 0 ;;
           info)     exit $EC ;;
           never)    exit 0 ;;
-          *) echo "Invalid fail-on: ${{ inputs.fail-on }}"; exit 3 ;;
+          *) echo "Invalid fail-on: $INPUT_FAIL_ON"; exit 3 ;;
         esac
 
     - name: Post sticky PR comment
@@ -139,7 +162,7 @@ runs:
         case "$MODE" in
           always) ;;
           on-findings)
-            COUNT=$(python3 -c "import json;d=json.load(open('$JSON_OUT'));print(d.get('summary',{}).get('total',0))" 2>/dev/null || echo 0)
+            COUNT=$(JSON_OUT="$JSON_OUT" python3 -c 'import json,os;d=json.load(open(os.environ["JSON_OUT"]));print(d.get("summary",{}).get("total",0))' 2>/dev/null || echo 0)
             [ "$COUNT" = "0" ] && { echo "no findings; skipping PR comment"; exit 0; }
             ;;
           on-failure)
