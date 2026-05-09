@@ -33,6 +33,18 @@ inputs:
     description: "Optional git ref (e.g. main). When set, only files changed since this ref are analyzed."
     required: false
     default: ""
+  policy-file:
+    description: "Optional path to .shingan.yaml policy file. Default: walk up from CWD looking for .shingan.yaml"
+    required: false
+    default: ""
+  pr-comment:
+    description: "Post a sticky markdown comment on the PR summarising findings. Requires `permissions: pull-requests: write` and a pull_request trigger."
+    required: false
+    default: "false"
+  pr-comment-mode:
+    description: "Controls when the PR comment is posted: 'always' / 'on-findings' (only when total>0) / 'on-failure' (only when fail-on threshold tripped)."
+    required: false
+    default: "on-findings"
 
 outputs:
   exit-code:
@@ -75,6 +87,19 @@ runs:
         if [ -n "${{ inputs.since }}" ]; then
           FLAGS+=(--since "${{ inputs.since }}")
         fi
+        if [ -n "${{ inputs.policy-file }}" ]; then
+          FLAGS+=(--policy "${{ inputs.policy-file }}")
+        fi
+
+        # Always also produce a JSON copy so the PR-comment formatter
+        # downstream has structured input regardless of the user's
+        # primary --output choice.
+        JSON_OUT="$RUNNER_TEMP/shingan-findings.json"
+        JSON_FLAGS=(--format "${{ inputs.format }}" --input "${{ inputs.input }}" --output json --output-file "$JSON_OUT")
+        if [ -n "${{ inputs.baseline-file }}" ]; then JSON_FLAGS+=(--baseline "${{ inputs.baseline-file }}"); fi
+        if [ -n "${{ inputs.since }}" ]; then JSON_FLAGS+=(--since "${{ inputs.since }}"); fi
+        if [ -n "${{ inputs.policy-file }}" ]; then JSON_FLAGS+=(--policy "${{ inputs.policy-file }}"); fi
+        shingan analyze "${JSON_FLAGS[@]}" >/dev/null 2>&1 || true
 
         set +e
         shingan analyze "${FLAGS[@]}"
@@ -82,6 +107,14 @@ runs:
         set -e
 
         echo "exit-code=$EC" >> "$GITHUB_OUTPUT"
+        echo "json-output=$JSON_OUT" >> "$GITHUB_OUTPUT"
+
+        if [ -f "$JSON_OUT" ]; then
+          COUNT=$(python3 -c "import json;d=json.load(open('$JSON_OUT'));print(d.get('summary',{}).get('total',0))" 2>/dev/null || echo 0)
+        else
+          COUNT=0
+        fi
+        echo "findings-count=$COUNT" >> "$GITHUB_OUTPUT"
 
         # Fail behavior
         case "${{ inputs.fail-on }}" in
@@ -91,3 +124,74 @@ runs:
           never)    exit 0 ;;
           *) echo "Invalid fail-on: ${{ inputs.fail-on }}"; exit 3 ;;
         esac
+
+    - name: Post sticky PR comment
+      if: ${{ always() && inputs.pr-comment == 'true' && github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        JSON_OUT: ${{ steps.analyze.outputs.json-output }}
+        EC: ${{ steps.analyze.outputs.exit-code }}
+        MODE: ${{ inputs.pr-comment-mode }}
+        REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+      run: |
+        case "$MODE" in
+          always) ;;
+          on-findings)
+            COUNT=$(python3 -c "import json;d=json.load(open('$JSON_OUT'));print(d.get('summary',{}).get('total',0))" 2>/dev/null || echo 0)
+            [ "$COUNT" = "0" ] && { echo "no findings; skipping PR comment"; exit 0; }
+            ;;
+          on-failure)
+            [ "$EC" = "0" ] && { echo "no failure; skipping PR comment"; exit 0; }
+            ;;
+          *) echo "Invalid pr-comment-mode: $MODE"; exit 3 ;;
+        esac
+
+        MARKER="<!-- shingan-pr-comment-marker -->"
+        BODY="$RUNNER_TEMP/shingan-pr-body.md"
+        {
+          echo "$MARKER"
+          echo "## 🔍 Shingan static analysis"
+          echo
+          if [ -f "$JSON_OUT" ]; then
+            python3 - "$JSON_OUT" <<'PY'
+        import json, sys
+        with open(sys.argv[1]) as fp: d = json.load(fp)
+        s = d.get('summary', {}); total = s.get('total', 0)
+        if total == 0:
+            print('✅ **No findings.**'); sys.exit(0)
+        crit, warn, info = s.get('critical',0), s.get('warning',0), s.get('info',0)
+        print(f'**Summary**: {total} findings — {crit} Critical · {warn} Warning · {info} Info')
+        print()
+        findings = d.get('findings', [])
+        top = findings[:10]
+        if top:
+            print('| Severity | Rule | Node | Confidence | File:Line |')
+            print('|---|---|---|---|---|')
+            for f in top:
+                pos = f.get('pos') or {}
+                file = pos.get('file') or f.get('source_file') or ''
+                line = pos.get('line') or 0
+                src = f"{file}:{line}" if line else file
+                conf = int(f.get('confidence', 0) * 100)
+                print(f"| {f['severity']} | `{f['rule']}` | `{f['node_id'][:48]}` | {conf}% | `{src}` |")
+            if len(findings) > 10:
+                print(f"\n…and {len(findings)-10} more — see the workflow log.")
+        PY
+          else
+            echo "_(no JSON output — see the workflow logs)_"
+          fi
+          echo
+          echo "<sub>Posted by [shingan](https://github.com/hatyibei/shingan) · use [\`# shingan: ignore <rule>\`](https://github.com/hatyibei/shingan/blob/main/docs/ignore-comments.md) to suppress an individual finding · [\`.shingan.yaml\`](https://github.com/hatyibei/shingan/blob/main/docs/severity-policy.md) for repo-level overrides</sub>"
+        } > "$BODY"
+
+        EXISTING=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+          --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" | head -1)
+        if [ -n "$EXISTING" ]; then
+          gh api -X PATCH "repos/$REPO/issues/comments/$EXISTING" -F "body=@$BODY"
+          echo "Updated existing PR comment $EXISTING"
+        else
+          gh api -X POST "repos/$REPO/issues/$PR/comments" -F "body=@$BODY"
+          echo "Posted new PR comment"
+        fi
