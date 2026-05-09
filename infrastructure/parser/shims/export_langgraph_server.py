@@ -877,6 +877,12 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
         self._edges: list[Dict[str, Any]] = []
         self._entry: str = ""
         self._source_path = source_path
+        # Per-call unique counter so multiple `add_node(<runtime_var>, …)`
+        # calls in the same file don't all collapse to a single
+        # `<dynamic>` ID — that produced false-positive cycle_detection
+        # findings on langchain's own factory.py (dogfood) where the
+        # collapsed self-loop wasn't real.
+        self._dyn_counter: int = 0
 
     def visit_Assign(self, node: _ast.Assign) -> None:
         # Detect `<name> = StateGraph(...)`.
@@ -992,9 +998,12 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
         if not node.args:
             return
         # add_node("name", fn) OR add_node(fn) (1-arg sugar where fn.__name__
-        # is the name in newer langgraph).
+        # is the name in newer langgraph). Non-literal name args get a
+        # PER-CALL unique placeholder so we don't collapse N distinct
+        # `add_node(state.var, fn_n)` calls onto one `<dynamic>` node and
+        # invent self-cycles between them.
         if len(node.args) >= 2:
-            name = self._str_arg(node.args[0]) or "<dynamic>"
+            name = self._str_arg(node.args[0]) or self._next_dynamic_name()
             ntype = self._node_type_for(node.args[1])
             self._ensure_node(name, ntype)
         else:
@@ -1005,14 +1014,25 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
                 name = fn.id
             elif isinstance(fn, _ast.Attribute):
                 name = fn.attr
-            self._ensure_node(name or "<dynamic>", self._node_type_for(fn))
+            if not name:
+                name = self._next_dynamic_name()
+            self._ensure_node(name, self._node_type_for(fn))
+
+    def _next_dynamic_name(self) -> str:
+        self._dyn_counter += 1
+        return f"<dynamic_{self._dyn_counter}>"
 
     def _handle_add_edge(self, node: _ast.Call) -> None:
         if len(node.args) < 2:
             return
         src_arg, dst_arg = node.args[0], node.args[1]
-        src = self._sentinel_arg(src_arg) or self._str_arg(src_arg) or "<dynamic>"
-        dst = self._sentinel_arg(dst_arg) or self._str_arg(dst_arg) or "<dynamic>"
+        src = self._sentinel_arg(src_arg) or self._str_arg(src_arg)
+        dst = self._sentinel_arg(dst_arg) or self._str_arg(dst_arg)
+        # Skip edges whose endpoints aren't string literals — we can't
+        # know what they connect, and inventing a synthetic placeholder
+        # creates false-positive cycles (langchain factory.py dogfood).
+        if src is None or dst is None:
+            return
         if src in self._SENTINELS:
             # START → user-node: the user-node becomes the entry. Drop the edge.
             if dst not in self._SENTINELS and not self._entry:
@@ -1031,7 +1051,11 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
         if len(node.args) < 2:
             return
         src_arg = node.args[0]
-        src = self._sentinel_arg(src_arg) or self._str_arg(src_arg) or "<dynamic>"
+        src = self._sentinel_arg(src_arg) or self._str_arg(src_arg)
+        # Skip when the source isn't a string literal — same false-cycle
+        # rationale as _handle_add_edge.
+        if src is None:
+            return
         if src in self._SENTINELS:
             return
         self._ensure_node(src, "llm")
