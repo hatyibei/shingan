@@ -380,8 +380,33 @@ def _extract_nodes(graph: Any) -> Dict[str, Any]:
 
 
 def _extract_edges(graph: Any) -> Any:
-    """Return edges container in whichever form langgraph happens to use."""
-    return _read_field(graph, "edges", "_edges", "__edges")
+    """Return edges container, merging the fan-in `waiting_edges` set
+    when present.
+
+    LangGraph stores standard 1:1 edges in `.edges` and the
+    `add_edge(["a", "b"], "c")` fan-in form in `.waiting_edges`
+    (entries shaped `((src1, src2), dst)`). Without merging the two,
+    the runtime path treated fan-in joins as missing and the
+    downstream join node looked unreachable. Dogfood:
+    langgraph/libs/langgraph/bench/wide_state.py.
+    """
+    edges = _read_field(graph, "edges", "_edges", "__edges")
+    waiting = _read_field(graph, "waiting_edges")
+    if waiting is None:
+        return edges
+    merged = []
+    if isinstance(edges, (set, list, tuple)):
+        merged.extend(edges)
+    elif isinstance(edges, dict):
+        for s, dsts in edges.items():
+            if isinstance(dsts, (list, tuple, set)):
+                for d in dsts:
+                    merged.append((s, d))
+            else:
+                merged.append((s, dsts))
+    if isinstance(waiting, (set, list, tuple)):
+        merged.extend(waiting)
+    return merged
 
 
 def _extract_branches(graph: Any) -> Dict[str, Any]:
@@ -413,19 +438,34 @@ def _node_handler(spec: Any) -> Any:
     return spec
 
 
-def _normalise_edge(edge: Any) -> Optional[Tuple[str, str]]:
-    """Coerce miscellaneous edge representations into ``(from, to)`` tuples."""
+def _normalise_edge(edge: Any) -> Optional[list[Tuple[str, str]]]:
+    """Coerce miscellaneous edge representations into ``[(from, to), …]``.
+
+    Returns a LIST so the LangGraph fan-in form
+    `add_edge(["a", "b"], "c")` — internally stored as
+    `(("a", "b"), "c")` — expands to multiple `(from, to)` pairs
+    rather than producing a single bogus edge with a tuple-string
+    source like `"('a', 'b')"`. Single-source edges still come back
+    as a length-1 list.
+    """
     if isinstance(edge, tuple) and len(edge) == 2:
-        return str(edge[0]), str(edge[1])
+        a, b = edge
+        if isinstance(a, (list, tuple)):
+            return [(str(s), str(b)) for s in a]
+        return [(str(a), str(b))]
     if isinstance(edge, dict):
         a = edge.get("source") or edge.get("from") or edge.get("start")
         b = edge.get("target") or edge.get("to") or edge.get("end")
         if a and b:
-            return str(a), str(b)
+            if isinstance(a, (list, tuple)):
+                return [(str(s), str(b)) for s in a]
+            return [(str(a), str(b))]
     a = getattr(edge, "source", None) or getattr(edge, "from_", None) or getattr(edge, "start", None)
     b = getattr(edge, "target", None) or getattr(edge, "to", None) or getattr(edge, "end", None)
     if a and b:
-        return str(a), str(b)
+        if isinstance(a, (list, tuple)):
+            return [(str(s), str(b)) for s in a]
+        return [(str(a), str(b))]
     return None
 
 
@@ -593,11 +633,11 @@ def _build_graph(graph_obj: Any, source_path: str) -> Dict[str, Any]:
         edges_iter = []
 
     for raw_edge in edges_iter:
-        pair = _normalise_edge(raw_edge)
-        if pair is None:
+        pairs = _normalise_edge(raw_edge)
+        if pairs is None:
             continue
-        src, dst = pair
-        _push_edge(_node_id(src), _node_id(dst))
+        for src, dst in pairs:
+            _push_edge(_node_id(src), _node_id(dst))
 
     # Conditional branches → over-approximated edges.
     # Each branch maps source → list of (return-value → target-name) entries.
@@ -1395,30 +1435,45 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
         if len(node.args) < 2:
             return
         src_arg, dst_arg = node.args[0], node.args[1]
-        src = self._sentinel_arg(src_arg) or self._str_arg(src_arg)
+        # LangGraph fan-in form: `add_edge(["a", "b"], "c")` produces
+        # edges {a → c, b → c}. Dogfood (langgraph/libs/langgraph/bench/
+        # wide_state.py): without list-src support `five` and `six`
+        # showed up as `unreachable_node` because the join node was
+        # only reachable via the list form.
+        srcs: list[str] = []
+        if isinstance(src_arg, (_ast.List, _ast.Tuple)):
+            for elt in src_arg.elts:
+                v = self._sentinel_arg(elt) or self._str_arg(elt)
+                if v is not None:
+                    srcs.append(v)
+        else:
+            v = self._sentinel_arg(src_arg) or self._str_arg(src_arg)
+            if v is not None:
+                srcs.append(v)
         dst = self._sentinel_arg(dst_arg) or self._str_arg(dst_arg)
         # Skip edges whose endpoints aren't string literals — we can't
         # know what they connect, and inventing a synthetic placeholder
         # creates false-positive cycles (langchain factory.py dogfood).
-        if src is None or dst is None:
+        if not srcs or dst is None:
             return
         graph = self._graphs[graph_id]
-        if src in self._SENTINELS:
-            # START → user-node: the user-node becomes the entry. Drop the edge.
-            if dst not in self._SENTINELS and not graph["entry"]:
-                graph["entry"] = dst
-                self._ensure_node(graph_id, dst, "llm")
-            return
-        if dst in self._SENTINELS:
-            # User-node → END: drop the edge but mark the source as
-            # having an explicit END branch so cycle_detection can
-            # recognise the cycle as bounded.
+        for src in srcs:
+            if src in self._SENTINELS:
+                # START → user-node: the user-node becomes the entry. Drop the edge.
+                if dst not in self._SENTINELS and not graph["entry"]:
+                    graph["entry"] = dst
+                    self._ensure_node(graph_id, dst, "llm")
+                continue
+            if dst in self._SENTINELS:
+                # User-node → END: drop the edge but mark the source as
+                # having an explicit END branch so cycle_detection can
+                # recognise the cycle as bounded.
+                self._ensure_node(graph_id, src, "llm")
+                self._mark_end_branch(graph_id, src)
+                continue
             self._ensure_node(graph_id, src, "llm")
-            self._mark_end_branch(graph_id, src)
-            return
-        self._ensure_node(graph_id, src, "llm")
-        self._ensure_node(graph_id, dst, "llm")
-        graph["edges"].append({"from": src, "to": dst})
+            self._ensure_node(graph_id, dst, "llm")
+            graph["edges"].append({"from": src, "to": dst})
 
     def _handle_add_conditional(self, graph_id: str, node: _ast.Call) -> None:
         if len(node.args) < 2:

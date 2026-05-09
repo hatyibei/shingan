@@ -481,6 +481,57 @@ func TestLangGraphParser_ConditionalRouterLiteral(t *testing.T) {
 	}
 }
 
+// TestLangGraphParser_FanInListSrc verifies that
+// `builder.add_edge(["a", "b"], "c")` produces edges {a→c, b→c}.
+//
+// Dogfood: langgraph/libs/langgraph/bench/wide_state.py uses this
+// fan-in idiom on its `["three", "four"] → "five"` join. Before the
+// list-src fix the source list was treated as non-literal and the
+// edge dropped, leaving `five` and `six` apparently unreachable.
+func TestLangGraphParser_FanInListSrc(t *testing.T) {
+	requirePythonLangGraph(t)
+
+	src := `from langgraph.graph import StateGraph, START, END
+
+def fn(state): return state
+
+g = StateGraph(dict)
+g.add_node("a", fn)
+g.add_node("b", fn)
+g.add_node("c", fn)
+g.add_edge(START, "a")
+g.add_edge(START, "b")
+g.add_edge(["a", "b"], "c")
+g.add_edge("c", END)
+graph = g.compile()
+`
+	p, err := parser.NewLangGraphParser()
+	if err != nil {
+		t.Fatalf("NewLangGraphParser: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	wfg, err := p.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	hasEdge := func(from, to string) bool {
+		for _, e := range wfg.Edges {
+			if e.From == from && e.To == to {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasEdge("a", "c") {
+		t.Errorf("expected edge a→c (fan-in expansion); edges: %+v", wfg.Edges)
+	}
+	if !hasEdge("b", "c") {
+		t.Errorf("expected edge b→c (fan-in expansion); edges: %+v", wfg.Edges)
+	}
+}
+
 // nodeIDList returns the sorted node ID slice for diagnostic messages.
 func nodeIDList(g *domain.WorkflowGraph) []string {
 	out := make([]string, 0, len(g.Nodes))
