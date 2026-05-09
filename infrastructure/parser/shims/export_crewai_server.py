@@ -100,13 +100,42 @@ def _crewai_version() -> str:
 
 
 # ----- module loader ---------------------------------------------------------
+def _package_root(path: str) -> str:
+    """Return the first ancestor of `path` that is *not* a Python package.
+
+    A directory is considered a package when it contains `__init__.py`.
+    Walking up and stopping at the first non-package gives us the
+    directory Python's import system needs on `sys.path` for both
+    relative and absolute imports inside the user's package to resolve.
+    """
+    abs_path = os.path.abspath(path)
+    dir_ = os.path.dirname(abs_path)
+    seen = set()
+    while dir_ and dir_ not in seen:
+        seen.add(dir_)
+        init = os.path.join(dir_, "__init__.py")
+        if not os.path.exists(init):
+            return dir_
+        parent = os.path.dirname(dir_)
+        if parent == dir_:
+            return dir_
+        dir_ = parent
+    return os.path.dirname(abs_path)
+
+
 def _import_user_module(path: str) -> types.ModuleType:
+    """Both the immediate file directory AND the package root go on sys.path
+    so absolute self-imports (`from <pkg> import …`) resolve. See
+    docstring on the LangGraph shim's _import_user_module for the rationale.
+    """
     abs_path = os.path.abspath(path)
     src_dir = os.path.dirname(abs_path)
-    inserted = False
-    if src_dir and src_dir not in sys.path:
-        sys.path.insert(0, src_dir)
-        inserted = True
+    pkg_root = _package_root(abs_path)
+    inserted: list[str] = []
+    for d in (pkg_root, src_dir):
+        if d and d not in sys.path:
+            sys.path.insert(0, d)
+            inserted.append(d)
     try:
         spec = importlib.util.spec_from_file_location(
             f"_shingan_user_{abs_path.replace(os.sep, '_')}", abs_path
@@ -117,9 +146,9 @@ def _import_user_module(path: str) -> types.ModuleType:
         spec.loader.exec_module(module)  # type: ignore[union-attr]
         return module
     finally:
-        if inserted:
+        for d in inserted:
             try:
-                sys.path.remove(src_dir)
+                sys.path.remove(d)
             except ValueError:
                 pass
 

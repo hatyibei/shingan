@@ -94,18 +94,52 @@ def _langgraph_version() -> str:
 
 
 # ----- module loader for parse_file / parse_content -------------------------
+def _package_root(path: str) -> str:
+    """Return the first ancestor of `path` that is *not* a Python package.
+
+    A directory is considered a package when it contains `__init__.py`.
+    Walking up and stopping at the first non-package gives us the directory
+    Python's import system needs on `sys.path` for both relative
+    (`from .helpers import X`) and absolute (`from <pkg> import Y`) imports
+    inside the user's package to resolve. Real-world OSS (e.g.
+    `langgraph_supervisor/supervisor.py`, `legacy/graph.py`) almost always
+    sits inside a package — without this, `from <pkg> import …` raises
+    ModuleNotFoundError on the package's own name.
+    """
+    abs_path = os.path.abspath(path)
+    dir_ = os.path.dirname(abs_path)
+    seen = set()
+    while dir_ and dir_ not in seen:
+        seen.add(dir_)
+        init = os.path.join(dir_, "__init__.py")
+        if not os.path.exists(init):
+            return dir_
+        parent = os.path.dirname(dir_)
+        if parent == dir_:
+            return dir_
+        dir_ = parent
+    return os.path.dirname(abs_path)
+
+
 def _import_user_module(path: str) -> types.ModuleType:
     """Load ``path`` as a fresh Python module without polluting sys.modules.
 
-    The directory containing ``path`` is prepended to sys.path so sibling
-    imports work, then restored afterwards.
+    Both the directory containing ``path`` and the package root (the first
+    ancestor without ``__init__.py``) are prepended to ``sys.path`` so:
+      * sibling imports (`from .helpers import X`) resolve via the
+        immediate-parent dir, and
+      * absolute self-imports (`from <package_name> import Y`) resolve
+        via the package root.
+    Both entries are removed on exit so subsequent parses don't leak.
     """
     abs_path = os.path.abspath(path)
     src_dir = os.path.dirname(abs_path)
-    inserted = False
-    if src_dir and src_dir not in sys.path:
-        sys.path.insert(0, src_dir)
-        inserted = True
+    pkg_root = _package_root(abs_path)
+    inserted: list[str] = []
+    for d in (pkg_root, src_dir):
+        if d and d not in sys.path:
+            sys.path.insert(0, d)
+            inserted.append(d)
     try:
         spec = importlib.util.spec_from_file_location(
             f"_shingan_user_{abs_path.replace(os.sep, '_')}", abs_path
@@ -116,9 +150,9 @@ def _import_user_module(path: str) -> types.ModuleType:
         spec.loader.exec_module(module)  # type: ignore[union-attr]
         return module
     finally:
-        if inserted:
+        for d in inserted:
             try:
-                sys.path.remove(src_dir)
+                sys.path.remove(d)
             except ValueError:
                 pass
 
