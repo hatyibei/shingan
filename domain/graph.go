@@ -34,7 +34,7 @@ const (
 var nodeTypeStrings = map[string]NodeType{
 	"llm":       NodeTypeLLM,
 	"tool":      NodeTypeTool,
-	"control":   NodeTypeLoop,   // backward-compat: "control" → Loop
+	"control":   NodeTypeLoop, // backward-compat: "control" → Loop
 	"human":     NodeTypeHuman,
 	"output":    NodeTypeOutput,
 	"loop":      NodeTypeLoop,

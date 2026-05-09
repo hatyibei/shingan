@@ -38,9 +38,9 @@ type LangGraphParser struct {
 type LangGraphOption func(*langGraphConfig)
 
 type langGraphConfig struct {
-	scriptPath   string
-	pythonBin    string
-	workerOpts   []PythonWorkerOption
+	scriptPath     string
+	pythonBin      string
+	workerOpts     []PythonWorkerOption
 	existingWorker *PythonWorker
 }
 
@@ -210,10 +210,10 @@ var errLangGraphMissing = fmt.Errorf(
 // We accept and ignore unknown keys so future shim versions can add fields
 // without breaking the Go side.
 type shimGraphMetadata struct {
-	SourceFormat            string `json:"source_format,omitempty"`
-	SourceFile              string `json:"source_file,omitempty"`
-	LangGraphVersion        string `json:"langgraph_version,omitempty"`
-	ConditionalEdgeReason   string `json:"conditional_edge_reason,omitempty"`
+	SourceFormat          string `json:"source_format,omitempty"`
+	SourceFile            string `json:"source_file,omitempty"`
+	LangGraphVersion      string `json:"langgraph_version,omitempty"`
+	ConditionalEdgeReason string `json:"conditional_edge_reason,omitempty"`
 }
 
 // shimGraph is the on-wire shape produced by `_build_graph` in the shim.
