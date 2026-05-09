@@ -57,3 +57,7 @@ scripts/screenshots/shingan-web-log-tail.txt
 
 # shingan-web binary (auto-built)
 /shingan-web
+
+# Runtime logs from gpt-researcher dogfood etc.
+/logs/
+*.log
