@@ -99,8 +99,8 @@ func TestCreate_RedundantLLMCall(t *testing.T) {
 func TestCreateAll_ReturnsTwentyRules(t *testing.T) {
 	f := factory.NewAnalyzerFactory()
 	all := f.CreateAll()
-	if len(all) != 21 {
-		t.Fatalf("expected 21 rules, got %d", len(all))
+	if len(all) != 22 {
+		t.Fatalf("expected 22 rules, got %d", len(all))
 	}
 }
 
@@ -130,6 +130,7 @@ func TestCreateAll_ContainsExpectedNames(t *testing.T) {
 		"secret_in_prompt_template": false,
 		"missing_eval_dataset":      false,
 		"human_gate_missing":        false,
+		"tool_description_missing":  false,
 	}
 
 	for _, rule := range all {
