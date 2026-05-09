@@ -552,13 +552,22 @@ def _build_graph(graph_obj: Any, source_path: str) -> Dict[str, Any]:
         if not entry_node_id:
             entry_node_id = target_id
 
+    def _mark_runtime_end_branch(src_id: str) -> None:
+        """Source-node has an explicit END branch. Lets cycle_detection
+        recognise the cycle as bounded — see AST visitor's `_mark_end_branch`."""
+        for n in out_nodes:
+            if n["id"] == src_id:
+                n.setdefault("config", {})["has_end_branch"] = True
+                return
+
     def _push_edge(src: str, dst: str, condition: str = "") -> None:
         # START → user-node: mark entry, drop the edge.
         if src == LANGGRAPH_START:
             _record_entry(dst)
             return
-        # User-node → END: drop the edge entirely (END is implicit).
+        # User-node → END: drop the edge but mark exit on source.
         if dst == LANGGRAPH_END:
+            _mark_runtime_end_branch(src)
             return
         # Defensive: skip START/END appearing on the wrong side too.
         if src == LANGGRAPH_END or dst == LANGGRAPH_START:
@@ -683,8 +692,10 @@ def _augment_runtime_graph_with_command_goto(
     if not handler_to_fn:
         return
     node_ids = {n["id"] for n in payload.get("nodes", [])}
+    nodes_by_id = {n["id"]: n for n in payload.get("nodes", [])}
     existing_edges = {(e["from"], e["to"]) for e in payload.get("edges", [])}
     added = 0
+    SENTINELS = ("START", "END", "__start__", "__end__")
     for node_id in node_ids:
         fn_name = handler_to_fn.get(node_id)
         if not fn_name:
@@ -693,6 +704,10 @@ def _augment_runtime_graph_with_command_goto(
         if not dests:
             continue
         for dest in sorted(dests):
+            if dest in SENTINELS:
+                # Sentinel destination → mark source exit, no edge.
+                nodes_by_id[node_id].setdefault("config", {})["has_end_branch"] = True
+                continue
             if dest not in node_ids:
                 continue
             if (node_id, dest) in existing_edges:
@@ -1049,9 +1064,12 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
                 continue
             dests.update(self._extract_command_dests_from_return(val))
 
-        # Drop sentinels (`__end__`/END/etc) — they don't become real edges.
-        dests = {d for d in dests if d not in self._SENTINELS}
-
+        # Sentinels (END / __end__) ARE kept in the map — downstream
+        # consumers (router_literal lookup, Command(goto=END) edges)
+        # need to see them so they can call `_mark_end_branch` on the
+        # source. They are filtered out only at edge-materialisation
+        # time inside `_handle_add_conditional` and
+        # `_materialize_command_goto_edges`.
         if dests:
             existing = self._command_goto_map.setdefault(fn_node.name, set())
             existing.update(dests)
@@ -1060,10 +1078,16 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
         """Pull `Literal["a","b"]` destinations from `Command[Literal[...]]`.
 
         Also handles `Optional[Command[Literal[...]]]`,
-        `Union[Command[Literal[...]], None]`, and the older
-        `Command[Literal["a"], Literal["b"]]` shape (rare but legal).
+        `Union[Command[Literal[...]], None]`, the older
+        `Command[Literal["a"], Literal["b"]]` shape, and the
+        sentinel-mixed `Literal[END, "back"]` form (where END is the
+        imported identifier `from langgraph.graph import END`). Bare
+        Names matching SENTINELS are surfaced verbatim so the caller
+        can route them through `_mark_end_branch` rather than mistaking
+        them for a real destination.
         """
         out: set[str] = set()
+        elts: list[Any] = []
         for sub in _ast.walk(ann):
             if not isinstance(sub, _ast.Subscript):
                 continue
@@ -1075,17 +1099,20 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
                 base_name = base.attr
             if base_name != "Literal":
                 continue
-            # The slice is the Literal arguments. AST shape differs
-            # across Python 3.8 vs 3.9+ (Index wrapper vs raw).
             slice_node = sub.slice
             if isinstance(slice_node, _ast.Index):  # py3.8 (deprecated)
                 slice_node = slice_node.value  # type: ignore[attr-defined]
             if isinstance(slice_node, _ast.Tuple):
-                for elt in slice_node.elts:
-                    if isinstance(elt, _ast.Constant) and isinstance(elt.value, str):
-                        out.add(elt.value)
-            elif isinstance(slice_node, _ast.Constant) and isinstance(slice_node.value, str):
-                out.add(slice_node.value)
+                elts.extend(slice_node.elts)
+            else:
+                elts.append(slice_node)
+        for elt in elts:
+            if isinstance(elt, _ast.Constant) and isinstance(elt.value, str):
+                out.add(elt.value)
+            elif isinstance(elt, _ast.Name) and elt.id in self._SENTINELS:
+                out.add(elt.id)
+            elif isinstance(elt, _ast.Attribute) and elt.attr in self._SENTINELS:
+                out.add(elt.attr)
         return out
 
     def _extract_command_dests_from_return(self, val: _ast.expr) -> set[str]:
@@ -1248,6 +1275,26 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
             "pos":    {"file": self._source_path, "line": 0, "col": 0},
         }
 
+    def _mark_end_branch(self, graph_id: str, src: str) -> None:
+        """Flag `src` as having a static edge to LangGraph's END sentinel.
+
+        Sentinels (`END` / `__end__`) are not materialised as graph
+        nodes (they would falsely satisfy `loop_guard` etc), so any
+        source-of-truth for "this node has an exit branch" must live
+        on the source node itself. The cycle_detection rule reads
+        `config.has_end_branch` to recognise bounded cycles whose only
+        exit is via END — without this, conditionals that route to
+        `Literal[END, "back_to_loop"]` (the most common LangGraph
+        human-in-the-loop / reflection idiom) get classified Critical
+        despite a structural exit. Dogfood: company-researcher's
+        `route_from_reflection`.
+        """
+        node_obj = self._graphs[graph_id]["nodes"].get(src)
+        if node_obj is None:
+            return
+        cfg = node_obj.setdefault("config", {})
+        cfg["has_end_branch"] = True
+
     def _node_type_for(self, fn: _ast.expr) -> str:
         """Heuristic: handler argument's name → tool/llm classification."""
         name = ""
@@ -1329,8 +1376,11 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
                 self._ensure_node(graph_id, dst, "llm")
             return
         if dst in self._SENTINELS:
-            # User-node → END: drop the edge entirely.
+            # User-node → END: drop the edge but mark the source as
+            # having an explicit END branch so cycle_detection can
+            # recognise the cycle as bounded.
             self._ensure_node(graph_id, src, "llm")
+            self._mark_end_branch(graph_id, src)
             return
         self._ensure_node(graph_id, src, "llm")
         self._ensure_node(graph_id, dst, "llm")
@@ -1389,7 +1439,10 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
                 if dests:
                     graph = self._graphs[graph_id]
                     for dest in sorted(dests):
-                        if dest in self._SENTINELS or not dest:
+                        if not dest:
+                            continue
+                        if dest in self._SENTINELS:
+                            self._mark_end_branch(graph_id, src)
                             continue
                         self._ensure_node(graph_id, dest, "llm")
                         graph["edges"].append({
@@ -1406,6 +1459,7 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
                 if not target:
                     continue
                 if target in self._SENTINELS:
+                    self._mark_end_branch(graph_id, src)
                     continue
                 self._ensure_node(graph_id, target, "llm")
                 edge = {"from": src, "to": target}
@@ -1418,6 +1472,7 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
                 if not target:
                     continue
                 if target in self._SENTINELS:
+                    self._mark_end_branch(graph_id, src)
                     continue
                 self._ensure_node(graph_id, target, "llm")
                 graph["edges"].append({"from": src, "to": target})
@@ -1453,6 +1508,13 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
             if not dests:
                 continue
             for dest in sorted(dests):
+                # Sentinel destination (END / __end__) → mark exit on
+                # the source rather than synthesising a fake edge.
+                if dest in self._SENTINELS:
+                    if node_name in graph["nodes"]:
+                        cfg = graph["nodes"][node_name].setdefault("config", {})
+                        cfg["has_end_branch"] = True
+                    continue
                 if dest not in graph["nodes"]:
                     continue
                 if (node_name, dest) in existing:

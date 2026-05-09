@@ -297,6 +297,57 @@ func TestCycleDetector_DedupeBackEdges(t *testing.T) {
 	}
 }
 
+// TestCycleDetector_HasEndBranchExit verifies that a cycle whose source
+// node carries `config.has_end_branch=true` is recognised as bounded
+// (Warning) rather than structural (Critical). The flag is set by the
+// LangGraph parser when a router function declares `Literal[END, ...]`
+// as its return type — `END` is a sentinel rather than a real node, so
+// without this signal the cycle would look exit-less.
+//
+// Dogfood: company-researcher's `route_from_reflection` ->
+// `Literal[END, "research_company"]`.
+func TestCycleDetector_HasEndBranchExit(t *testing.T) {
+	g := mustBuild(t, testutil.NewBuilder().
+		AddNode("a", domain.NodeTypeLLM).
+		AddNodeWithConfig("b", domain.NodeTypeLLM, map[string]any{
+			// `b`'s router returns Literal[END, "a"] — the parser sets
+			// has_end_branch=true to surface the sentinel exit.
+			"has_end_branch": true,
+		}).
+		AddEdge("a", "b").
+		AddEdge("b", "a").
+		Entry("a"))
+
+	findings := rules.NewCycleDetector().Analyze(g)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d: %+v", len(findings), findings)
+	}
+	if findings[0].Severity != domain.Warning {
+		t.Errorf("severity = %v, want Warning (cycle has END exit branch)", findings[0].Severity)
+	}
+}
+
+// TestCycleDetector_NoEndBranchIsCritical sanity check: identical
+// graph WITHOUT `has_end_branch` stays Critical. Ensures the new
+// signal is what causes the downgrade in the previous test, not some
+// adjacent change.
+func TestCycleDetector_NoEndBranchIsCritical(t *testing.T) {
+	g := mustBuild(t, testutil.NewBuilder().
+		AddNode("a", domain.NodeTypeLLM).
+		AddNode("b", domain.NodeTypeLLM).
+		AddEdge("a", "b").
+		AddEdge("b", "a").
+		Entry("a"))
+
+	findings := rules.NewCycleDetector().Analyze(g)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if findings[0].Severity != domain.Critical {
+		t.Errorf("severity = %v, want Critical (no exit branch)", findings[0].Severity)
+	}
+}
+
 func TestCycleDetector_Confidence(t *testing.T) {
 	// Graph with an unguarded cycle (Loop node, no max_iterations) → Critical finding.
 	g := mustBuild(t, testutil.NewBuilder().

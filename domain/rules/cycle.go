@@ -193,6 +193,26 @@ func (c *CycleDetector) cycleHasExit(graph *domain.WorkflowGraph, cycleNodeID st
 			return true
 		}
 	}
+	// In addition to a structural exit edge, recognise nodes flagged
+	// `config.has_end_branch=true` by the LangGraph parser. END /
+	// `__end__` is a sentinel rather than a real node, so an
+	// `add_conditional_edges("src", router_fn)` returning
+	// `Literal[END, "back_to_loop"]` would otherwise look exit-less.
+	// The parser sets `has_end_branch` on `src` when it encounters any
+	// such sentinel destination so the cycle is correctly classified
+	// as bounded. Dogfood: company-researcher
+	// `route_from_reflection` (Literal[END, "research_company"]).
+	for id := range cycleSet {
+		n, ok := graph.Nodes[id]
+		if !ok || n == nil {
+			continue
+		}
+		if v, ok := n.Config["has_end_branch"]; ok {
+			if b, ok := v.(bool); ok && b {
+				return true
+			}
+		}
+	}
 	return false
 }
 
