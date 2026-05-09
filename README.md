@@ -162,6 +162,40 @@ CI integration (GitHub Actions):
   run: shingan analyze --format adk-go --input ./agents/
 ```
 
+## Real-world LangGraph dogfood (v0.8.5+)
+
+Shingan is run against production LangGraph repos before each release.
+The numbers below are the actual finding counts on `main` (ten dogfood-
+driven analyser refinements between v0.8.4 → v0.8.5+ collapsed FPs
+without sacrificing real defects):
+
+| Repo | File | Findings | Critical | What survives |
+|---|---|---|---|---|
+| [open_deep_research](https://github.com/langchain-ai/open_deep_research) | `legacy/graph.py` | **1** | 0 | one bounded-cycle Warning on `generate_report_plan` (legitimate human-in-the-loop revision pattern bounded only by `recursion_limit`) |
+| [gpt-researcher](https://github.com/assafelovic/gpt-researcher) | `multi_agents/agents/orchestrator.py` | 7 | 0 | bounded cycle through `planner` (researcher exit branch present); 3× `error_handler_checker` on tool nodes |
+| [data-enrichment](https://github.com/langchain-ai/data-enrichment) | `src/enrichment_agent/graph.py` | 3 | 0 | one bounded-cycle Warning on `call_agent_model`; tool-node info |
+| [executive-ai-assistant](https://github.com/langchain-ai/executive-ai-assistant) | `eaia/main/graph.py` | 3 | 0 | bounded cycle on `draft_response`; missing error handling + tool description on `bad_tool_name` |
+| [company-researcher](https://github.com/langchain-ai/company-researcher) | `src/agent/graph.py` | 4 | 0 | bounded cycle on `research_company` (END branch via `route_from_reflection`); 2× error handling, 1× tool description |
+| [langchain-academy](https://github.com/langchain-ai/langchain-academy) | `module-1/studio/agent.py` | 1 | 0 | bounded cycle on `assistant ↔ tools` (canonical LangGraph tool-calling pattern) |
+| [langgraph](https://github.com/langchain-ai/langgraph) | `bench/wide_state.py` | 0 | 0 | clean (parallel fan-in benchmark) |
+
+Idioms surfaced and supported during the v0.8.5+ dogfood loop:
+
+- `Command(goto=...)` and `def fn() -> Command[Literal["a","b"]]` typed dispatch
+- `add_conditional_edges("src", router_fn)` with omitted path_map — router's `-> Literal[...]` annotation read instead
+- `add_conditional_edges` `path_map` as list (`["a","b"]`) and dict (`{"k":"a"}`)
+- `add_edge([a, b], c)` fan-in form
+- Multi-graph composition (`builder.add_node("section", section_builder.compile())`)
+- LangGraph builtin routers (`tools_condition`, with hooks for adding more)
+- `Literal[END, ...]` sentinel exit recognition (cycle severity downgrade Critical → Warning)
+- Generic-exception fallback to AST when modules side-effect at import (`OpenAIError`, missing API keys, etc)
+
+Running the same scan on your fork:
+
+```bash
+shingan analyze --format langgraph --input path/to/graph.py --output markdown
+```
+
 ## Demo on real ADK-Go samples
 
 `examples/real/` ships three samples written against `google.golang.org/adk v1.1.0`. Shingan detects the following findings on each:

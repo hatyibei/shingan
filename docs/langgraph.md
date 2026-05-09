@@ -62,21 +62,29 @@ shingan analyze \
 
 | Feature | Support | Notes |
 |---|---|---|
-| `StateGraph(State)` instance detection | OK | Picks the first instance per module |
-| `add_node(name, fn)` | OK | SourcePos populated via `inspect.getsourcefile/getsourcelines` |
+| `StateGraph(State)` instance detection | OK | Multi-graph aware: when a module defines several StateGraphs, the one passed to `<var>.compile()` (the idiomatic `graph = builder.compile()` at module bottom) wins; falls back to the largest by node count |
+| `add_node(name, fn)` | OK | Single-arg form (`add_node(fn)`, name = `fn.__name__`) and two-arg form both supported. SourcePos populated via `inspect.getsourcefile/getsourcelines` |
 | `add_edge(from, to)` | OK | Static edge |
+| `add_edge([a, b], c)` (fan-in) | OK (v0.8.5+) | LangGraph stores fan-in joins in `waiting_edges` separately from `edges`; the shim merges them and `_normalise_edge` expands `((a, b), c)` to `[(a, c), (b, c)]` |
 | `add_conditional_edges(from, fn, mapping)` | OK (over-approximation) | Each mapping key is recorded as an `Edge.Condition` and every candidate is emitted as an edge |
-| `START` / `END` sentinels | Virtualised (not materialised as nodes) | Treated as pseudo sentinels just like LangGraph itself: the `x` in `add_edge(START, x)` is promoted to `entry_node_id`, and `add_edge(y, END)` is dropped. This is a critical adjustment to keep Shingan's `loop_guard` / `reachability` rules from misfiring (it also avoids the `NodeTypeControl` ⇒ `NodeTypeLoop` backward-compat alias) |
+| `add_conditional_edges(from, fn, ["a", "b"])` (list path_map) | OK (v0.8.5+) | List/tuple shorthand for `path_map`; each element becomes an edge target |
+| `add_conditional_edges(from, fn)` (no path_map) | OK (v0.8.5+) | Reads `fn`'s `-> Literal[...]` return-type annotation to discover destinations. Used by `executive-ai-assistant`'s `route_after_triage`-style routers |
+| `def fn(...) -> Command[Literal["a", "b"]]` | OK (v0.8.5+) | Typed Command return: AST visitor records the destination set when a node's handler is registered, then materialises edges as `condition="command_goto"` |
+| `return Command(goto="x")` (bare) | OK (v0.8.5+) | Untyped Command body: the visitor scans Return statements and harvests string literals from the `goto` kwarg |
+| `tools_condition` (LangGraph builtin) | OK (v0.8.5+) | Hard-coded as `_BUILTIN_ROUTER_LITERALS = {"tools_condition": {"tools", "__end__"}}` so `add_conditional_edges("agent", tools_condition)` resolves correctly even though the function lives in `langgraph.prebuilt` |
+| `START` / `END` sentinels | Virtualised (not materialised as nodes) | The `x` in `add_edge(START, x)` is promoted to `entry_node_id`. `add_edge(y, END)` and any sentinel destination from a router (`Literal[END, ...]`, `Command(goto=END)`, list/dict containing `END`) sets `Node.HasExitBranch=true` on `y` so `cycle_detection` recognises bounded cycles whose only exit is via END |
 | `set_entry_point(...)` / `entry_point` attribute | OK | Falls back to reading the graph object's `entry_point` attribute when `add_edge(START, ...)` cannot supply it |
 | `MessageGraph` / `Graph` subclasses | Partial | Detected by class-name match (with a fallback to private attributes such as `_nodes`) |
 | Graphs constructed via `builder.compile()` | OK | Reaches the StateGraph through the compiled object's `.builder` / `.graph` attribute |
+| Subgraph composition (`builder.add_node("section", section_builder.compile())`) | OK (v0.8.5+) | Each `<var> = StateGraph(...)` owns a separate node/edge namespace; the visitor returns the outer graph (the one whose `<var>.compile()` was the last call), not a flat-merged union |
+| Modules with import-time side-effects | OK (v0.8.5+) | When `import` raises any exception (`OpenAIError`, missing API keys, network calls), the shim falls back to AST-only extraction without executing the module |
 
 ### Unsupported / known limitations
 
-- **Dynamic `add_node` (constructed at runtime)**: graphs that are not assembled by the time the module is imported cannot be detected. Typical LangGraph code constructs the graph at the module top level, so this rarely matters in practice.
-- **Subgraphs (StateGraph as node)**: child graphs are deferred to Phase 2 (ADR-013). Today only the parent StateGraph is expanded.
-- **ReAct's dynamic tool selection**: when `should_continue()` returns a target chosen at runtime, only the candidates enumerated in the mapping appear as edges. If the tool actually invoked is outside the mapping, the parser cannot see it (the over-approximation limit, ADR-013).
-- **Multi-module layouts**: `parse_file` temporarily prepends `os.path.dirname(path)` to `sys.path` for the target `.py`. Imports from other locations depend on the runtime `sys.path`.
+- **Functional API** (`@entrypoint`, `@task`): the new LangGraph 1.x decorator-based API is not yet recognised. Files using `@entrypoint` produce empty graphs.
+- **Dynamic `add_node` (constructed at runtime)**: graphs that are not assembled by the time the module is imported cannot be detected. Most LangGraph code constructs the graph at the module top level or inside an instance method (the AST fallback handles the latter).
+- **ReAct's dynamic tool selection**: when `should_continue()` returns a target chosen at runtime that is outside the type annotation, the parser cannot see it (the over-approximation limit, ADR-013).
+- **Multi-module layouts**: `parse_file` temporarily prepends the package root to `sys.path` for the target `.py`. Imports from other locations depend on the runtime `sys.path`.
 
 ## Confidence and ConfidenceReason
 
