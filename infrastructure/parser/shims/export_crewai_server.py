@@ -964,6 +964,19 @@ def _handle_parse_file(params: Dict[str, Any]) -> Dict[str, Any]:
         if ast_graph is not None and ast_graph["nodes"]:
             return ast_graph
         raise RuntimeError(_missing_dep_message(path, exc))
+    except Exception:  # noqa: BLE001 — symmetry with LangGraph shim
+        # Modules with side-effects at import (LLM client init,
+        # network-touching loaders, deprecated module shims like
+        # `langchain.llms` re-export wrappers) raise non-ModuleNotFound
+        # exceptions before Crew/Agent/Task are in scope. AST fallback
+        # walks the syntax tree without executing the module, so route
+        # through it before giving up. Dogfood: crewAI-examples
+        # crews/instagram_post/main.py raises RuntimeError on
+        # `from langchain.llms import ...` re-export.
+        ast_graph = _try_ast_extract(path=path, source_path=path)
+        if ast_graph is not None and ast_graph["nodes"]:
+            return ast_graph
+        raise
     crew = _find_crew(user_module)
     if crew is None:
         ast_graph = _try_ast_extract(path=path, source_path=path)
@@ -996,6 +1009,11 @@ def _handle_parse_content(params: Dict[str, Any]) -> Dict[str, Any]:
         if ast_graph is not None and ast_graph["nodes"]:
             return ast_graph
         raise RuntimeError(_missing_dep_message(filename, exc))
+    except Exception:  # noqa: BLE001 — symmetry with parse_file
+        ast_graph = _try_ast_extract(content=content, source_path=filename)
+        if ast_graph is not None and ast_graph["nodes"]:
+            return ast_graph
+        raise
     crew = _find_crew(user_module)
     if crew is None:
         ast_graph = _try_ast_extract(content=content, source_path=filename)
