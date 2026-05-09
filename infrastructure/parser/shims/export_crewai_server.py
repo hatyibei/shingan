@@ -660,26 +660,74 @@ def _build_graph(crew: Any, source_path: str) -> Dict[str, Any]:
 
 
 def _find_crew(module: types.ModuleType) -> Any:
-    """Walk module globals to find the first Crew instance.
+    """Walk module globals to find a Crew instance.
 
-    The user can declare:
-        crew = Crew(agents=[...], tasks=[...])
-    or use a factory:
-        def make_crew() -> Crew: ...
-        crew = make_crew()
-
-    We accept either — finding any module-level value that is_crew().
+    Resolution order:
+      1. Module-level Crew instances (`crew = Crew(...)` at top level).
+      2. Module-level objects with `.crew` attribute (CrewBase patterns).
+      3. **Zero-arg factory functions returning Crew** — real-world code
+         (crewAI-examples) constructs the Crew inside `def crew()` /
+         `def make_crew()` rather than at module top level. Try calling
+         such functions; catch all exceptions so a broken factory
+         (missing API key, network call) doesn't kill the worker.
     """
+    # Pass 1: top-level instances + attribute hops.
     for _name, value in vars(module).items():
         if value is module:
             continue
         if _is_crew(value):
             return value
-        # Some helper modules expose an attribute (e.g. obj.crew).
         attr = getattr(value, "crew", None)
         if attr is not None and _is_crew(attr):
             return attr
+
+    # Pass 2: zero-arg factory functions (Codex iter+ via dogfood:
+    # crewAI-examples uses `def crew()` decorator pattern almost universally).
+    for name, value in vars(module).items():
+        if not callable(value) or isinstance(value, type):
+            continue
+        if value is module:
+            continue
+        try:
+            value_module = getattr(value, "__module__", None)
+            if value_module and value_module != module.__name__:
+                continue
+        except Exception:  # noqa: BLE001
+            continue
+        if not _has_only_optional_args(value):
+            continue
+        try:
+            result = value()
+        except Exception:  # noqa: BLE001 — factory may need API keys / deps
+            continue
+        if _is_crew(result):
+            return result
+        attr = getattr(result, "crew", None)
+        if attr is not None and _is_crew(attr):
+            return attr
+
     return None
+
+
+def _has_only_optional_args(fn: Any) -> bool:
+    """Return True when fn has no required positional/keyword arguments.
+
+    Used by `_find_crew` to skip factories that require config (LLM
+    model, API key, etc.) — calling those without args would just raise
+    TypeError without producing useful structure for the analysis.
+    """
+    try:
+        import inspect as _inspect
+        sig = _inspect.signature(fn)
+    except (TypeError, ValueError):
+        return False
+    for p in sig.parameters.values():
+        if p.kind in (_inspect.Parameter.VAR_POSITIONAL,
+                      _inspect.Parameter.VAR_KEYWORD):
+            continue
+        if p.default is _inspect.Parameter.empty:
+            return False
+    return True
 
 
 # ----- handlers --------------------------------------------------------------

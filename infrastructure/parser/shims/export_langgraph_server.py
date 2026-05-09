@@ -494,13 +494,23 @@ def _build_graph(graph_obj: Any, source_path: str) -> Dict[str, Any]:
 
 
 def _find_state_graphs(module: types.ModuleType) -> Any:
-    """Walk module globals to find the first StateGraph instance.
+    """Walk module globals to find a StateGraph instance.
 
-    We look for *compiled* graphs first (``module.graph = builder.compile()``)
-    by checking ``builder`` attribute, then fall back to plain StateGraph
-    instances. Returns the underlying StateGraph object or None.
+    Resolution order:
+      1. Module-level StateGraph / compiled graph instances (the original
+         "graph = StateGraph(...)" / "graph = builder.compile()" pattern).
+      2. **Factory functions that return a StateGraph** — real-world code
+         (LangGraph examples, ADK-Go agents, CrewAI crews, …) overwhelmingly
+         constructs the graph inside `make_graph()` / `build_graph()` /
+         `def graph()` rather than at module top level. We attempt to call
+         zero-argument top-level callables and inspect the return value;
+         exceptions / side effects are caught so the worker stays alive.
+
+    Returns the underlying StateGraph object or None.
     """
     candidate: Any = None
+
+    # Pass 1: top-level instances (existing behaviour).
     for _name, value in vars(module).items():
         if value is module:
             continue
@@ -515,7 +525,61 @@ def _find_state_graphs(module: types.ModuleType) -> Any:
         graph = getattr(value, "graph", None)
         if graph is not None and _is_state_graph(graph):
             return graph
-    return candidate
+    if candidate is not None:
+        return candidate
+
+    # Pass 2: zero-arg factory functions. We only try functions defined in
+    # the user module itself (skip imports), with no required parameters,
+    # and we wrap each call in try/except so a broken factory doesn't kill
+    # the worker. The first one returning a StateGraph wins.
+    for name, value in vars(module).items():
+        if not callable(value) or isinstance(value, type):
+            continue
+        if value is module:
+            continue
+        # Only consider functions defined in this module to avoid invoking
+        # imported helpers (e.g. langgraph internals).
+        try:
+            value_module = getattr(value, "__module__", None)
+            if value_module and value_module != module.__name__:
+                continue
+        except Exception:  # noqa: BLE001
+            continue
+        if not _has_only_optional_args(value):
+            continue
+        try:
+            result = value()
+        except Exception:  # noqa: BLE001 — factory may need network / API keys
+            continue
+        if _is_state_graph(result):
+            return result
+        for attr in ("builder", "graph"):
+            inner = getattr(result, attr, None)
+            if inner is not None and _is_state_graph(inner):
+                return inner
+
+    return None
+
+
+def _has_only_optional_args(fn: Any) -> bool:
+    """Return True when fn has no required positional/keyword arguments.
+
+    Used by `_find_state_graphs` to skip factories that require config
+    (LLM model, API key, etc.) — calling those without args would just
+    raise TypeError without producing useful structure for the analysis.
+    """
+    try:
+        import inspect as _inspect
+        sig = _inspect.signature(fn)
+    except (TypeError, ValueError):
+        return False
+    for p in sig.parameters.values():
+        if p.kind in (_inspect.Parameter.VAR_POSITIONAL,
+                      _inspect.Parameter.VAR_KEYWORD):
+            continue
+        if p.default is _inspect.Parameter.empty:
+            return False
+    return True
 
 
 # ----- handlers --------------------------------------------------------------
