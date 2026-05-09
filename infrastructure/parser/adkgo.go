@@ -8,6 +8,7 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -89,11 +90,24 @@ func (p *ADKGoParser) parseWithFilename(input []byte, filename string) (*domain.
 	entryCandidates := b.findEntryCandidates()
 
 	if len(entryCandidates) == 0 {
-		// No recognized agent found — return empty but valid graph.
-		return &domain.WorkflowGraph{
-			Nodes: make(map[string]*domain.Node),
-			Edges: []domain.Edge{},
-		}, nil
+		// No orchestrator (Sequential/Loop/Parallel) — but the function-walk
+		// inside findEntryCandidates may still have produced standalone
+		// LlmAgent nodes (factory pattern: `func NewX() agent.Agent { x, _ :=
+		// llmagent.New(...) }`, common in google/adk-samples). Promote the
+		// first such node to the graph entry instead of dropping everything.
+		// Without this, single-agent factory files would silently parse as
+		// empty graphs (dogfood: financial-advisor/agents/data_analyst.go
+		// returned 0 findings even though the parser correctly extracted
+		// the LLM agent).
+		if len(b.nodes) > 0 {
+			entryCandidates = b.firstStandaloneAgentID()
+		}
+		if len(entryCandidates) == 0 {
+			return &domain.WorkflowGraph{
+				Nodes: make(map[string]*domain.Node),
+				Edges: []domain.Edge{},
+			}, nil
+		}
 	}
 
 	// Check for //shingan:entry annotation to override the default first-entry selection.
@@ -269,6 +283,23 @@ func extractFuncToolName(expr ast.Expr) string {
 	}
 	fields := extractKeyedFields(cfgLit)
 	return stringFieldValue(fields, "Name")
+}
+
+// firstStandaloneAgentID returns a 1-element slice containing the first
+// LlmAgent node — used as a fallback entry when the file declares no
+// orchestrator (Sequential/Loop/Parallel) but does declare one or more
+// standalone LlmAgents (factory pattern in google/adk-samples). Order
+// is alphabetic-by-id for deterministic output.
+func (b *adkgoBuilder) firstStandaloneAgentID() []string {
+	if len(b.nodes) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(b.nodes))
+	for id := range b.nodes {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids[:1]
 }
 
 // findEntryCandidates walks the AST to find all top-level orchestrator agents
