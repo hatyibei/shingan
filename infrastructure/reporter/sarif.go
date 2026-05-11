@@ -2,6 +2,7 @@ package reporter
 
 import (
 	"encoding/json"
+	"net/url"
 
 	"github.com/hatyibei/shingan/domain"
 )
@@ -158,24 +159,38 @@ type sarifArtifactLocation struct {
 // Artifact URIs use the synthetic scheme "workflow://nodes/<nodeID>"
 // since Shingan's Workflow Graph does not carry source file locations.
 func (r *SARIFReporter) Format(findings []domain.Finding) ([]byte, error) {
-	// Build ordered unique rules, preserving first-seen severity and confidence per rule.
+	// Build ordered unique rules.
+	//
+	// Per-rule precision is the MINIMUM confidence across that
+	// rule's findings (Codex Slice D #3). The previous "first-seen
+	// confidence wins" approach was order-dependent: identical
+	// finding sets in different order produced different
+	// reportingDescriptor.properties.precision values. Minimum is
+	// both deterministic and semantically conservative — Code
+	// Scanning uses precision for ranking, and an over-optimistic
+	// "high" on a rule that often emits "medium" results would
+	// distort alert prioritisation.
 	type ruleKey struct {
 		name       string
 		severity   domain.Severity
-		confidence float64
+		confidence float64 // minimum across findings
 	}
-	seen := make(map[string]bool)
+	indexByName := make(map[string]int)
 	var orderedRules []ruleKey
 
 	for _, f := range findings {
-		if !seen[f.RuleName] {
-			seen[f.RuleName] = true
-			orderedRules = append(orderedRules, ruleKey{
-				name:       f.RuleName,
-				severity:   f.Severity,
-				confidence: f.Confidence,
-			})
+		if idx, ok := indexByName[f.RuleName]; ok {
+			if f.Confidence < orderedRules[idx].confidence {
+				orderedRules[idx].confidence = f.Confidence
+			}
+			continue
 		}
+		indexByName[f.RuleName] = len(orderedRules)
+		orderedRules = append(orderedRules, ruleKey{
+			name:       f.RuleName,
+			severity:   f.Severity,
+			confidence: f.Confidence,
+		})
 	}
 
 	rules := make([]sarifRule, 0, len(orderedRules))
@@ -200,7 +215,19 @@ func (r *SARIFReporter) Format(findings []domain.Finding) ([]byte, error) {
 				shortDesc = md.Description
 				fullDesc = md.Description
 			}
-			helpURI = md.DocsURL
+			// SARIF schema treats reportingDescriptor.helpUri as
+			// `format=uri` (absolute), not `uri-reference`. Built-in
+			// rules carry repo-relative paths like
+			// `docs/cycle-detection-note.md` which would fail strict
+			// schema validation and silently break Code Scanning's
+			// "View rule docs" link. Only emit DocsURL when it
+			// parses as an absolute URL (Codex Slice D #1). Plugin
+			// authors are expected to supply absolute URLs.
+			if md.DocsURL != "" {
+				if u, err := url.Parse(md.DocsURL); err == nil && u.IsAbs() {
+					helpURI = md.DocsURL
+				}
+			}
 
 			tags := make([]string, 0, 2+len(md.Tags)+len(md.Frameworks))
 			tags = append(tags, "shingan-rule")
@@ -235,7 +262,12 @@ func (r *SARIFReporter) Format(findings []domain.Finding) ([]byte, error) {
 
 	results := make([]sarifResult, 0, len(findings))
 	for _, f := range findings {
-		nodeURI := "workflow://nodes/" + f.NodeID
+		// URL-encode the node ID so spaces, slashes, `?`, `#`, `%`,
+		// and Unicode characters produce a well-formed SARIF
+		// artifactLocation.uri (Codex Slice D #2). Pre-fix, an ID
+		// like `task #1` would emit `workflow://nodes/task #1`,
+		// which schema validators reject as an invalid URI.
+		nodeURI := "workflow://nodes/" + url.PathEscape(f.NodeID)
 		if f.NodeID == "" {
 			nodeURI = "workflow://graph"
 		}

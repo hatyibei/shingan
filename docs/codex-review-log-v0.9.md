@@ -10,7 +10,7 @@
 | A | Plugin SDK public API | `plugin/`, `version/` | ✅ done — see below |
 | B | CLI runtime extract | `cli/` | ✅ done — see below |
 | C | Policy enforcement + analyze flow | `application/policy.go`, `cli/analyze.go` flow | ✅ done — see below |
-| D | SARIF reporter | `infrastructure/reporter/sarif*.go` | pending |
+| D | SARIF reporter | `infrastructure/reporter/sarif*.go` | ✅ done — see below |
 | E | ADK-Go parser | `infrastructure/parser/adkgo*.go`, `domain/graph.go` | pending |
 | F | Rule catalog + domain | `application/rule_catalog.go`, NodeType marshalling | pending |
 | G | Tests & fixtures meta | `*_test.go` new, `testdata/` new | pending |
@@ -76,5 +76,23 @@ Full suite green.
 **Regression tests added (2):**
 - `TestPluginNameSuffix_MatchesSDK` — uppercase/hyphen/path-sep/space rejected
 - `TestVerifyRequiredPlugins_WhitespaceRejected`
+
+All suite green.
+
+## Slice D: SARIF reporter
+
+**4 findings**: Medium=3, Low=1.
+
+| # | Severity | Site | Action |
+|---|---|---|---|
+| 1 | Medium | helpUri accepts relative DocsURL (SARIF requires absolute URI) | **Fixed**: only emit when `url.Parse(...).IsAbs()`. Existing test updated to use absolute. |
+| 2 | Medium | NodeID concatenated into URI without encoding | **Fixed**: `url.PathEscape` in `workflow://nodes/<id>`. |
+| 3 | Medium | rule.properties.precision is order-dependent (first-seen confidence) | **Fixed**: minimum confidence across findings — deterministic + conservative. |
+| 4 | Low | No partialFingerprints for GitHub alert tracking | **Backlog**: optimisation, not correctness. |
+
+**Regression tests added (3):**
+- `TestSARIF_RelativeDocsURLOmitted`
+- `TestSARIF_NodeIDIsURLEncoded`
+- `TestSARIF_PrecisionIsMinimumAcrossFindings`
 
 All suite green.
