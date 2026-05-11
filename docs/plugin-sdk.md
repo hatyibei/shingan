@@ -49,27 +49,78 @@ packages cannot register their own rules yet — that's deliberate per
 ADR-015 ("v0.x 期間中は `experimental:` prefix 必須、no stability
 promise").
 
-## What ships at v0.9 (planned)
+## What ships at v0.9 (partial — landing in commits)
 
-**Public registration API.** A new package `github.com/hatyibei/shingan/plugin`
-will export:
+**Public registration API ✓ (this commit).** Package
+`github.com/hatyibei/shingan/plugin` exports `Register`,
+`MustRegister`, the `Manifest` type, and registry accessors. See the
+package doc for the authoring contract and validation rules
+(experimental: prefix mandatory through v0.x, at least one framework
++ tag, no collisions with built-ins).
+
+**Working example ✓ (this commit).** `examples/plugin-template/`
+ships a runnable plugin (`experimental:todo_node_marker`) plus tests
+that side-effect-import it and assert it appears in the
+`shingan rules` catalog. This is the reference implementation plugin
+authors should mirror.
+
+**Catalog integration ✓ (this commit).** `application.ListRuleManifests`
+merges plugin rules into the catalog so `shingan rules` and
+`shingan rules --format=json` surface them with
+`"stability": "experimental"`. The same output flows to IDE rule
+hovers, SARIF taxonomy emitters, and `.shingan.yaml` generators
+without special-casing.
+
+**Analyze integration ✓ (this commit).** `shingan analyze` appends
+`plugin.Rules()` to the built-in slice so plugin findings appear in
+normal analysis output and are subject to the same severity overrides
+/ ignore comments / baseline suppression as built-ins.
+
+**Custom binary build flow ⏳ (follow-up commit).** The CLI entry
+point (`cmd/shingan/`) needs to be extracted into an importable
+package so plugin wrapper binaries can call into it. Until that
+lands, the supported path is fork-and-import (described in
+`examples/plugin-template/README.md`). The integration tests in
+`cmd/shingan/plugin_integration_test.go` demonstrate the wiring works
+end-to-end via in-tree side-effect imports.
+
+**Sample external repo ⏳ (planned).**
+`github.com/hatyibei/shingan-rule-template` will be a forkable repo
+that mirrors `examples/plugin-template/` plus the wrapper binary,
+once the CLI extraction lands.
+
+### v0.9 API quick reference
+
+The public surface that's stable as of this commit:
 
 ```go
 package plugin
 
-// Register adds an external rule to the catalog with experimental
-// stability. The rule's Name() must begin with "experimental:" so
-// shingan.yaml authors can spot non-built-in rules at a glance.
-// External rules cannot share Names with built-ins (panics at init).
+// Register validates and stores a plugin rule. The rule's Name()
+// must begin with `plugin.ExperimentalPrefix` ("experimental:") so
+// `.shingan.yaml` authors can spot non-built-in rules at a glance.
+// External rules cannot share Names with built-ins.
+// Returns an error on validation failure; the rule is NOT registered.
 func Register(rule domain.AnalysisRule, m Manifest) error
 
-// Manifest is the external-author-facing equivalent of the internal
-// RuleManifest. Required fields are validated at Register() time.
+// MustRegister is the init()-friendly wrapper around Register that
+// panics on validation failure. Use this in plugin init() blocks.
+func MustRegister(rule domain.AnalysisRule, m Manifest)
+
+// Manifest is the external-author-facing rule metadata, validated at
+// Register() time and surfaced in `shingan rules --format=json`.
 type Manifest struct {
-    Frameworks []string // at least one
-    Tags       []string // at least one
-    DocsURL    string   // optional; surfaced in IDE hovers
+    Severity   domain.Severity // optional; defaults to Info
+    Frameworks []string        // at least one of: langgraph, crewai, n8n, adk-go, samurai, json, all
+    Tags       []string        // at least one
+    DocsURL    string          // optional; surfaced in IDE rule hovers
 }
+
+// RegisteredRules / Rules: catalog accessors used by the
+// application-layer catalog renderer + the analyze command's rule
+// gathering. Plugin authors don't call these directly.
+func RegisteredRules() []Registered
+func Rules() []domain.AnalysisRule
 ```
 
 External rule template:

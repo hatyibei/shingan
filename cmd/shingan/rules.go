@@ -38,6 +38,11 @@ For the multi-paragraph explanation of a specific rule, run:
 
     shingan explain <rule_name>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Built-in rules only — plugin rules are merged inside
+			// ListRuleManifests by reading the plugin.RegisteredRules
+			// table. Passing only built-ins here keeps the layering
+			// clean (catalog renderer doesn't need to know how
+			// plugin discovery happens).
 			rules := infraFactory.NewAnalyzerFactory().CreateAll()
 			catalog := application.ListRuleManifests(rules)
 			out := cmd.OutOrStdout()

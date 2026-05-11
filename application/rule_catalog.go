@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/hatyibei/shingan/domain"
+	"github.com/hatyibei/shingan/plugin"
 )
 
 // RuleManifest is the declarative, machine-readable descriptor for one
@@ -67,21 +68,29 @@ var staticRuleMeta = map[string]struct {
 	"human_gate_missing":          {[]string{"all"}, []string{"governance", "safety"}, "stable", ""},
 }
 
-// ListRuleManifests returns one RuleManifest per rule in `rules`,
-// merging the runtime Meta() output (Name / Severity / Fixable) with the
-// static table above (Frameworks / Tags / Stability / DocsURL) and the
-// first non-empty line of RuleExplanations (Description).
+// ListRuleManifests returns one RuleManifest per built-in rule in
+// `rules`, merging the runtime Meta() output (Name / Severity /
+// Fixable) with the static table above (Frameworks / Tags / Stability
+// / DocsURL) and the first non-empty line of RuleExplanations
+// (Description).
 //
-// Takes the rule slice as input rather than reaching into infrastructure
-// so that Onion is preserved: application depends only on domain.
-// Callers (CLI, MCP server, web service) supply the rule slice via
-// `infrastructure/factory.NewAnalyzerFactory().CreateAll()`.
+// Plugin rules registered via `plugin.MustRegister` are automatically
+// appended — callers do not need to pass them. The catalog therefore
+// represents the union of built-in + plugin rules visible to the
+// current binary.
+//
+// Takes the built-in rule slice as input rather than reaching into
+// infrastructure so that Onion is preserved: application depends only
+// on domain (and the public plugin package, which itself depends only
+// on domain). Callers (CLI, MCP server, web service) supply the
+// built-in slice via `infrastructure/factory.NewAnalyzerFactory().CreateAll()`.
 //
 // The returned slice is sorted by Name so the output is deterministic
 // across calls — consumers (CLI, IDE rule list, SARIF) can diff
 // catalogs across releases without sort artifacts.
 func ListRuleManifests(rules []domain.AnalysisRule) []RuleManifest {
-	out := make([]RuleManifest, 0, len(rules))
+	plugins := plugin.RegisteredRules()
+	out := make([]RuleManifest, 0, len(rules)+len(plugins))
 	for _, r := range rules {
 		name := r.Name()
 		manifest := RuleManifest{
@@ -109,6 +118,30 @@ func ListRuleManifests(rules []domain.AnalysisRule) []RuleManifest {
 				manifest.Stability = static.Stability
 			}
 			manifest.DocsURL = static.DocsURL
+		}
+		out = append(out, manifest)
+	}
+	// Plugin rules: source of truth for metadata is the plugin's
+	// Manifest (author-supplied at Register time), not staticRuleMeta.
+	// Stability is forced to "experimental" until v1.0 (ADR-015).
+	for _, pr := range plugins {
+		name := pr.Rule.Name()
+		desc := firstLineSummary(name)
+		if desc == name {
+			// Plugin authors don't write into RuleExplanations; fall
+			// back to a generic description so the catalog row isn't
+			// confusingly empty.
+			desc = "External plugin rule"
+		}
+		manifest := RuleManifest{
+			Name:        name,
+			Severity:    pr.Manifest.Severity,
+			SeverityStr: pr.Manifest.Severity.String(),
+			Description: desc,
+			Frameworks:  pr.Manifest.Frameworks,
+			Tags:        pr.Manifest.Tags,
+			Stability:   "experimental",
+			DocsURL:     pr.Manifest.DocsURL,
 		}
 		out = append(out, manifest)
 	}

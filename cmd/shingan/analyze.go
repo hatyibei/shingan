@@ -13,6 +13,7 @@ import (
 	baselineio "github.com/hatyibei/shingan/infrastructure/baseline"
 	"github.com/hatyibei/shingan/infrastructure/factory"
 	"github.com/hatyibei/shingan/infrastructure/parser"
+	"github.com/hatyibei/shingan/plugin"
 	"github.com/spf13/cobra"
 )
 
@@ -142,8 +143,14 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 
 	// 4. Run all analysis rules per-graph; AnalyzeMulti stamps each
 	//    finding with its originating SourceFile (ADR-012).
+	//
+	// Plugin rules (ADR-015, v0.9 Plugin SDK) are appended to the
+	// built-in slice so the orchestrator sees them as first-class
+	// rules. Plugins register themselves at `init()` time via
+	// `plugin.MustRegister`, which means the set is fixed by what
+	// the binary statically links — there's no runtime loader.
 	analyzerFactory := factory.NewAnalyzerFactory()
-	rules := analyzerFactory.CreateAll()
+	rules := append(analyzerFactory.CreateAll(), plugin.Rules()...)
 
 	orchestrator := application.NewAnalysisOrchestrator()
 
