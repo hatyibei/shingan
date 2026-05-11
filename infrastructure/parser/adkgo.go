@@ -531,10 +531,14 @@ func (b *adkgoBuilder) processRealAPIConfig(cfg *ast.CompositeLit, agentType str
 		b.processToolsRealAPI(topFields, nodeID)
 
 	case "SequentialAgent":
+		// NodeTypeSequence — not Loop. SequentialAgent runs its
+		// sub-agents in fixed order once, so max_iterations is not a
+		// meaningful concept and loop_guard must NOT fire here.
+		// Dogfood: google/adk-samples llm-auditor (2026-05-11).
 		node := &domain.Node{
 			ID:     nodeID,
 			Name:   name,
-			Type:   domain.NodeTypeControl,
+			Type:   domain.NodeTypeSequence,
 			Config: make(map[string]any),
 			Pos:    pos,
 		}
@@ -561,10 +565,15 @@ func (b *adkgoBuilder) processRealAPIConfig(cfg *ast.CompositeLit, agentType str
 		}
 
 	case "ParallelAgent":
+		// NodeTypeParallel — distinct from Loop. ParallelAgent fans
+		// out to its sub-agents concurrently; max_iterations is not
+		// applicable, but cost / max_parallel_branches rules want
+		// to fire here, hence a dedicated type rather than reuse of
+		// NodeTypeControl.
 		node := &domain.Node{
 			ID:     nodeID,
 			Name:   name,
-			Type:   domain.NodeTypeControl,
+			Type:   domain.NodeTypeParallel,
 			Config: make(map[string]any),
 			Pos:    pos,
 		}
@@ -738,10 +747,12 @@ func (b *adkgoBuilder) processAgentLit(cl *ast.CompositeLit, parent *string) str
 		b.processTools(fields, nodeID)
 
 	case "SequentialAgent":
+		// See ADK-Go SequentialAgent case in the SDK-style path above
+		// for the rationale on NodeTypeSequence vs NodeTypeControl.
 		node := &domain.Node{
 			ID:     nodeID,
 			Name:   name,
-			Type:   domain.NodeTypeControl,
+			Type:   domain.NodeTypeSequence,
 			Config: make(map[string]any),
 			Pos:    pos,
 		}
@@ -766,7 +777,7 @@ func (b *adkgoBuilder) processAgentLit(cl *ast.CompositeLit, parent *string) str
 		node := &domain.Node{
 			ID:     nodeID,
 			Name:   name,
-			Type:   domain.NodeTypeControl,
+			Type:   domain.NodeTypeParallel,
 			Config: make(map[string]any),
 			Pos:    pos,
 		}

@@ -867,3 +867,72 @@ func nodeKeys(graph *domain.WorkflowGraph) []string {
 	}
 	return keys
 }
+
+// TestADKGoParser_SequentialAgentIsSequenceNotLoop locks in the
+// v0.9.1 ADK-Go FP fix: SequentialAgent must be parsed as
+// NodeTypeSequence so loop_guard doesn't false-positive on
+// sequential pipelines. The bare-struct path and the SDK-style
+// `sequentialagent.New(sequentialagent.Config{...})` path both flow
+// through this assertion via the parser entry point.
+//
+// Dogfood source: google/adk-samples/go/agents/llm-auditor
+// (2026-05-11), where llm_auditor is a SequentialAgent that
+// previously surfaced a Critical loop_guard finding.
+func TestADKGoParser_SequentialAgentIsSequenceNotLoop(t *testing.T) {
+	src := []byte(`package agents
+
+var workflow = &SequentialAgent{
+	Name: "llm_auditor",
+	SubAgents: []Agent{
+		&LlmAgent{Name: "critic", Model: "gpt-4o"},
+		&LlmAgent{Name: "reviser", Model: "gpt-4o"},
+	},
+}
+`)
+	p := parser.NewADKGoParser()
+	graph, err := p.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	node := graph.Nodes["llm_auditor"]
+	if node == nil {
+		t.Fatalf("node 'llm_auditor' not found; nodes=%v", nodeKeys(graph))
+	}
+	if node.Type != domain.NodeTypeSequence {
+		t.Errorf("SequentialAgent Type = %v, want NodeTypeSequence (loop_guard would FP otherwise)", node.Type)
+	}
+	if node.Type == domain.NodeTypeLoop || node.Type == domain.NodeTypeControl {
+		t.Error("SequentialAgent must NOT be classified as Loop/Control — that path FP'd in v0.9.0")
+	}
+}
+
+// TestADKGoParser_ParallelAgentIsParallelNotLoop is the symmetric
+// case for ParallelAgent: NodeTypeParallel, never NodeTypeLoop /
+// NodeTypeControl.
+func TestADKGoParser_ParallelAgentIsParallelNotLoop(t *testing.T) {
+	src := []byte(`package agents
+
+var fanout = &ParallelAgent{
+	Name: "broadcast",
+	SubAgents: []Agent{
+		&LlmAgent{Name: "worker_a", Model: "gpt-4o"},
+		&LlmAgent{Name: "worker_b", Model: "gpt-4o"},
+	},
+}
+`)
+	p := parser.NewADKGoParser()
+	graph, err := p.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	node := graph.Nodes["broadcast"]
+	if node == nil {
+		t.Fatalf("node 'broadcast' not found; nodes=%v", nodeKeys(graph))
+	}
+	if node.Type != domain.NodeTypeParallel {
+		t.Errorf("ParallelAgent Type = %v, want NodeTypeParallel", node.Type)
+	}
+	if node.Type == domain.NodeTypeLoop || node.Type == domain.NodeTypeControl {
+		t.Error("ParallelAgent must NOT be classified as Loop/Control")
+	}
+}

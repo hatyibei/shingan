@@ -98,6 +98,7 @@ release lands on each repo.
 | `starpig1129/AI-Data-Analysis-MultiAgent` (DATAGEN) | LangGraph | 1.7K | 2 unreachable FP → 0 (v0.8.7 for-loop unrolling) | **0** | Triggered v0.8.7 FP-1 fix |
 | `theyashwanthsai/Devyan` | CrewAI | 289 | 3 unreachable FP → 0 (v0.8.7 agents-only fallback) | **0** | Triggered v0.8.7 FP-2 fix |
 | `langtalks/swe-agent` | LangGraph | 630 | 4 cycle_detection | **0** | Real bug → [Issue #6](https://github.com/langtalks/swe-agent/issues/6) |
+| `google/adk-samples` (5 Go agents) | ADK-Go | 5K | 1 Critical FP → 0 (v0.9.1 SequentialAgent NodeType fix) | **0** | Triggered NodeTypeSequence / NodeTypeParallel split |
 | `ArcInstitute/SRAgent` | LangGraph | — | **0 findings** | **0** | Clean repo, no FP either |
 | `CopilotKit/open-multi-agent-canvas` | LangGraph | — | **0 findings** | **0** | Clean repo |
 | `letta-ai/letta` (formerly MemGPT) | LangGraph | 13K | swept in v0.8.4 dogfood | **0** | — |
@@ -112,6 +113,7 @@ The fixes below were all triggered by real OSS — not by synthetic test cases. 
 
 | Release | Fix | Source repo | Pattern closed |
 | --- | --- | --- | --- |
+| v0.9.1 | ADK-Go SequentialAgent → NodeTypeSequence | google/adk-samples llm-auditor | SequentialAgent FP'd as Loop, triggered spurious Critical loop_guard finding |
 | v0.8.7 | LangGraph for-loop edge unrolling | DATAGEN | `for x in [<lit>, …]: g.add_edge(x, "T")` |
 | v0.8.7 | CrewAI agents-only empty-graph | Devyan | `agents.py` factory-style module |
 | v0.8.6 | LangGraph `Command(goto=…)` typed-return | open_deep_research | `Command[Literal["a","b"]]` |

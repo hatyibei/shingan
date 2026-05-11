@@ -27,6 +27,18 @@ const (
 	NodeTypeLoop
 	// NodeTypeCondition represents a conditional branch node (if/switch, max_iterations not required).
 	NodeTypeCondition
+	// NodeTypeSequence represents a workflow agent that runs its
+	// sub-agents in deterministic order (ADK-Go SequentialAgent,
+	// CrewAI Process.sequential). Distinct from NodeTypeLoop so
+	// loop_guard / max_iterations rules don't false-positive on
+	// sequential pipelines (dogfood: google/adk-samples llm-auditor,
+	// 2026-05-11). max_iterations is not a meaningful concept here.
+	NodeTypeSequence
+	// NodeTypeParallel represents a workflow agent that fans out to
+	// its sub-agents concurrently (ADK-Go ParallelAgent). Distinct
+	// from NodeTypeLoop for the same reason as Sequence; cost +
+	// fan-out rules consume this directly.
+	NodeTypeParallel
 )
 
 // nodeTypeStrings maps the canonical string names to NodeType values.
@@ -39,6 +51,8 @@ var nodeTypeStrings = map[string]NodeType{
 	"output":    NodeTypeOutput,
 	"loop":      NodeTypeLoop,
 	"condition": NodeTypeCondition,
+	"sequence":  NodeTypeSequence,
+	"parallel":  NodeTypeParallel,
 }
 
 // String returns the lowercase string representation of a NodeType.
@@ -58,6 +72,10 @@ func (t NodeType) String() string {
 		return "loop"
 	case NodeTypeCondition:
 		return "condition"
+	case NodeTypeSequence:
+		return "sequence"
+	case NodeTypeParallel:
+		return "parallel"
 	default:
 		return fmt.Sprintf("NodeType(%d)", int(t))
 	}
@@ -76,7 +94,7 @@ func (t *NodeType) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &s); err == nil {
 		nt, ok := nodeTypeStrings[s]
 		if !ok {
-			return fmt.Errorf("unknown node type string %q: expected one of llm, tool, control, human, output, loop, condition", s)
+			return fmt.Errorf("unknown node type string %q: expected one of llm, tool, control, human, output, loop, condition, sequence, parallel", s)
 		}
 		*t = nt
 		return nil
