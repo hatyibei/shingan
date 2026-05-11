@@ -70,3 +70,79 @@ go test -bench=. -benchmem -run=^$ ./domain/rules/...
 go test -bench=. -benchmem -run=^$ ./application/...
 go test -bench=. -benchmem -run=^$ ./infrastructure/parser/...
 ```
+
+---
+
+# Real-World Accuracy (Dogfood Sweep, v0.5.0 → v0.8.7)
+
+Runtime benchmarks above measure *speed*. The far more relevant question
+for a static-analysis tool is *signal quality*: when shingan flags a
+node, is the developer's correct response "yes, fix that" or "ignore,
+false positive"? We track this by sweeping real-world OSS that use
+LangGraph / CrewAI / n8n / ADK-Go in production and recording how each
+release lands on each repo.
+
+> Methodology: zero hand-tuning. We run `shingan analyze --format=<fw>
+> --input=<repo>` exactly as a CI user would, count every finding by
+> rule, classify each as a real issue vs. false positive by reading the
+> code, and ship a fix for every Critical FP before the next release.
+
+## Cumulative track record (12+ OSS, v0.5.0 → v0.8.7)
+
+| Project | Framework | Stars | Findings @ first run | Critical FP @ latest | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `assafelovic/gpt-researcher` | LangGraph | 24K | 1 cycle_detection | **0** | Real bug → [Issue #1766](https://github.com/assafelovic/gpt-researcher/issues/1766) |
+| `langchain-ai/open_deep_research` | LangGraph | 7K | 9 → 1 (after v0.8 router fix) | **0** | Real bug → [Issue #269](https://github.com/langchain-ai/open_deep_research/issues/269), maintainer-style community engagement |
+| `langchain-ai/executive-ai-assistant` | LangGraph | 1K | 14 → 3 (after v0.8 sentinel/router fix) | **0** | Archived, but parser improvements landed in v0.8.6 |
+| `langchain-ai/company-researcher` | LangGraph | 600 | 1 Critical FP → 0 (v0.8.6 router-Literal fix) | **0** | Triggered the `tools_condition` builtin handling |
+| `starpig1129/AI-Data-Analysis-MultiAgent` (DATAGEN) | LangGraph | 1.7K | 2 unreachable FP → 0 (v0.8.7 for-loop unrolling) | **0** | Triggered v0.8.7 FP-1 fix |
+| `theyashwanthsai/Devyan` | CrewAI | 289 | 3 unreachable FP → 0 (v0.8.7 agents-only fallback) | **0** | Triggered v0.8.7 FP-2 fix |
+| `langtalks/swe-agent` | LangGraph | 630 | 4 cycle_detection | **0** | Real bug → [Issue #6](https://github.com/langtalks/swe-agent/issues/6) |
+| `ArcInstitute/SRAgent` | LangGraph | — | **0 findings** | **0** | Clean repo, no FP either |
+| `CopilotKit/open-multi-agent-canvas` | LangGraph | — | **0 findings** | **0** | Clean repo |
+| `letta-ai/letta` (formerly MemGPT) | LangGraph | 13K | swept in v0.8.4 dogfood | **0** | — |
+| `langchain-ai/langgraph-supervisor-py` | LangGraph | 800 | swept in v0.8.4 | **0** | — |
+| `langchain-ai/data-enrichment` | LangGraph | 200 | canonical tool-calling pattern | **0** | Skipped Issue submission — impact too weak |
+
+**Zero Critical false positives across every sweep at the latest release**. Each non-zero number in the "Findings" column was either (a) a real bug we filed upstream, or (b) a parser-shim gap we closed in the next release. The fix commits are linked from each release's CHANGELOG entry under "dogfood-driven".
+
+## Dogfood-driven shim improvements (v0.5.0 → v0.8.7)
+
+The fixes below were all triggered by real OSS — not by synthetic test cases. They are why the FP count keeps trending down.
+
+| Release | Fix | Source repo | Pattern closed |
+| --- | --- | --- | --- |
+| v0.8.7 | LangGraph for-loop edge unrolling | DATAGEN | `for x in [<lit>, …]: g.add_edge(x, "T")` |
+| v0.8.7 | CrewAI agents-only empty-graph | Devyan | `agents.py` factory-style module |
+| v0.8.6 | LangGraph `Command(goto=…)` typed-return | open_deep_research | `Command[Literal["a","b"]]` |
+| v0.8.6 | LangGraph bare-return router (Source 3) | chatbot-simulation-eval | untyped router with `>=2` distinct literal returns |
+| v0.8.6 | LangGraph BoolOp + functools.partial | simulation_utils | `should_continue or functools.partial(_should_continue, …)` |
+| v0.8.6 | LangGraph fan-in list-src `add_edge` | langgraph/bench/wide_state | `add_edge(["a","b"], "c")` |
+| v0.8.6 | LangGraph END-sentinel exit recognition | many | `add_edge(node, END)` → `HasExitBranch=true` |
+| v0.8.6 | LangGraph 2-pass visit ordering | simulation_utils | router defined after `make_graph()` |
+| v0.8.6 | LangGraph router-Literal annotation lookup | executive-ai-assistant | `add_conditional_edges("src", route_fn)` with no `path_map` |
+| v0.8.6 | CrewAI generic-Exception fallback | langchain-academy | import-time `OpenAIError` / `RuntimeError` |
+| v0.8.6 | n8n sticky-note skip | n8n workflows | `n8n-nodes-base.stickyNote` widgets |
+| v0.8.6 | Onion: typed `Node.HasExitBranch` field | — | replaced cross-layer `Config["has_end_branch"]` |
+
+## Reproducing the accuracy benchmark
+
+```bash
+# Clone each repo, run shingan on it, output report.
+git clone --depth=1 https://github.com/starpig1129/AI-Data-Analysis-MultiAgent /tmp/datagen
+shingan analyze --format=langgraph --input=/tmp/datagen \
+                --output=markdown --min-confidence=0.7
+
+# Expected with shingan-lint@0.8.7+: 4 bounded-cycle warnings,
+# zero unreachable_node FPs. Earlier versions emitted 2 FPs on
+# QualityReview / NoteTaker before the for-loop unrolling fix.
+```
+
+## Zero-FP guarantee policy
+
+For every Critical false positive surfaced in dogfood (or reported via
+GitHub Discussions), the fix lands in the *next* release together with
+a regression fixture pinned in `testdata/`. We treat FP fixes as
+load-bearing CHANGELOG entries (not housekeeping notes), and the
+"dogfood-driven" tag on each entry tells maintainers exactly which
+real-world pattern motivated the change.

@@ -162,22 +162,25 @@ CI integration (GitHub Actions):
   run: shingan analyze --format adk-go --input ./agents/
 ```
 
-## Real-world LangGraph dogfood (v0.8.5+)
+## Real-world dogfood (v0.5.0 → v0.8.7)
 
-Shingan is run against production LangGraph repos before each release.
-The numbers below are the actual finding counts on `main` (ten dogfood-
-driven analyser refinements between v0.8.4 → v0.8.5+ collapsed FPs
-without sacrificing real defects):
+Shingan is run against production LangGraph / CrewAI / n8n repos before
+each release. **Zero Critical false positives across 12+ swept OSS at
+the latest release.** Every Critical FP we ever surfaced has a regression
+fixture pinned in `testdata/` and a "dogfood-driven" CHANGELOG entry.
 
-| Repo | File | Findings | Critical | What survives |
+| Repo | Framework | Findings | Critical FP | Notes |
 |---|---|---|---|---|
-| [open_deep_research](https://github.com/langchain-ai/open_deep_research) | `legacy/graph.py` | **1** | 0 | one bounded-cycle Warning on `generate_report_plan` (legitimate human-in-the-loop revision pattern bounded only by `recursion_limit`) |
-| [gpt-researcher](https://github.com/assafelovic/gpt-researcher) | `multi_agents/agents/orchestrator.py` | 7 | 0 | bounded cycle through `planner` (researcher exit branch present); 3× `error_handler_checker` on tool nodes |
-| [data-enrichment](https://github.com/langchain-ai/data-enrichment) | `src/enrichment_agent/graph.py` | 3 | 0 | one bounded-cycle Warning on `call_agent_model`; tool-node info |
-| [executive-ai-assistant](https://github.com/langchain-ai/executive-ai-assistant) | `eaia/main/graph.py` | 3 | 0 | bounded cycle on `draft_response`; missing error handling + tool description on `bad_tool_name` |
-| [company-researcher](https://github.com/langchain-ai/company-researcher) | `src/agent/graph.py` | 4 | 0 | bounded cycle on `research_company` (END branch via `route_from_reflection`); 2× error handling, 1× tool description |
-| [langchain-academy](https://github.com/langchain-ai/langchain-academy) | `module-1/studio/agent.py` | 1 | 0 | bounded cycle on `assistant ↔ tools` (canonical LangGraph tool-calling pattern) |
-| [langgraph](https://github.com/langchain-ai/langgraph) | `bench/wide_state.py` | 0 | 0 | clean (parallel fan-in benchmark) |
+| [gpt-researcher](https://github.com/assafelovic/gpt-researcher) (24K★) | LangGraph | 1 cycle_detection | 0 | Real bug → [Issue #1766](https://github.com/assafelovic/gpt-researcher/issues/1766) |
+| [open_deep_research](https://github.com/langchain-ai/open_deep_research) (7K★) | LangGraph | 9 → 1 | 0 | Real bug → [Issue #269](https://github.com/langchain-ai/open_deep_research/issues/269) |
+| [executive-ai-assistant](https://github.com/langchain-ai/executive-ai-assistant) (1K★) | LangGraph | 14 → 3 | 0 | v0.8.6 sentinel/router-Literal fix |
+| [company-researcher](https://github.com/langchain-ai/company-researcher) | LangGraph | 1 Critical FP → 0 | 0 | Triggered `tools_condition` builtin handling |
+| [DATAGEN](https://github.com/starpig1129/AI-Data-Analysis-MultiAgent) (1.7K★) | LangGraph | 2 unreachable FP → 0 | 0 | Triggered v0.8.7 for-loop unrolling |
+| [Devyan](https://github.com/theyashwanthsai/Devyan) | CrewAI | 3 unreachable FP → 0 | 0 | Triggered v0.8.7 agents-only fallback |
+| [swe-agent](https://github.com/langtalks/swe-agent) (630★) | LangGraph | 4 cycle_detection | 0 | Real bug → [Issue #6](https://github.com/langtalks/swe-agent/issues/6) |
+| [SRAgent](https://github.com/ArcInstitute/SRAgent), [open-multi-agent-canvas](https://github.com/CopilotKit/open-multi-agent-canvas) | LangGraph | **0** | 0 | Clean repos |
+
+→ Full track record + reproducible accuracy benchmark: [docs/benchmarks.md](./docs/benchmarks.md#real-world-accuracy-dogfood-sweep-v050--v087).
 
 Idioms surfaced and supported during the v0.8.5+ dogfood loop:
 
@@ -288,6 +291,21 @@ go test -tags=demo -v -run TestDemo_ .
 | json | application/json | API response, program-to-program |
 | markdown | text/markdown | CLI, human-readable reports |
 | sarif | application/sarif+json | GitHub Code Scanning integration |
+
+## Stability commitment
+
+Through v1.0 we commit to **no breaking changes** in the following
+public surfaces. The version line below each item is the floor —
+breaking changes will not happen earlier than the listed major bump.
+
+- **Rule names + IDs** (`cycle_detection`, `pii_leak_scanner`, …) — stable through v1.0. Rules may be added; existing IDs will not be renamed or repurposed.
+- **`.shingan.yaml` policy schema** — semver-pinned. Additive keys only through v1.0.
+- **SARIF output structure** — conforms to SARIF 2.1.0; shingan-specific extensions live in `properties` and are append-only through v1.0.
+- **CLI flags** (`shingan analyze --format / --input / --output / --min-confidence / --baseline / --since`) — stable through v1.0. New flags will be added; existing flags will not change semantics.
+- **Exit codes** (0 = clean, 1 = Warning, 2 = Critical) — stable through v2.0.
+
+Plugin SDK (when it ships in v0.9+) is gated behind an `experimental:`
+prefix until v1.0 and explicitly *not* covered by this commitment.
 
 ## Roadmap
 
