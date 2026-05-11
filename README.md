@@ -307,6 +307,22 @@ breaking changes will not happen earlier than the listed major bump.
 Plugin SDK (when it ships in v0.9+) is gated behind an `experimental:`
 prefix until v1.0 and explicitly *not* covered by this commitment.
 
+## Zero-FP guarantee
+
+Static analysis is only useful if developers can trust the output.
+Shingan tracks Critical false positives as a load-bearing quality
+metric — we have ended every release sweep at **0 Critical FP** since
+v0.7 (see [docs/benchmarks.md](./docs/benchmarks.md#real-world-accuracy-dogfood-sweep-v050--v087) for the per-release breakdown).
+
+If you hit a false positive:
+
+1. Open an Issue using the [false-positive template](./.github/ISSUE_TEMPLATE/false_positive.md) — paste the repo URL or minimal repro, the `shingan analyze` output, and why you believe it's wrong.
+2. **Critical FP**: triaged within 24h on weekdays (best-effort), fix + regression fixture land in the next release with a `dogfood-driven` CHANGELOG entry.
+3. **Warning / Info FP**: same template, triaged within 1 week.
+4. The fix is *always* a parser/shim precision improvement or a confidence-rule tweak — never silently muting the finding, never moving it to a deny-list.
+
+Every dogfood-driven FP fix shipped since v0.5 is listed in [docs/benchmarks.md § Dogfood-driven shim improvements](./docs/benchmarks.md#dogfood-driven-shim-improvements-v050--v087). v0.8.7 alone closed two FPs surfaced by 1.7K-star and ~300-star LangGraph/CrewAI projects.
+
 ## Roadmap
 
 - **v0.1〜v0.5** (Apr 2026): JSON / ADK-Go / Samurai parsers, Confidence × Severity 2-axis, SARIF / GitHub Action, 9 rules ✓
