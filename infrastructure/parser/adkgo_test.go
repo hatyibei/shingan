@@ -1085,3 +1085,36 @@ func NewB() agent.Agent {
 		t.Errorf("EntryNodeID must be empty when roots are ambiguous; got %q", graph.EntryNodeID)
 	}
 }
+
+// TestADKGoParser_AmbiguousRootsNoSpuriousCritical is the end-to-end
+// half of Codex Slice E #1: parsing an ambiguous-root ADK-Go file
+// produces a graph with EntryAmbiguous=true so the reachability
+// rule downstream skips and the orchestrator emits no Critical
+// "entry node is not set" finding. The previous round-2 fix
+// suppressed unreachable_node FPs but inadvertently swapped them
+// for a Critical from reachability.go's empty-EntryNodeID guard.
+func TestADKGoParser_AmbiguousRootsNoSpuriousCritical(t *testing.T) {
+	src := []byte(`package agents
+
+func NewA() agent.Agent {
+	a, _ := llmagent.New(llmagent.Config{Name: "agent_a", Model: "gpt-4o"})
+	return a
+}
+
+func NewB() agent.Agent {
+	a, _ := llmagent.New(llmagent.Config{Name: "agent_b", Model: "gpt-4o"})
+	return a
+}
+`)
+	p := parser.NewADKGoParser()
+	graph, err := p.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !graph.EntryAmbiguous {
+		t.Fatal("ADK-Go parser should set EntryAmbiguous=true for multi-root factory file")
+	}
+	if graph.EntryNodeID != "" {
+		t.Errorf("EntryNodeID must remain empty when ambiguous; got %q", graph.EntryNodeID)
+	}
+}

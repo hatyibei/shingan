@@ -49,6 +49,16 @@ func (r *ReachabilityChecker) Analyze(graph *domain.WorkflowGraph) []domain.Find
 		return nil
 	}
 
+	// Codex Slice E #1: when the parser explicitly marked the graph
+	// as having an ambiguous entry (e.g. ADK-Go file with multiple
+	// unrelated standalone factories), skip the reachability check
+	// rather than surfacing a Critical finding. The user didn't
+	// "forget to set entry_node_id"; the parser couldn't pick one,
+	// and either node could be a legitimate root.
+	if graph.EntryAmbiguous && graph.EntryNodeID == "" {
+		return nil
+	}
+
 	// Guard: entry node must be set and exist in the graph.
 	if graph.EntryNodeID == "" {
 		return []domain.Finding{

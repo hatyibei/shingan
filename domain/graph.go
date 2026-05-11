@@ -178,15 +178,26 @@ type WorkflowGraph struct {
 	Edges []Edge `json:"edges"`
 	// EntryNodeID is the ID of the node where execution begins.
 	EntryNodeID string `json:"entry_node_id"`
+	// EntryAmbiguous is set by a parser when the source has multiple
+	// plausible roots and none can be statically identified as the
+	// canonical entry — for example, an ADK-Go file declaring two
+	// unrelated standalone factories. Distinguishes "no entry by
+	// parser design" (skip reachability) from "user forgot to set
+	// entry_node_id in a hand-authored JSON" (Critical). Codex
+	// Slice E #1: pre-flag, the ambiguous-root parser path
+	// surfaced a Critical "entry node is not set" finding that the
+	// fix in 32db300 was meant to suppress.
+	EntryAmbiguous bool `json:"entry_ambiguous,omitempty"`
 }
 
 // workflowGraphJSON is the intermediate type used when unmarshalling a
 // WorkflowGraph from JSON. The Nodes field is stored as an array in JSON
 // to make hand-authoring testdata easier, but the domain type uses a map.
 type workflowGraphJSON struct {
-	Nodes       []*Node `json:"nodes"`
-	Edges       []Edge  `json:"edges"`
-	EntryNodeID string  `json:"entry_node_id"`
+	Nodes          []*Node `json:"nodes"`
+	Edges          []Edge  `json:"edges"`
+	EntryNodeID    string  `json:"entry_node_id"`
+	EntryAmbiguous bool    `json:"entry_ambiguous,omitempty"`
 }
 
 // UnmarshalJSON deserializes a WorkflowGraph from JSON. The JSON format stores
@@ -200,6 +211,7 @@ func (g *WorkflowGraph) UnmarshalJSON(data []byte) error {
 
 	g.Edges = raw.Edges
 	g.EntryNodeID = raw.EntryNodeID
+	g.EntryAmbiguous = raw.EntryAmbiguous
 	g.Nodes = make(map[string]*Node, len(raw.Nodes))
 	for _, n := range raw.Nodes {
 		if n == nil {

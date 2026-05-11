@@ -11,7 +11,7 @@
 | B | CLI runtime extract | `cli/` | ✅ done — see below |
 | C | Policy enforcement + analyze flow | `application/policy.go`, `cli/analyze.go` flow | ✅ done — see below |
 | D | SARIF reporter | `infrastructure/reporter/sarif*.go` | ✅ done — see below |
-| E | ADK-Go parser | `infrastructure/parser/adkgo*.go`, `domain/graph.go` | pending |
+| E | ADK-Go parser | `infrastructure/parser/adkgo*.go`, `domain/graph.go` | ✅ done — see below |
 | F | Rule catalog + domain | `application/rule_catalog.go`, NodeType marshalling | pending |
 | G | Tests & fixtures meta | `*_test.go` new, `testdata/` new | pending |
 
@@ -94,5 +94,22 @@ All suite green.
 - `TestSARIF_RelativeDocsURLOmitted`
 - `TestSARIF_NodeIDIsURLEncoded`
 - `TestSARIF_PrecisionIsMinimumAcrossFindings`
+
+All suite green.
+
+## Slice E: ADK-Go parser
+
+**5 findings**: High=1, Medium=2, Low=2.
+
+| # | Severity | Site | Action |
+|---|---|---|---|
+| 1 | High | Ambiguous-root EntryNodeID="" surfaces Critical from reachability.go (round-2 fix swapped FP class) | **Fixed**: new `WorkflowGraph.EntryAmbiguous` field; parser sets it; reachability skips. |
+| 2 | Medium | isToolConstructorCall too broad (any `*tool.New`) | **Backlog**: narrow once real-world wrong-match case surfaces. |
+| 3 | Medium | `agenttool.New(NewDataAnalyst(ctx), nil)` → tool name "new_data_analyst" | **Backlog**: cosmetic precision improvement. |
+| 4 | Low | MaxIterations int overflow (round-2 #7) | **Fixed**: `strconv.Atoi` rejects overflow; returns nil so loop_guard fires. |
+| 5 | Low | functiontool.Config{Name: ToolName} const-resolution missing | **Backlog**: edge case, deferred. |
+
+**Regression tests added (1):**
+- `TestADKGoParser_AmbiguousRootsNoSpuriousCritical` — EntryAmbiguous=true on multi-root factory file
 
 All suite green.

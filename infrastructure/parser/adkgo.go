@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -120,7 +121,11 @@ func (p *ADKGoParser) parseWithFilename(input []byte, filename string) (*domain.
 			return &domain.WorkflowGraph{
 				Nodes: b.nodes,
 				Edges: b.edges,
-				// EntryNodeID intentionally empty.
+				// EntryNodeID intentionally empty. EntryAmbiguous
+				// tells the reachability rule to skip rather than
+				// surface a Critical "entry node is not set" — Codex
+				// Slice E #1.
+				EntryAmbiguous: true,
 			}, nil
 		}
 	}
@@ -1193,7 +1198,11 @@ func stringFieldValue(fields map[string]ast.Expr, key string) string {
 }
 
 // intFieldValue extracts an integer literal value for a keyed field.
-// Returns nil if field is missing or not an integer literal.
+// Returns nil if field is missing, not an integer literal, or
+// overflows int (Codex Slice E #4). The previous manual digit-by-digit
+// accumulation silently wrapped on huge literals, which would have
+// caused loop_guard / cycle severity to treat a value-overflowed
+// MaxIterations as bounded.
 func intFieldValue(fields map[string]ast.Expr, key string) *int {
 	expr, ok := fields[key]
 	if !ok {
@@ -1203,12 +1212,12 @@ func intFieldValue(fields map[string]ast.Expr, key string) *int {
 	if !ok || lit.Kind != token.INT {
 		return nil
 	}
-	var n int
-	for _, ch := range lit.Value {
-		if ch < '0' || ch > '9' {
-			return nil
-		}
-		n = n*10 + int(ch-'0')
+	n, err := strconv.Atoi(lit.Value)
+	if err != nil {
+		// Overflow or non-decimal literal (0x..., 0o...). Return nil
+		// so loop_guard sees max_iterations as missing and fires
+		// rather than recording garbage.
+		return nil
 	}
 	return &n
 }
