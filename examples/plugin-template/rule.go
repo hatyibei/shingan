@@ -66,9 +66,10 @@ func (Rule) Analyze(g *domain.WorkflowGraph) []domain.Finding {
 
 func init() {
 	plugin.MustRegister(Rule{}, plugin.Manifest{
-		Severity:   domain.Warning,
-		Frameworks: []string{"all"},
-		Tags:       []string{"hygiene", "example"},
-		DocsURL:    "https://github.com/hatyibei/shingan/tree/main/examples/plugin-template",
+		Severity:          domain.Warning,
+		Frameworks:        []string{"all"},
+		Tags:              []string{"hygiene", "example"},
+		DocsURL:           "https://github.com/hatyibei/shingan/tree/main/examples/plugin-template",
+		MinShinganVersion: "0.9.0",
 	})
 }

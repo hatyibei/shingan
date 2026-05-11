@@ -24,6 +24,11 @@ builds:
       - -X main.version={{.Version}}
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
+      # Plugin SDK compatibility: plugin.checkShinganVersion reads
+      # github.com/hatyibei/shingan/version.Version to validate
+      # plugins' MinShinganVersion field. Without this injection the
+      # constant defaults to "dev", which is allowed-anything mode.
+      - -X github.com/hatyibei/shingan/version.Version={{.Version}}
 
   - id: shingan-gen
     main: ./cmd/shingan-gen

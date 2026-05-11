@@ -43,6 +43,8 @@ import (
 
 	"github.com/hatyibei/shingan/domain"
 	"github.com/hatyibei/shingan/domain/rules"
+	"github.com/hatyibei/shingan/version"
+	"golang.org/x/mod/semver"
 )
 
 // ExperimentalPrefix is the mandatory Name() prefix for plugin rules
@@ -65,11 +67,20 @@ const ExperimentalPrefix = "experimental:"
 // Optional fields:
 //   - Severity: defaults to domain.Info when zero-valued.
 //   - DocsURL: surfaced in IDE rule-hover providers.
+//   - MinShinganVersion: minimum semver (no leading `v`) of the
+//     shingan binary required to load this plugin. Empty means "no
+//     opinion / accept any version" — only use this for plugins that
+//     genuinely depend on no specific SDK feature. Recommended: pin
+//     the version your plugin was built against (e.g. "0.9.0") so
+//     future binary upgrades that break the plugin contract surface
+//     as a clear error at Register time rather than a runtime
+//     surprise.
 type Manifest struct {
-	Severity   domain.Severity
-	Frameworks []string
-	Tags       []string
-	DocsURL    string
+	Severity          domain.Severity
+	Frameworks        []string
+	Tags              []string
+	DocsURL           string
+	MinShinganVersion string
 }
 
 // Registered describes one plugin rule's runtime + author metadata.
@@ -107,6 +118,48 @@ var ErrEmpty = errors.New("plugin: Manifest requires non-empty Frameworks and Ta
 // registered the same name.
 var ErrCollision = errors.New("plugin: rule name already registered")
 
+// ErrVersionMismatch means the running shingan binary's version is
+// older than the plugin's declared MinShinganVersion. Plugin authors
+// can detect this case with errors.Is.
+var ErrVersionMismatch = errors.New("plugin: shingan binary is older than plugin's MinShinganVersion")
+
+// ErrBadVersion means the plugin's MinShinganVersion isn't a valid
+// semver string (must be "MAJOR.MINOR.PATCH" without leading `v`).
+var ErrBadVersion = errors.New("plugin: MinShinganVersion is not valid semver")
+
+// checkShinganVersion compares the binary's `version.Version` against
+// the plugin's declared MinShinganVersion. Returns nil when:
+//   - the plugin opts out by leaving MinShinganVersion empty;
+//   - the binary is a dev build (version.Version == "dev"), so local
+//     development isn't blocked by ldflags injection state;
+//   - the binary version satisfies `binary >= MinShinganVersion`.
+//
+// Returns ErrBadVersion when the plugin's declared MinShinganVersion
+// can't be parsed, ErrVersionMismatch when the binary is too old.
+func checkShinganVersion(min string) error {
+	if min == "" {
+		return nil
+	}
+	if version.IsDev() {
+		return nil
+	}
+	wantV := "v" + min
+	gotV := "v" + version.Version
+	if !semver.IsValid(wantV) {
+		return fmt.Errorf("%w: %q", ErrBadVersion, min)
+	}
+	if !semver.IsValid(gotV) {
+		// Binary version isn't valid semver. Treat as "unknown" and
+		// don't gate registration — dev builds and tagged builds are
+		// the supported configurations.
+		return nil
+	}
+	if semver.Compare(gotV, wantV) < 0 {
+		return fmt.Errorf("%w: binary=%s, plugin requires >=%s", ErrVersionMismatch, version.Version, min)
+	}
+	return nil
+}
+
 // Register validates and stores a plugin rule. Typical use is in an
 // init() function of the plugin package.
 //
@@ -127,6 +180,10 @@ func Register(rule domain.AnalysisRule, m Manifest) error {
 		if _, ok := validFrameworks[fw]; !ok {
 			return fmt.Errorf("plugin: unknown framework %q (valid: langgraph, crewai, n8n, adk-go, samurai, json, all)", fw)
 		}
+	}
+	// Version compatibility (optional opt-in).
+	if err := checkShinganVersion(m.MinShinganVersion); err != nil {
+		return err
 	}
 	// Collision with a built-in?
 	for _, b := range rules.AllBuiltins() {
@@ -184,3 +241,13 @@ func resetForTest() {
 	registry = nil
 	names = map[string]struct{}{}
 }
+
+// pluginVersion / setPluginVersion are internal accessors for the
+// binary version string. Production code reads `version.Version`
+// directly; tests use these to swap the value out and restore it
+// without rebuilding the test binary. Defined here (rather than in
+// _test.go) so the swap mutates the same global that the production
+// `checkShinganVersion` reads.
+func pluginVersion() string { return version.Version }
+
+func setPluginVersion(v string) { version.Version = v }

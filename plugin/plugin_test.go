@@ -8,6 +8,22 @@ import (
 	"github.com/hatyibei/shingan/domain"
 )
 
+// withBinaryVersion temporarily overrides `version.Version` for the
+// duration of fn, restoring it on cleanup. Compatibility tests use it
+// to simulate different release / dev builds without having to
+// rebuild the test binary with -ldflags.
+func withBinaryVersion(t *testing.T, v string, fn func()) {
+	t.Helper()
+	orig := pluginVersion()
+	setPluginVersion(v)
+	defer setPluginVersion(orig)
+	fn()
+}
+
+// errorsIs is a tiny alias so the new version-compat tests stay
+// readable alongside the existing `errors.Is` call sites.
+func errorsIs(err, target error) bool { return errors.Is(err, target) }
+
 // stubRule is the minimal AnalysisRule satisfying the contract.
 type stubRule struct{ name string }
 
@@ -130,5 +146,97 @@ func TestMustRegister_PanicsOnError(t *testing.T) {
 	}()
 	MustRegister(stubRule{name: "no_prefix"}, Manifest{
 		Frameworks: []string{"all"}, Tags: []string{"x"},
+	})
+}
+
+// stubRuleNamed is a parameterised stub so the version compat tests
+// can register multiple unique names without redefining the type.
+type stubRuleNamed struct{ name string }
+
+func (s stubRuleNamed) Name() string                                    { return s.name }
+func (stubRuleNamed) Analyze(_ *domain.WorkflowGraph) []domain.Finding { return nil }
+
+// TestRegister_MinShinganVersion_TooOld asserts a plugin requiring a
+// future binary version is rejected with ErrVersionMismatch when the
+// binary has a tagged release version (not "dev").
+func TestRegister_MinShinganVersion_TooOld(t *testing.T) {
+	t.Cleanup(resetForTest)
+	withBinaryVersion(t, "0.9.0", func() {
+		err := Register(stubRule{name: "experimental:future"}, Manifest{
+			Frameworks:        []string{"all"},
+			Tags:              []string{"x"},
+			MinShinganVersion: "0.10.0", // strictly newer than the binary
+		})
+		if !errorsIs(err, ErrVersionMismatch) {
+			t.Errorf("expected ErrVersionMismatch, got %v", err)
+		}
+	})
+}
+
+// TestRegister_MinShinganVersion_Compatible asserts registration
+// succeeds when the binary version is >= the plugin's minimum.
+func TestRegister_MinShinganVersion_Compatible(t *testing.T) {
+	t.Cleanup(resetForTest)
+	withBinaryVersion(t, "0.9.5", func() {
+		err := Register(stubRule{name: "experimental:ok"}, Manifest{
+			Frameworks:        []string{"all"},
+			Tags:              []string{"x"},
+			MinShinganVersion: "0.9.0",
+		})
+		if err != nil {
+			t.Errorf("expected success, got %v", err)
+		}
+	})
+}
+
+// TestRegister_MinShinganVersion_DevAllowsAnything pins the
+// development-friendly behaviour: a "dev" binary (no ldflags) is
+// treated as compatible with every plugin so local iteration doesn't
+// require pinning the in-tree version.
+func TestRegister_MinShinganVersion_DevAllowsAnything(t *testing.T) {
+	t.Cleanup(resetForTest)
+	withBinaryVersion(t, "dev", func() {
+		err := Register(stubRule{name: "experimental:strict"}, Manifest{
+			Frameworks:        []string{"all"},
+			Tags:              []string{"x"},
+			MinShinganVersion: "99.0.0", // unreachable in any real release
+		})
+		if err != nil {
+			t.Errorf("dev build must accept any plugin, got %v", err)
+		}
+	})
+}
+
+// TestRegister_MinShinganVersion_InvalidRejected guards against typos:
+// a non-semver MinShinganVersion fails registration with ErrBadVersion
+// rather than silently passing.
+func TestRegister_MinShinganVersion_InvalidRejected(t *testing.T) {
+	t.Cleanup(resetForTest)
+	withBinaryVersion(t, "0.9.0", func() {
+		err := Register(stubRuleNamed{name: "experimental:typo"}, Manifest{
+			Frameworks:        []string{"all"},
+			Tags:              []string{"x"},
+			MinShinganVersion: "zero point nine",
+		})
+		if !errorsIs(err, ErrBadVersion) {
+			t.Errorf("expected ErrBadVersion, got %v", err)
+		}
+	})
+}
+
+// TestRegister_MinShinganVersion_EmptyOptsOut: leaving the field empty
+// is the supported "no opinion" path. Useful for plugins that
+// genuinely don't depend on a specific SDK feature.
+func TestRegister_MinShinganVersion_EmptyOptsOut(t *testing.T) {
+	t.Cleanup(resetForTest)
+	withBinaryVersion(t, "0.9.0", func() {
+		err := Register(stubRule{name: "experimental:any"}, Manifest{
+			Frameworks: []string{"all"},
+			Tags:       []string{"x"},
+			// MinShinganVersion intentionally omitted.
+		})
+		if err != nil {
+			t.Errorf("expected success when MinShinganVersion empty, got %v", err)
+		}
 	})
 }

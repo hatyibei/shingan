@@ -50,6 +50,7 @@ Supported analyses:
 	cmd.AddCommand(newListRulesCmd())
 	cmd.AddCommand(newExplainCmd())
 	cmd.AddCommand(newRulesCmd())
+	cmd.AddCommand(newVersionCmd())
 
 	return cmd
 }

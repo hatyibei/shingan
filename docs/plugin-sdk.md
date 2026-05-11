@@ -76,7 +76,35 @@ without special-casing.
 normal analysis output and are subject to the same severity overrides
 / ignore comments / baseline suppression as built-ins.
 
-**`.shingan.yaml plugins:` declaration ✓ (this commit).** Projects
+**Plugin version compat check ✓ (this commit).** Plugins declare the
+minimum shingan release they were built against:
+
+```go
+plugin.MustRegister(MyRule{}, plugin.Manifest{
+    // ...
+    MinShinganVersion: "0.9.0",
+})
+```
+
+At `init()` time, `plugin.Register` compares the plugin's
+`MinShinganVersion` against the binary's `version.Version` (set via
+`-ldflags '-X github.com/hatyibei/shingan/version.Version=...'`,
+populated by goreleaser). If the binary is older, registration fails
+with `ErrVersionMismatch` and a message naming both versions. Dev
+builds (binary version `"dev"`) accept every plugin so local
+iteration isn't blocked. Plugins that genuinely don't depend on a
+specific SDK feature can leave `MinShinganVersion` empty to opt out.
+
+```
+$ shingan version
+0.8.0
+
+$ shingan-with-plugins rules
+panic: plugin.MustRegister: plugin: shingan binary is older than
+plugin's MinShinganVersion: binary=0.8.0, plugin requires >=0.9.0
+```
+
+**`.shingan.yaml plugins:` declaration ✓ (previous commit).** Projects
 declare which plugin rules they depend on:
 
 ```yaml
@@ -141,6 +169,24 @@ type Manifest struct {
 // gathering. Plugin authors don't call these directly.
 func RegisteredRules() []Registered
 func Rules() []domain.AnalysisRule
+```
+
+```go
+// version package — single source of truth for the binary's release
+// string. Plugin authors don't import this; they declare
+// `MinShinganVersion` in their Manifest and the SDK reads
+// version.Version for them.
+package version
+
+// Version is the shingan release tag this binary was built for
+// (semver, no leading `v`). Defaults to "dev"; goreleaser injects
+// the real value via ldflags at release time.
+var Version = "dev"
+
+// IsDev reports whether the running binary is a development build.
+// MinShinganVersion checks treat dev builds as compatible with
+// everything so local iteration isn't blocked.
+func IsDev() bool
 ```
 
 External rule template:

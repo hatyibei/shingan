@@ -11,6 +11,7 @@ require (
 	go.lsp.dev/uri v0.3.0
 	go.uber.org/zap v1.21.0
 	goa.design/goa/v3 v3.26.0
+	golang.org/x/mod v0.35.0
 	golang.org/x/tools v0.44.0
 	google.golang.org/adk v1.1.0
 	google.golang.org/genai v1.40.0
@@ -69,7 +70,6 @@ require (
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/multierr v1.8.0 // indirect
 	golang.org/x/crypto v0.51.0 // indirect
-	golang.org/x/mod v0.35.0 // indirect
 	golang.org/x/net v0.54.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
