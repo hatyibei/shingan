@@ -1192,18 +1192,24 @@ func intFieldValue(fields map[string]ast.Expr, key string) *int {
 // langchaintool, mcptool) plus future "*tool" packages without
 // hard-coding each.
 func isToolConstructorCall(call *ast.CallExpr) bool {
-	sel, ok := call.Fun.(*ast.SelectorExpr)
+	// Unwrap generic instantiation FIRST: for
+	// `functiontool.New[TArgs, TResults](...)`, Go's AST stores
+	// call.Fun as an *ast.IndexListExpr (or *ast.IndexExpr for a
+	// single type arg) WRAPPING the SelectorExpr, not the other way
+	// around. Asserting *ast.SelectorExpr on the raw call.Fun would
+	// fail for every generic form and silently drop the tool from
+	// the graph. Mirrors the unwrap order in extractFuncToolName.
+	fun := call.Fun
+	if idx, ok := fun.(*ast.IndexListExpr); ok {
+		fun = idx.X
+	} else if idx, ok := fun.(*ast.IndexExpr); ok {
+		fun = idx.X
+	}
+	sel, ok := fun.(*ast.SelectorExpr)
 	if !ok || sel.Sel == nil || sel.Sel.Name != "New" {
 		return false
 	}
-	// Unwrap generic instantiation: `functiontool.New[T,R]`.
-	x := sel.X
-	if idx, ok := x.(*ast.IndexExpr); ok {
-		x = idx.X
-	} else if idx, ok := x.(*ast.IndexListExpr); ok {
-		x = idx.X
-	}
-	pkgIdent, ok := x.(*ast.Ident)
+	pkgIdent, ok := sel.X.(*ast.Ident)
 	if !ok {
 		return false
 	}

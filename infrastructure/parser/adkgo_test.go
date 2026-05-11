@@ -1010,3 +1010,45 @@ func NewCoordinator() agent.Agent {
 			graph.EntryNodeID, nodeKeys(graph))
 	}
 }
+
+// TestADKGoParser_GenericFunctionToolNewIsRecognised guards the
+// codex-review-flagged ordering bug in isToolConstructorCall: for
+// `functiontool.New[TArgs, TResults](...)` the Go AST stores call.Fun
+// as an IndexListExpr WRAPPING the SelectorExpr, not the other way
+// around. The original code asserted SelectorExpr on call.Fun
+// directly, which fails for generic forms and silently dropped the
+// tool from the graph. After the fix the unwrap happens first; this
+// test makes that ordering load-bearing.
+//
+// We assert on the *graph* (tool present + edge from owner) rather
+// than on the predicate in isolation so that the regression survives
+// future refactors that move the predicate.
+func TestADKGoParser_GenericFunctionToolNewIsRecognised(t *testing.T) {
+	src := []byte(`package agents
+
+func NewWorker() agent.Agent {
+	a, _ := llmagent.New(llmagent.Config{
+		Name:  "worker",
+		Model: "gpt-4o",
+		Tools: []tool.Tool{
+			functiontool.New[QueryArgs, QueryResult](
+				functiontool.Config{Name: "search_index"},
+				searchHandler,
+			),
+		},
+	})
+	return a
+}
+`)
+	p := parser.NewADKGoParser()
+	graph, err := p.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if graph.Nodes["search_index"] == nil {
+		t.Errorf("generic functiontool.New[T,R] tool missing; nodes=%v", nodeKeys(graph))
+	}
+	if _, leaked := graph.Nodes["new"]; leaked {
+		t.Errorf("generic constructor name 'new' leaked as a tool")
+	}
+}
