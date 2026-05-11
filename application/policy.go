@@ -20,6 +20,18 @@
 //	    rules:
 //	      cycle_detection:
 //	        enabled: false
+//	plugins:                   # declarative plugin manifest (v0.9+)
+//	  - experimental:todo_node_marker
+//	  - experimental:company_naming
+//
+// The `plugins:` block lists rule names that MUST be registered in the
+// running binary's plugin catalog. shingan fails at startup with a
+// clear error pointing at the wrapper-binary build instructions if any
+// declared plugin is absent. This bridges the gap between Go's static
+// linkage (no dynamic plugin loading) and the ESLint-style plugin
+// list that teams expect their project config to capture: the YAML
+// declares intent, the build pipeline produces a binary that fulfils
+// it.
 //
 // Resolution order (later wins):
 //
@@ -44,6 +56,11 @@ import (
 type Policy struct {
 	Rules     map[string]RuleConfig `yaml:"rules,omitempty"`
 	Overrides []OverridePolicy      `yaml:"overrides,omitempty"`
+	// Plugins is the list of plugin rule names the project requires
+	// to be present in the running binary's catalog. shingan
+	// validates this list at startup via VerifyRequiredPlugins. An
+	// empty list (the default) opts out of the check.
+	Plugins []string `yaml:"plugins,omitempty"`
 }
 
 // RuleConfig overrides one rule's defaults.
@@ -210,4 +227,58 @@ func parseSeverity(s string) (domain.Severity, bool) {
 		return domain.Info, true
 	}
 	return 0, false
+}
+
+// VerifyRequiredPlugins confirms every rule name in policy.Plugins is
+// present in `availableRules`. Returns nil when the policy is nil,
+// has no plugins declared, or all declared plugins are present.
+// Returns a multi-line error pointing at the wrapper-binary build
+// docs when any declared plugin is missing — this is the fail-fast
+// signal that the user is running a shingan binary that doesn't ship
+// the plugins their project config expects.
+//
+// availableRules is the union of built-in rule names and plugin rule
+// names visible to the current binary (typically supplied as
+// `application.RuleNamesFromManifests(ListRuleManifests(builtins))`
+// by the CLI). Passing it in keeps Onion intact — application doesn't
+// reach into infrastructure to discover what rules exist.
+func VerifyRequiredPlugins(policy *Policy, availableRules []string) error {
+	if policy == nil || len(policy.Plugins) == 0 {
+		return nil
+	}
+	available := make(map[string]struct{}, len(availableRules))
+	for _, name := range availableRules {
+		available[name] = struct{}{}
+	}
+	var missing []string
+	for _, want := range policy.Plugins {
+		if _, ok := available[want]; !ok {
+			missing = append(missing, want)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"plugins declared in .shingan.yaml are not registered in this binary: %v\n\n"+
+			"Hint: build a wrapper binary that side-effect-imports the plugin "+
+			"packages. See examples/plugin-template/cmd/shingan-with-plugins/main.go "+
+			"or https://github.com/hatyibei/shingan/blob/main/docs/plugin-sdk.md "+
+			"for the canonical wrapper. The official `shingan` binary ships only "+
+			"the 22 built-in rules and cannot dynamically load Go plugins.",
+		missing,
+	)
+}
+
+// RuleNamesFromManifests is a small helper that turns a RuleManifest
+// slice into a flat name slice, suitable for passing to
+// VerifyRequiredPlugins. Provided so callers don't have to write the
+// trivial loop and so the dependency direction stays
+// cli → application (cli reads manifests, application validates).
+func RuleNamesFromManifests(manifests []RuleManifest) []string {
+	out := make([]string, len(manifests))
+	for i, m := range manifests {
+		out[i] = m.Name
+	}
+	return out
 }

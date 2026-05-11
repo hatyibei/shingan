@@ -166,6 +166,15 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 	if policyPath != "" {
 		if loaded, err := application.LoadPolicy(policyPath); err == nil && loaded != nil {
 			orchestrator.Policy = loaded
+			// .shingan.yaml `plugins:` declares which plugin rule names
+			// this project requires. If any are missing from the
+			// running binary's catalog the user is on the wrong
+			// binary (no plugin wrapper, or the wrapper omitted
+			// some plugins) — fail fast with a build pointer.
+			catalog := application.ListRuleManifests(analyzerFactory.CreateAll())
+			if vErr := application.VerifyRequiredPlugins(loaded, application.RuleNamesFromManifests(catalog)); vErr != nil {
+				return 1, vErr
+			}
 		} else if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not load policy %q: %v\n", policyPath, err)
 		}

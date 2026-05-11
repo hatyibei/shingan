@@ -76,6 +76,25 @@ without special-casing.
 normal analysis output and are subject to the same severity overrides
 / ignore comments / baseline suppression as built-ins.
 
+**`.shingan.yaml plugins:` declaration ✓ (this commit).** Projects
+declare which plugin rules they depend on:
+
+```yaml
+# .shingan.yaml
+plugins:
+  - experimental:todo_node_marker
+  - experimental:company_naming
+```
+
+At analyze time, shingan verifies every name in `plugins:` is present
+in the running binary's catalog. If any are missing, analyze fails
+with a build-pointer error so the user knows to switch to the
+wrapper binary that ships those plugins. This bridges the gap between
+Go's static linkage (no dynamic plugin loading) and the ESLint-style
+plugin list that teams expect their project config to capture: the
+YAML declares intent, the build pipeline produces a binary that
+fulfils it. Empty/missing `plugins:` key opts out of the check.
+
 **Custom binary build flow ✓ (this commit).** The CLI runtime is
 exposed as `github.com/hatyibei/shingan/cli` with two exports:
 `Run(args []string) int` and `NewRootCmd() *cobra.Command`. Plugin
