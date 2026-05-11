@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,6 +34,15 @@ type analyzeFlags struct {
 
 	// Phase 0.5 — operational trust.
 	policy string // --policy=<path>: load .shingan.yaml severity policy; "" = auto-discover
+
+	// stdout / stderr writers (Codex Slice B #2/#3). Threaded through
+	// from cmd.OutOrStdout / cmd.ErrOrStderr so wrappers and tests
+	// can capture report output via root.SetOut. Default to
+	// os.Stdout / os.Stderr when zero-valued, preserving the binary
+	// UX. Direct field access rather than helpers keeps the analyze
+	// surface compact.
+	stdout io.Writer
+	stderr io.Writer
 }
 
 // newAnalyzeCmd builds and returns the cobra.Command for "shingan analyze".
@@ -50,11 +60,26 @@ Exit codes:
   1  At least one Warning finding (and no Critical findings)
   2  At least one Critical finding`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Thread cobra's writers through so wrappers and tests
+			// using root.SetOut/SetErr can capture report and warning
+			// output (Codex Slice B #2/#3). Existing CLI behaviour
+			// is preserved because cobra's defaults are os.Stdout /
+			// os.Stderr.
+			flags.stdout = cmd.OutOrStdout()
+			flags.stderr = cmd.ErrOrStderr()
 			code, err := executeAnalyze(flags)
 			if err != nil {
 				return err
 			}
-			os.Exit(code)
+			if code != 0 {
+				// Surface the analysis exit code (1=Warning, 2=Critical)
+				// as a typed error so cli.Run can translate it to a
+				// process exit code WITHOUT process-killing the caller.
+				// Codex Slice B #1 flagged that the old os.Exit(code)
+				// here broke the cli.Run contract: in-process wrappers
+				// and tests were terminated instead of seeing the code.
+				return &exitCodeError{code: code}
+			}
 			return nil
 		},
 	}
@@ -279,7 +304,7 @@ func emitFindings(flags *analyzeFlags, outputFormat string, findings []domain.Fi
 		return 1, fmt.Errorf("format findings: %w", err)
 	}
 
-	if err := writeOutput(flags.outputFile, output); err != nil {
+	if err := writeOutput(flags.outputFile, output, flags.stdout); err != nil {
 		return 1, fmt.Errorf("write output: %w", err)
 	}
 
@@ -537,15 +562,21 @@ func loadGraph(path string) (*domain.WorkflowGraph, error) {
 	return parseFile(path, p)
 }
 
-// writeOutput writes data to a file if path is non-empty, otherwise to stdout.
-func writeOutput(path string, data []byte) error {
+// writeOutput writes data to a file if path is non-empty, otherwise to
+// the supplied stdout writer (defaulting to os.Stdout when nil). The
+// writer is threaded from `cmd.OutOrStdout()` in newAnalyzeCmd so
+// in-process wrappers and tests using `root.SetOut` capture the
+// report.
+func writeOutput(path string, data []byte, stdout io.Writer) error {
 	if path == "" {
-		_, err := os.Stdout.Write(data)
-		if err != nil {
+		if stdout == nil {
+			stdout = os.Stdout
+		}
+		if _, err := stdout.Write(data); err != nil {
 			return fmt.Errorf("write to stdout: %w", err)
 		}
 		// Add a trailing newline for terminal readability.
-		_, _ = fmt.Fprintln(os.Stdout)
+		_, _ = fmt.Fprintln(stdout)
 		return nil
 	}
 

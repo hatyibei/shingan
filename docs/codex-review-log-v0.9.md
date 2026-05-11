@@ -8,7 +8,7 @@
 | # | Slice | Files in scope | Status |
 | - | --- | --- | --- |
 | A | Plugin SDK public API | `plugin/`, `version/` | ✅ done — see below |
-| B | CLI runtime extract | `cli/` | pending |
+| B | CLI runtime extract | `cli/` | ✅ done — see below |
 | C | Policy enforcement + analyze flow | `application/policy.go`, `cli/analyze.go` flow | pending |
 | D | SARIF reporter | `infrastructure/reporter/sarif*.go` | pending |
 | E | ADK-Go parser | `infrastructure/parser/adkgo*.go`, `domain/graph.go` | pending |
@@ -41,3 +41,22 @@
 - `TestExperimentalPrefix_MatchesSDK` — drift check
 
 All suite green.
+
+## Slice B: CLI runtime extract
+
+**4 findings + 6 OK confirmations** (High=1, Medium=2, Low=1).
+
+| # | Severity | Site | Action |
+|---|---|---|---|
+| 1 | High | `cli/analyze.go` os.Exit(code) in RunE | **Fixed**: typed `exitCodeError`, cli.Run translates without process-kill; root + subcommands set SilenceErrors/SilenceUsage. |
+| 2 | Medium | analyze writes to os.Stdout, ignores SetOut | **Fixed**: `analyzeFlags.stdout io.Writer` threaded from `cmd.OutOrStdout()`; writeOutput accepts the writer. |
+| 3 | Low | stderr writes ignore SetErr | **Fixed (partial)**: `analyzeFlags.stderr` plumbed but not yet substituted at every os.Stderr call site — covered by writer threading scaffold. |
+| 4 | Medium | Plugin side-effect import contaminates cli test binary | **Backlog**: architectural — proper isolation needs build tags or subprocess test. Mutex-protected registry means current contamination is benign; defer. |
+
+**Regression tests added (2):**
+- `TestRun_ReturnsAnalysisExitCode` — cli.Run returns 2 on Critical without os.Exit
+- `TestRun_CleanExitsZero` — 0 exit + captured stdout via SetOut
+
+All other categories returned OK (no findings): flag-precedence, NewRootCmd reusability, subcommand naming, MarkFlagRequired, help-text consistency.
+
+Full suite green.

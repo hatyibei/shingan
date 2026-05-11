@@ -23,11 +23,23 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 )
+
+// exitCodeError is a typed error returned from a subcommand's RunE
+// when the work succeeded but the analysis result requires a non-zero
+// process exit code (Warning=1, Critical=2). cli.Run translates this
+// into the exit code without process-killing the caller — that's the
+// contract that lets plugin wrapper binaries and in-process tests
+// drive analyze via cli.Run. Codex Slice B #1: pre-fix, analyze
+// called os.Exit(code) directly in RunE.
+type exitCodeError struct{ code int }
+
+func (e *exitCodeError) Error() string { return fmt.Sprintf("exit code %d", e.code) }
 
 // NewRootCmd builds the root cobra command tree with every subcommand
 // shingan ships with (analyze, list-rules, explain, rules). External
@@ -56,17 +68,41 @@ Supported analyses:
 }
 
 // Run executes the root cobra command with the supplied argv (typically
-// `os.Args[1:]`). It returns an exit code suitable for `os.Exit`:
-// 0 on success, 1 on any error returned from the command tree.
+// `os.Args[1:]`). Returns the process exit code: 0 on success, 1 on
+// any real error, or the analysis exit code (1=Warning, 2=Critical)
+// when a finding-based exitCodeError surfaces from analyze.
 //
-// Errors are printed to stderr before returning. Plugin wrapper
-// binaries typically just write `os.Exit(cli.Run(os.Args[1:]))`.
+// Real errors are printed to stderr before returning;
+// finding-based exits print only the report itself (which the
+// subcommand already wrote to stdout). Plugin wrapper binaries
+// typically just write `os.Exit(cli.Run(os.Args[1:]))`.
 func Run(args []string) int {
 	root := NewRootCmd()
+	// Silence cobra's auto-print of errors and usage so we can
+	// distinguish finding-based exits (no extra output) from real
+	// errors (Error: <msg>) ourselves. Applied to root + every
+	// subcommand so the behaviour is uniform.
+	silenceErrors(root)
 	root.SetArgs(args)
 	if err := root.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		var ec *exitCodeError
+		if errors.As(err, &ec) {
+			return ec.code
+		}
+		fmt.Fprintln(os.Stderr, "Error:", err)
 		return 1
 	}
 	return 0
+}
+
+// silenceErrors walks the command tree disabling cobra's automatic
+// "Error: ..." print and usage-on-error display. We render real
+// errors ourselves in Run() and finding-based exitCodeError values
+// produce no extra output.
+func silenceErrors(cmd *cobra.Command) {
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	for _, c := range cmd.Commands() {
+		silenceErrors(c)
+	}
 }
