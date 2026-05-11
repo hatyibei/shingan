@@ -240,3 +240,53 @@ func TestRegister_MinShinganVersion_EmptyOptsOut(t *testing.T) {
 		}
 	})
 }
+
+// TestRegister_ManifestSlicesDeepCopied covers Codex round-2 P4:
+// caller-supplied Frameworks / Tags slices must be deep-copied at
+// registration time so a post-Register mutation can't reach into the
+// registry's manifest. Without the copy, what was validated and what
+// is in the catalog drift apart, and concurrent readers race against
+// the writer.
+func TestRegister_ManifestSlicesDeepCopied(t *testing.T) {
+	t.Cleanup(resetForTest)
+	fw := []string{"langgraph"}
+	tags := []string{"safety"}
+	if err := Register(stubRule{name: "experimental:isolation"}, Manifest{
+		Frameworks: fw,
+		Tags:       tags,
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	fw[0] = "bogus"
+	tags[0] = "bogus"
+	got := RegisteredRules()
+	if got[0].Manifest.Frameworks[0] != "langgraph" {
+		t.Errorf("post-Register Frameworks mutation leaked into registry: %v", got[0].Manifest.Frameworks)
+	}
+	if got[0].Manifest.Tags[0] != "safety" {
+		t.Errorf("post-Register Tags mutation leaked into registry: %v", got[0].Manifest.Tags)
+	}
+}
+
+// TestRegisteredRules_ReturnsDeepCopy: same guarantee on the read side.
+// Mutating the returned slice's contents must not affect future
+// reads.
+func TestRegisteredRules_ReturnsDeepCopy(t *testing.T) {
+	t.Cleanup(resetForTest)
+	if err := Register(stubRule{name: "experimental:isolation_read"}, Manifest{
+		Frameworks: []string{"langgraph"},
+		Tags:       []string{"safety"},
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	first := RegisteredRules()
+	first[0].Manifest.Frameworks[0] = "bogus"
+	first[0].Manifest.Tags[0] = "bogus"
+	second := RegisteredRules()
+	if second[0].Manifest.Frameworks[0] != "langgraph" {
+		t.Errorf("second read sees mutation from first: %v", second[0].Manifest.Frameworks)
+	}
+	if second[0].Manifest.Tags[0] != "safety" {
+		t.Errorf("second read Tags mutated: %v", second[0].Manifest.Tags)
+	}
+}

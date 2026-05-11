@@ -102,6 +102,45 @@ rules:
 	}
 }
 
+// TestVerifyRequiredPlugins_BuiltinNameRejected covers Codex round-2
+// P3: a non-prefixed name (e.g. a built-in like "cycle_detection")
+// in plugins: must fail validation even if it's in `available`. The
+// plugins: contract is specifically for experimental: plugin rules;
+// built-in tuning belongs under `rules:`.
+func TestVerifyRequiredPlugins_BuiltinNameRejected(t *testing.T) {
+	p := &Policy{Plugins: []string{"cycle_detection"}}
+	available := []string{"cycle_detection"} // even though it's "available"
+	err := VerifyRequiredPlugins(p, available)
+	if err == nil {
+		t.Fatal("expected error for non-prefixed plugin entry, got nil")
+	}
+	if !strings.Contains(err.Error(), "experimental:") {
+		t.Errorf("error must hint at the experimental: prefix requirement; got: %s", err)
+	}
+}
+
+// TestVerifyRequiredPlugins_MixedErrorsReported asserts both the
+// bad-prefix and missing-plugin error categories surface in a single
+// validation pass when both apply.
+func TestVerifyRequiredPlugins_MixedErrorsReported(t *testing.T) {
+	p := &Policy{Plugins: []string{
+		"cycle_detection",       // bad prefix
+		"experimental:absent",   // wrong binary
+		"experimental:present",  // ok
+	}}
+	available := []string{"experimental:present"}
+	err := VerifyRequiredPlugins(p, available)
+	if err == nil {
+		t.Fatal("expected combined error")
+	}
+	msg := err.Error()
+	for _, want := range []string{"cycle_detection", "experimental:absent", "experimental:"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error must mention %q; got: %s", want, msg)
+		}
+	}
+}
+
 // TestRuleNamesFromManifests is a trivial-but-load-bearing helper —
 // the CLI uses it to feed VerifyRequiredPlugins.
 func TestRuleNamesFromManifests(t *testing.T) {

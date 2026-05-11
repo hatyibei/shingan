@@ -47,6 +47,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/hatyibei/shingan/domain"
 	"gopkg.in/yaml.v3"
@@ -229,19 +230,30 @@ func parseSeverity(s string) (domain.Severity, bool) {
 	return 0, false
 }
 
-// VerifyRequiredPlugins confirms every rule name in policy.Plugins is
-// present in `availableRules`. Returns nil when the policy is nil,
-// has no plugins declared, or all declared plugins are present.
-// Returns a multi-line error pointing at the wrapper-binary build
-// docs when any declared plugin is missing — this is the fail-fast
-// signal that the user is running a shingan binary that doesn't ship
-// the plugins their project config expects.
+// experimentalPrefix mirrors plugin.ExperimentalPrefix. Duplicated as
+// a constant here so `application` doesn't need to import `plugin`
+// (which would invert the dependency direction — plugin → domain,
+// application → plugin is fine, but we keep the dependency
+// minimal). Kept in sync via TestVerifyRequiredPlugins_PrefixMatchesSDK.
+const experimentalPrefix = "experimental:"
+
+// VerifyRequiredPlugins confirms every rule name in policy.Plugins
+// is (1) prefixed with `experimental:` (the v0.x SDK contract — only
+// plugin rules belong in this list, not built-ins) and (2) present
+// in `availableRules`. Returns nil when the policy is nil, has no
+// plugins declared, or all declared plugins are valid.
 //
-// availableRules is the union of built-in rule names and plugin rule
-// names visible to the current binary (typically supplied as
-// `application.RuleNamesFromManifests(ListRuleManifests(builtins))`
-// by the CLI). Passing it in keeps Onion intact — application doesn't
-// reach into infrastructure to discover what rules exist.
+// availableRules should be the names of currently-registered plugin
+// rules (typically `plugin.Rules()` mapped to names). The caller
+// supplies this slice rather than the union of all rules so a
+// typo'd built-in name in `.shingan.yaml plugins:` is caught here
+// instead of silently passing validation.
+//
+// Two distinct error categories so users debugging CI know whether
+// to fix the YAML or the wrapper binary build:
+//
+//   - Wrong prefix → typo / misunderstanding; fix the YAML.
+//   - Missing from catalog → wrong binary; rebuild the wrapper.
 func VerifyRequiredPlugins(policy *Policy, availableRules []string) error {
 	if policy == nil || len(policy.Plugins) == 0 {
 		return nil
@@ -250,24 +262,40 @@ func VerifyRequiredPlugins(policy *Policy, availableRules []string) error {
 	for _, name := range availableRules {
 		available[name] = struct{}{}
 	}
-	var missing []string
+	var badPrefix, missing []string
 	for _, want := range policy.Plugins {
+		if want == "" {
+			continue
+		}
+		if !strings.HasPrefix(want, experimentalPrefix) {
+			badPrefix = append(badPrefix, want)
+			continue
+		}
 		if _, ok := available[want]; !ok {
 			missing = append(missing, want)
 		}
 	}
-	if len(missing) == 0 {
+	if len(badPrefix) == 0 && len(missing) == 0 {
 		return nil
 	}
-	return fmt.Errorf(
-		"plugins declared in .shingan.yaml are not registered in this binary: %v\n\n"+
-			"Hint: build a wrapper binary that side-effect-imports the plugin "+
-			"packages. See examples/plugin-template/cmd/shingan-with-plugins/main.go "+
-			"or https://github.com/hatyibei/shingan/blob/main/docs/plugin-sdk.md "+
-			"for the canonical wrapper. The official `shingan` binary ships only "+
-			"the 22 built-in rules and cannot dynamically load Go plugins.",
-		missing,
-	)
+	parts := []string{}
+	if len(badPrefix) > 0 {
+		parts = append(parts, fmt.Sprintf(
+			"plugins entries must start with %q (built-in rule names belong under `rules:`, not `plugins:`); got: %v",
+			experimentalPrefix, badPrefix,
+		))
+	}
+	if len(missing) > 0 {
+		parts = append(parts, fmt.Sprintf(
+			"plugins declared in .shingan.yaml are not registered in this binary: %v\n"+
+				"Hint: build a wrapper binary that side-effect-imports the plugin "+
+				"packages. See examples/plugin-template/cmd/shingan-with-plugins/main.go "+
+				"or https://github.com/hatyibei/shingan/blob/main/docs/plugin-sdk.md "+
+				"for the canonical wrapper.",
+			missing,
+		))
+	}
+	return fmt.Errorf("%s", strings.Join(parts, "\n\n"))
 }
 
 // RuleNamesFromManifests is a small helper that turns a RuleManifest

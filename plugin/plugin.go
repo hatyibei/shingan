@@ -197,8 +197,28 @@ func Register(rule domain.AnalysisRule, m Manifest) error {
 		return fmt.Errorf("%w (plugin %q)", ErrCollision, name)
 	}
 	names[name] = struct{}{}
-	registry = append(registry, Registered{Rule: rule, Manifest: m})
+	// Deep-copy the slice fields so a caller mutating their original
+	// slices after Register() can't reach into the registry and change
+	// what was validated. Codex round-2 P4 flagged this — without the
+	// copy, `m.Frameworks` aliased the caller's slice, leaving a
+	// post-validation mutation path that also raced with
+	// ListRuleManifests readers.
+	stored := m
+	stored.Frameworks = copyStrings(m.Frameworks)
+	stored.Tags = copyStrings(m.Tags)
+	registry = append(registry, Registered{Rule: rule, Manifest: stored})
 	return nil
+}
+
+// copyStrings returns a defensive copy of s. Returns nil for nil
+// input so a manifest with no entries serialises identically.
+func copyStrings(s []string) []string {
+	if s == nil {
+		return nil
+	}
+	out := make([]string, len(s))
+	copy(out, s)
+	return out
 }
 
 // MustRegister is the init()-friendly wrapper around Register that
@@ -212,12 +232,20 @@ func MustRegister(rule domain.AnalysisRule, m Manifest) {
 }
 
 // Registered returns a copy of the currently registered plugin rules
-// in registration order. Returned slice is safe to mutate.
+// in registration order. The outer slice and each Manifest's
+// Frameworks / Tags slices are deep-copied so callers can mutate the
+// result without racing against ongoing Register calls or future
+// readers. Codex round-2 P4.
 func RegisteredRules() []Registered {
 	mu.RLock()
 	defer mu.RUnlock()
 	out := make([]Registered, len(registry))
-	copy(out, registry)
+	for i, r := range registry {
+		copied := r
+		copied.Manifest.Frameworks = copyStrings(r.Manifest.Frameworks)
+		copied.Manifest.Tags = copyStrings(r.Manifest.Tags)
+		out[i] = copied
+	}
 	return out
 }
 

@@ -103,9 +103,24 @@ func (p *ADKGoParser) parseWithFilename(input []byte, filename string) (*domain.
 			entryCandidates = b.firstStandaloneAgentID()
 		}
 		if len(entryCandidates) == 0 {
+			// Two sub-cases:
+			//   (a) Nothing parsed at all → return an empty graph (legacy).
+			//   (b) Multiple ambiguous roots (Codex round-2 P6) →
+			//       preserve the nodes so the catalog reflects what's
+			//       in the file, but leave EntryNodeID empty so the
+			//       reachability rule doesn't manufacture
+			//       unreachable_node FPs against an arbitrarily-chosen
+			//       leaf.
+			if len(b.nodes) == 0 {
+				return &domain.WorkflowGraph{
+					Nodes: make(map[string]*domain.Node),
+					Edges: []domain.Edge{},
+				}, nil
+			}
 			return &domain.WorkflowGraph{
-				Nodes: make(map[string]*domain.Node),
-				Edges: []domain.Edge{},
+				Nodes: b.nodes,
+				Edges: b.edges,
+				// EntryNodeID intentionally empty.
 			}, nil
 		}
 	}
@@ -322,18 +337,37 @@ func (b *adkgoBuilder) firstStandaloneAgentID() []string {
 			}
 		}
 	}
-	pickFrom := rootLLMs
-	if len(pickFrom) == 0 {
-		pickFrom = rootAny
+	// Codex round-2 P6: only auto-promote when the root is
+	// unambiguous. A file with two unrelated standalone factories
+	// (NewA / NewB, no edges between them) has TWO zero-indegree
+	// LLMs — picking one alphabetically would manufacture an
+	// `unreachable_node` finding on the other. Returning nil here
+	// leaves EntryNodeID empty, which signals "no clear root" to
+	// downstream rules (unreachable_node skips its check in that
+	// case).
+	if len(rootLLMs) == 1 {
+		return rootLLMs[:1]
 	}
-	if len(pickFrom) == 0 {
-		// Every node has an incoming edge — graph is a closed cycle.
-		// Fall back to alphabetic id for deterministic output.
-		for id := range b.nodes {
-			pickFrom = append(pickFrom, id)
-		}
+	if len(rootLLMs) > 1 {
+		return nil
+	}
+	if len(rootAny) == 1 {
+		return rootAny[:1]
+	}
+	if len(rootAny) > 1 {
+		return nil
+	}
+	// All nodes have incoming edges — graph is a closed cycle.
+	// Pick alphabetically for deterministic output (the cycle itself
+	// is what callers care about, not the entry).
+	var pickFrom []string
+	for id := range b.nodes {
+		pickFrom = append(pickFrom, id)
 	}
 	sort.Strings(pickFrom)
+	if len(pickFrom) == 0 {
+		return nil
+	}
 	return pickFrom[:1]
 }
 

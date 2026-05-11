@@ -87,6 +87,49 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 		outputFormat = "json"
 	}
 
+	// 0. Load + verify policy BEFORE any work — including before the
+	//    --since short-circuit. Without this, codex review (round 2)
+	//    flagged that `.shingan.yaml plugins:` verification was
+	//    bypassed when `--since` produced an empty change set, and a
+	//    malformed policy file was downgraded to a warning instead of
+	//    enforcing the fail-fast contract for missing-plugin builds.
+	analyzerFactory := factory.NewAnalyzerFactory()
+	policyPath := flags.policy
+	policyExplicit := policyPath != ""
+	if policyPath == "" {
+		if discovered, _ := application.DiscoverPolicy(""); discovered != "" {
+			policyPath = discovered
+		}
+	}
+	var loadedPolicy *application.Policy
+	if policyPath != "" {
+		loaded, err := application.LoadPolicy(policyPath)
+		if err != nil {
+			// A policy file exists but parses badly — that's a
+			// fail-fast condition. Silently warning would let a
+			// missing/typo'd plugins: list ride through CI.
+			return 1, fmt.Errorf("load policy %q: %w", policyPath, err)
+		}
+		if loaded != nil {
+			loadedPolicy = loaded
+			// Pass plugin-rule names only (NOT the built-in union).
+			// Codex round-2 P3 flagged that mixing built-ins in
+			// `availableRules` lets `.shingan.yaml plugins:
+			// ["cycle_detection"]` pass validation even though
+			// cycle_detection is a built-in rule and doesn't carry
+			// the `experimental:` prefix that the plugins: contract
+			// requires.
+			pluginNames := make([]string, 0, len(plugin.RegisteredRules()))
+			for _, pr := range plugin.RegisteredRules() {
+				pluginNames = append(pluginNames, pr.Rule.Name())
+			}
+			if vErr := application.VerifyRequiredPlugins(loaded, pluginNames); vErr != nil {
+				return 1, vErr
+			}
+		}
+	}
+	_ = policyExplicit // reserved for future "policy required" enforcement
+
 	// 1. Resolve --since FIRST so we can short-circuit before spawning any
 	//    parser (in particular: --format=langgraph eagerly forks a Python
 	//    worker, which must not happen for unchanged --since runs).
@@ -150,35 +193,11 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 	// rules. Plugins register themselves at `init()` time via
 	// `plugin.MustRegister`, which means the set is fixed by what
 	// the binary statically links — there's no runtime loader.
-	analyzerFactory := factory.NewAnalyzerFactory()
 	rules := append(analyzerFactory.CreateAll(), plugin.Rules()...)
 
 	orchestrator := application.NewAnalysisOrchestrator()
-
-	// Load policy: explicit --policy flag wins; otherwise walk up from
-	// CWD looking for .shingan.yaml. Failures are non-fatal — analysis
-	// proceeds with rule defaults if the policy file is malformed.
-	policyPath := flags.policy
-	if policyPath == "" {
-		if discovered, _ := application.DiscoverPolicy(""); discovered != "" {
-			policyPath = discovered
-		}
-	}
-	if policyPath != "" {
-		if loaded, err := application.LoadPolicy(policyPath); err == nil && loaded != nil {
-			orchestrator.Policy = loaded
-			// .shingan.yaml `plugins:` declares which plugin rule names
-			// this project requires. If any are missing from the
-			// running binary's catalog the user is on the wrong
-			// binary (no plugin wrapper, or the wrapper omitted
-			// some plugins) — fail fast with a build pointer.
-			catalog := application.ListRuleManifests(analyzerFactory.CreateAll())
-			if vErr := application.VerifyRequiredPlugins(loaded, application.RuleNamesFromManifests(catalog)); vErr != nil {
-				return 1, vErr
-			}
-		} else if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not load policy %q: %v\n", policyPath, err)
-		}
+	if loadedPolicy != nil {
+		orchestrator.Policy = loadedPolicy
 	}
 
 	findings := orchestrator.AnalyzeMulti(inputs, rules)

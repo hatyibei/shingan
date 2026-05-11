@@ -1052,3 +1052,36 @@ func NewWorker() agent.Agent {
 		t.Errorf("generic constructor name 'new' leaked as a tool")
 	}
 }
+
+// TestADKGoParser_AmbiguousRootsNoAutoEntry covers Codex round-2 P6:
+// when a file declares two unrelated standalone factories (no edges
+// between them, both zero-indegree LLMs), the parser must NOT pick
+// one alphabetically as the entry — doing so would manufacture an
+// unreachable_node finding on the other. Returning an empty
+// EntryNodeID signals "no clear root" so downstream rules skip the
+// reachability check.
+func TestADKGoParser_AmbiguousRootsNoAutoEntry(t *testing.T) {
+	src := []byte(`package agents
+
+func NewA() agent.Agent {
+	a, _ := llmagent.New(llmagent.Config{Name: "agent_a", Model: "gpt-4o"})
+	return a
+}
+
+func NewB() agent.Agent {
+	a, _ := llmagent.New(llmagent.Config{Name: "agent_b", Model: "gpt-4o"})
+	return a
+}
+`)
+	p := parser.NewADKGoParser()
+	graph, err := p.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if graph.Nodes["agent_a"] == nil || graph.Nodes["agent_b"] == nil {
+		t.Fatalf("expected both factory agents in graph; got %v", nodeKeys(graph))
+	}
+	if graph.EntryNodeID != "" {
+		t.Errorf("EntryNodeID must be empty when roots are ambiguous; got %q", graph.EntryNodeID)
+	}
+}
