@@ -35,21 +35,33 @@ isn't pinned yet.
 
 ## Building a custom shingan binary with this plugin
 
-The Shingan CLI entry point will be extractable into an importable
-package in the v0.9.0 final release (tracked as a follow-up to the
-v0.9 Plugin SDK landing). Until then, the supported integration path
-is:
+The Shingan CLI runtime is exposed as `github.com/hatyibei/shingan/cli`
+so wrapper binaries can embed the official command tree by importing
+that package plus their plugin(s). The canonical wrapper lives at
+`cmd/shingan-with-plugins/` in this directory:
 
-1. **Fork-and-import**: clone shingan, add a side-effect import of
-   your plugin package in `cmd/shingan/main.go`'s package, rebuild.
-2. **In-tree development**: drop your plugin under
-   `examples/<my-plugin>/`, add a side-effect import in a test file
-   to verify it loads, then publish from your own fork.
+```bash
+go build -o ./shingan-with-plugins ./examples/plugin-template/cmd/shingan-with-plugins
 
-The integration tests for this template (`cmd/shingan/plugin_integration_test.go`)
-demonstrate path 2 — they side-effect-import this package and assert
-the rule appears in `shingan rules` and `shingan rules --format=json`
-output.
+# The plugin appears in the rule catalog:
+./shingan-with-plugins rules
+# experimental:todo_node_marker  warning  all  External plugin rule
+
+# And participates in analyze alongside built-ins:
+./shingan-with-plugins analyze --input=mygraph.json --output=markdown
+# | experimental:todo_node_marker | TODO_classify | 100% | … |
+```
+
+Plugin authors copy `cmd/shingan-with-plugins/` into their own repo
+and replace the `_ "github.com/hatyibei/shingan/examples/plugin-template"`
+import with their plugin package's import path. The rest of the
+wrapper (calling `cli.Run(os.Args[1:])`) stays identical.
+
+The integration tests for this template
+(`cli/plugin_integration_test.go`) also demonstrate the wiring — they
+side-effect-import this package inside the test binary and assert
+the rule appears in `shingan rules` output and
+`shingan rules --format=json`.
 
 ## Running the example via tests
 

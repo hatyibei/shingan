@@ -76,13 +76,14 @@ without special-casing.
 normal analysis output and are subject to the same severity overrides
 / ignore comments / baseline suppression as built-ins.
 
-**Custom binary build flow ⏳ (follow-up commit).** The CLI entry
-point (`cmd/shingan/`) needs to be extracted into an importable
-package so plugin wrapper binaries can call into it. Until that
-lands, the supported path is fork-and-import (described in
-`examples/plugin-template/README.md`). The integration tests in
-`cmd/shingan/plugin_integration_test.go` demonstrate the wiring works
-end-to-end via in-tree side-effect imports.
+**Custom binary build flow ✓ (this commit).** The CLI runtime is
+exposed as `github.com/hatyibei/shingan/cli` with two exports:
+`Run(args []string) int` and `NewRootCmd() *cobra.Command`. Plugin
+wrapper binaries `_ "your-plugin"` + `cli.Run(os.Args[1:])` and they
+get the full official command tree (analyze, rules, list-rules,
+explain) with the plugin's rules merged in. See
+`examples/plugin-template/cmd/shingan-with-plugins/main.go` for the
+canonical 5-line wrapper.
 
 **Sample external repo ⏳ (planned).**
 `github.com/hatyibei/shingan-rule-template` will be a forkable repo

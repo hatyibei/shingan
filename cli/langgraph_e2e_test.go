@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"bytes"
@@ -15,7 +15,7 @@ import (
 // `testdata/langgraph/`.
 func langgraphTestdataPath(name string) string {
 	_, file, _, _ := runtime.Caller(0)
-	root := filepath.Join(filepath.Dir(file), "..", "..")
+	root := filepath.Join(filepath.Dir(file), "..")
 	return filepath.Join(root, "testdata", "langgraph", name)
 }
 
@@ -24,7 +24,7 @@ func langgraphTestdataPath(name string) string {
 // we check both for compat with vendored / forked checkouts.
 func shimPath() string {
 	_, file, _, _ := runtime.Caller(0)
-	root := filepath.Join(filepath.Dir(file), "..", "..")
+	root := filepath.Join(filepath.Dir(file), "..")
 	for _, rel := range []string{
 		filepath.Join("infrastructure", "parser", "shims", "export_langgraph_server.py"),
 		filepath.Join("scripts", "export_langgraph_server.py"),
@@ -64,7 +64,7 @@ func buildShinganBinary(t *testing.T) string {
 	cmd := exec.Command("go", "build", "-o", out, "./cmd/shingan")
 	// Run from project root so module resolution works.
 	_, file, _, _ := runtime.Caller(0)
-	cmd.Dir = filepath.Join(filepath.Dir(file), "..", "..")
+	cmd.Dir = filepath.Join(filepath.Dir(file), "..")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"encoding/json"
@@ -16,9 +16,9 @@ import (
 // testdata directory. Using runtime.Caller allows this to work regardless of
 // the working directory in which the test is executed.
 func testdataPath(name string) string {
-	// This file lives at cmd/shingan/main_test.go; root is two levels up.
+	// This file lives at cli/main_test.go; root is one level up.
 	_, file, _, _ := runtime.Caller(0)
-	root := filepath.Join(filepath.Dir(file), "..", "..")
+	root := filepath.Join(filepath.Dir(file), "..")
 	return filepath.Join(root, "testdata", name)
 }
 
