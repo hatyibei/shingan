@@ -35,6 +35,7 @@ Supported analyses:
 	cmd.AddCommand(newAnalyzeCmd())
 	cmd.AddCommand(newListRulesCmd())
 	cmd.AddCommand(newExplainCmd())
+	cmd.AddCommand(newRulesCmd())
 
 	return cmd
 }
