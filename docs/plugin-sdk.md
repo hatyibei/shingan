@@ -76,7 +76,26 @@ without special-casing.
 normal analysis output and are subject to the same severity overrides
 / ignore comments / baseline suppression as built-ins.
 
-**SARIF taxonomy with plugin namespace ✓ (this commit).** SARIF
+**Plugin author helpers ✓ (this commit).** Two small helpers replace
+the boilerplate plugin authors otherwise rewrite per rule:
+
+```go
+// Construct a Finding with sensible defaults (Confidence=1.0,
+// ConfidenceReason=ReasonExactStaticMatch). Override on the returned
+// struct for heuristic detections.
+plugin.NewFinding(ruleName, nodeID, domain.Warning, "message")
+
+// Iterate nodes by type without writing the for/switch:
+for _, n := range plugin.NodesOfType(g, domain.NodeTypeLLM) {
+    // ...
+}
+```
+
+Scope is deliberately narrow — the SDK ships only helpers that 80% of
+real rules will use. More helpers will land as patterns surface from
+actual plugin authors (Plugin SDK is experimental until v1.0).
+
+**SARIF taxonomy with plugin namespace ✓ (previous commit).** SARIF
 output (`shingan analyze --output=sarif`) now carries the full rule
 manifest on every `reportingDescriptor`:
 

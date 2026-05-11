@@ -35,8 +35,8 @@ type Rule struct{}
 func (Rule) Name() string { return plugin.ExperimentalPrefix + "todo_node_marker" }
 
 // Analyze emits a Finding for every node whose ID begins with BannedPrefix.
-// Severity is forced to Warning at the Finding level so the rule's
-// behaviour is independent of the Manifest's default Severity.
+// Uses plugin.NewFinding for the boilerplate (Confidence/ConfidenceReason
+// defaults) — the canonical plugin-author pattern.
 func (Rule) Analyze(g *domain.WorkflowGraph) []domain.Finding {
 	if g == nil {
 		return nil
@@ -49,17 +49,15 @@ func (Rule) Analyze(g *domain.WorkflowGraph) []domain.Finding {
 		if !strings.HasPrefix(node.ID, BannedPrefix) {
 			continue
 		}
-		out = append(out, domain.Finding{
-			RuleName:         Rule{}.Name(),
-			NodeID:           node.ID,
-			Severity:         domain.Warning,
-			Confidence:       1.0,
-			ConfidenceReason: domain.ReasonExactStaticMatch,
-			Message: "node ID begins with `" + BannedPrefix +
-				"`: rename before merge to production",
-			Suggestion: "Rename the node to something descriptive; the " +
-				"`" + BannedPrefix + "` prefix marks unfinished work.",
-		})
+		f := plugin.NewFinding(
+			Rule{}.Name(),
+			node.ID,
+			domain.Warning,
+			"node ID begins with `"+BannedPrefix+"`: rename before merge to production",
+		)
+		f.Suggestion = "Rename the node to something descriptive; the " +
+			"`" + BannedPrefix + "` prefix marks unfinished work."
+		out = append(out, f)
 	}
 	return out
 }
