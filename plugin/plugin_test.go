@@ -290,3 +290,100 @@ func TestRegisteredRules_ReturnsDeepCopy(t *testing.T) {
 		t.Errorf("second read Tags mutated: %v", second[0].Manifest.Tags)
 	}
 }
+
+// TestRegister_NameValidationStrict locks in Slice A finding #3:
+// the post-prefix portion of the rule name must match the documented
+// slug grammar. Before this validation any byte sequence after
+// `experimental:` would register — including control chars,
+// zero-width Unicode, path-traversal-like characters, and case
+// variants — and those names then flowed into YAML keys, SARIF rule
+// ids, IDE catalogs, and shell-like contexts.
+func TestRegister_NameValidationStrict(t *testing.T) {
+	t.Cleanup(resetForTest)
+	bad := []string{
+		"experimental:",              // empty suffix
+		"experimental:1bad",          // starts with digit
+		"experimental:Foo",           // uppercase
+		"experimental:foo bar",       // whitespace
+		"experimental:foo-bar",       // hyphen (deliberately disallowed at v0.x)
+		"experimental:foo/bar",       // path separator
+		"experimental:foo\nbar",      // newline
+		"experimental:foo\x00bar",    // NUL
+		"experimental:foo​bar",  // zero-width space
+		"experimental:../foo",        // path traversal
+		"experimental:" + strings.Repeat("a", 65), // length cap
+	}
+	m := Manifest{Frameworks: []string{"all"}, Tags: []string{"x"}}
+	for _, name := range bad {
+		err := Register(stubRuleNamed{name: name}, m)
+		if err == nil {
+			t.Errorf("Register(%q) should fail strict name validation", name)
+			resetForTest()
+			continue
+		}
+		resetForTest()
+	}
+	// Sanity: a clean name is accepted.
+	if err := Register(stubRule{name: "experimental:clean_name_42"}, m); err != nil {
+		t.Errorf("clean name rejected: %v", err)
+	}
+}
+
+// TestRegister_TagsEntryValidation covers Slice A #4: per-entry Tags
+// validation must reject empty, whitespace-only, and control-character
+// strings so the catalog has no blank chips.
+func TestRegister_TagsEntryValidation(t *testing.T) {
+	t.Cleanup(resetForTest)
+	bad := [][]string{
+		{""},
+		{"   "},
+		{"security\nx"},
+	}
+	for _, tags := range bad {
+		err := Register(stubRule{name: "experimental:tagcheck"}, Manifest{
+			Frameworks: []string{"all"},
+			Tags:       tags,
+		})
+		if err == nil {
+			t.Errorf("Tags=%v should fail validation", tags)
+		}
+		resetForTest()
+	}
+}
+
+// TestCheckShinganVersion_InvalidBinaryRejected covers Slice A #5:
+// a non-dev binary with an invalid version string (e.g. "main", a
+// git SHA) used to silently bypass the compat check. Now it
+// returns ErrBadVersion so CI of the wrapper binary catches the
+// bad ldflag injection.
+func TestCheckShinganVersion_InvalidBinaryRejected(t *testing.T) {
+	t.Cleanup(resetForTest)
+	withBinaryVersion(t, "main", func() {
+		err := Register(stubRule{name: "experimental:strict"}, Manifest{
+			Frameworks:        []string{"all"},
+			Tags:              []string{"x"},
+			MinShinganVersion: "0.9.0",
+		})
+		if !errors.Is(err, ErrBadVersion) {
+			t.Errorf("non-dev invalid binary version must surface ErrBadVersion, got %v", err)
+		}
+	})
+}
+
+// TestCheckShinganVersion_VPrefixOnBinaryAccepted: Slice A #6 noted
+// that `v0.9.0` injected via ldflags would be rejected because the
+// code prepends another `v`. The fix strips a leading `v` from the
+// binary version first.
+func TestCheckShinganVersion_VPrefixOnBinaryAccepted(t *testing.T) {
+	t.Cleanup(resetForTest)
+	withBinaryVersion(t, "v0.9.5", func() {
+		err := Register(stubRule{name: "experimental:vpfx"}, Manifest{
+			Frameworks:        []string{"all"},
+			Tags:              []string{"x"},
+			MinShinganVersion: "0.9.0",
+		})
+		if err != nil {
+			t.Errorf("binary version %q (with v prefix) should be accepted; got %v", "v0.9.5", err)
+		}
+	})
+}

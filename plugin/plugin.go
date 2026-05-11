@@ -38,6 +38,7 @@ package plugin
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -47,6 +48,16 @@ import (
 	"golang.org/x/mod/semver"
 )
 
+// validNameSuffix is the grammar plugin rule names must satisfy AFTER
+// the `experimental:` prefix. Lowercase ASCII letters/digits/underscores
+// only, must start with a letter, length-bounded to avoid pathological
+// inputs. This is intentionally restrictive at v0.x — Codex Slice A
+// flagged that the previous prefix-only check let through control
+// chars, whitespace, zero-width Unicode, path-traversal-like
+// characters, and case variants. Loosening later is non-breaking;
+// tightening later would break authors.
+var validNameSuffix = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+
 // ExperimentalPrefix is the mandatory Name() prefix for plugin rules
 // until v1.0. Rules whose Name() does not start with this prefix are
 // rejected by Register so .shingan.yaml authors can visually
@@ -55,18 +66,22 @@ const ExperimentalPrefix = "experimental:"
 
 // Manifest is the author-supplied metadata for a plugin rule. Combined
 // with the runtime data from the rule's domain.AnalysisRule methods
-// (Name, Severity via the optional metaProvider duck-type), it
-// produces the same RuleManifest that built-in rules expose to the
-// catalog.
+// (Name), it produces the same RuleManifest that built-in rules
+// expose to the catalog.
 //
 // Required fields are validated at Register() time:
 //   - Frameworks: at least one entry, each a known framework slug
 //     ("langgraph", "crewai", "n8n", "adk-go", "samurai", "json", "all").
-//   - Tags: at least one entry.
+//   - Tags: at least one non-empty entry.
 //
 // Optional fields:
 //   - Severity: defaults to domain.Info when zero-valued.
-//   - DocsURL: surfaced in IDE rule-hover providers.
+//   - Description: one-sentence summary surfaced in `shingan rules`,
+//     IDE rule-hover, and SARIF reportingDescriptor.shortDescription.
+//     If empty, the catalog falls back to "External plugin rule".
+//   - Fixable: signals the rule emits findings with TextEdit
+//     auto-fixes (used by LSP code-action providers).
+//   - DocsURL: surfaced as SARIF helpUri and in IDE rule-hover.
 //   - MinShinganVersion: minimum semver (no leading `v`) of the
 //     shingan binary required to load this plugin. Empty means "no
 //     opinion / accept any version" — only use this for plugins that
@@ -77,6 +92,8 @@ const ExperimentalPrefix = "experimental:"
 //     surprise.
 type Manifest struct {
 	Severity          domain.Severity
+	Description       string
+	Fixable           bool
 	Frameworks        []string
 	Tags              []string
 	DocsURL           string
@@ -144,18 +161,25 @@ func checkShinganVersion(min string) error {
 		return nil
 	}
 	wantV := "v" + min
-	gotV := "v" + version.Version
 	if !semver.IsValid(wantV) {
 		return fmt.Errorf("%w: %q", ErrBadVersion, min)
 	}
+	// Normalise the binary version: accept "v0.9.0" too, even though
+	// the canonical form is unprefixed (Codex Slice A #6 — common
+	// author mistake). After this strip-then-prepend dance, gotV is
+	// always semver-valid `v<x.y.z>` form for tagged releases.
+	binary := strings.TrimPrefix(version.Version, "v")
+	gotV := "v" + binary
 	if !semver.IsValid(gotV) {
-		// Binary version isn't valid semver. Treat as "unknown" and
-		// don't gate registration — dev builds and tagged builds are
-		// the supported configurations.
-		return nil
+		// Binary version isn't a valid semver tag (e.g. "main", a
+		// git SHA, or a malformed ldflag). Pre-fix this silently
+		// passed every check; Codex Slice A #5 flagged that as a
+		// production-risk bypass. Surface it as ErrBadVersion so
+		// the binary's CI catches the bad build.
+		return fmt.Errorf("%w (binary): %q is not valid semver; goreleaser injects MAJOR.MINOR.PATCH via -X github.com/hatyibei/shingan/version.Version=...", ErrBadVersion, version.Version)
 	}
 	if semver.Compare(gotV, wantV) < 0 {
-		return fmt.Errorf("%w: binary=%s, plugin requires >=%s", ErrVersionMismatch, version.Version, min)
+		return fmt.Errorf("%w: binary=%s, plugin requires >=%s", ErrVersionMismatch, binary, min)
 	}
 	return nil
 }
@@ -173,17 +197,40 @@ func Register(rule domain.AnalysisRule, m Manifest) error {
 	if !strings.HasPrefix(name, ExperimentalPrefix) {
 		return fmt.Errorf("%w (got %q)", ErrInvalidPrefix, name)
 	}
+	// Strict suffix grammar — Codex Slice A flagged that a bare
+	// HasPrefix accepts whitespace, control chars, zero-width Unicode,
+	// case variants, path separators, etc. Validate the part after
+	// the prefix as a slug.
+	suffix := strings.TrimPrefix(name, ExperimentalPrefix)
+	if !validNameSuffix.MatchString(suffix) {
+		return fmt.Errorf(
+			"plugin: rule name %q has invalid suffix %q — must match %s",
+			name, suffix, validNameSuffix.String(),
+		)
+	}
 	if len(m.Frameworks) == 0 || len(m.Tags) == 0 {
-		return ErrEmpty
+		return fmt.Errorf("%w (rule %q)", ErrEmpty, name)
 	}
 	for _, fw := range m.Frameworks {
 		if _, ok := validFrameworks[fw]; !ok {
-			return fmt.Errorf("plugin: unknown framework %q (valid: langgraph, crewai, n8n, adk-go, samurai, json, all)", fw)
+			return fmt.Errorf("plugin: rule %q: unknown framework %q (valid: langgraph, crewai, n8n, adk-go, samurai, json, all)", name, fw)
+		}
+	}
+	// Per-entry Tags validation: reject empty, whitespace-only, or
+	// control-character tags so the catalog can't render blanks.
+	for _, t := range m.Tags {
+		if strings.TrimSpace(t) == "" {
+			return fmt.Errorf("plugin: rule %q: Tags entry must be non-empty", name)
+		}
+		for _, r := range t {
+			if r < 0x20 || r == 0x7f {
+				return fmt.Errorf("plugin: rule %q: Tags entry %q contains control character", name, t)
+			}
 		}
 	}
 	// Version compatibility (optional opt-in).
 	if err := checkShinganVersion(m.MinShinganVersion); err != nil {
-		return err
+		return fmt.Errorf("plugin: rule %q: %w", name, err)
 	}
 	// Collision with a built-in?
 	for _, b := range rules.AllBuiltins() {

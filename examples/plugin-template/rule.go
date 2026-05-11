@@ -65,6 +65,7 @@ func (Rule) Analyze(g *domain.WorkflowGraph) []domain.Finding {
 func init() {
 	plugin.MustRegister(Rule{}, plugin.Manifest{
 		Severity:          domain.Warning,
+		Description:       "flags workflow nodes whose ID begins with TODO_ as unfinished work",
 		Frameworks:        []string{"all"},
 		Tags:              []string{"hygiene", "example"},
 		DocsURL:           "https://github.com/hatyibei/shingan/tree/main/examples/plugin-template",

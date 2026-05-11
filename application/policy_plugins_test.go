@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/hatyibei/shingan/plugin"
 )
 
 // TestVerifyRequiredPlugins_NilPolicy: defensive — caller should be
@@ -160,4 +162,18 @@ func TestRuleNamesFromManifests(t *testing.T) {
 
 func writeFile(path, body string) error {
 	return os.WriteFile(path, []byte(body), 0o644)
+}
+
+// TestExperimentalPrefix_MatchesSDK covers Slice A #9: the
+// experimentalPrefix constant in application/policy.go is duplicated
+// from plugin.ExperimentalPrefix to keep the dependency direction
+// clean (application → plugin, not vice versa). If the two drift,
+// VerifyRequiredPlugins rejects names that plugin.Register would
+// accept (or vice versa). This test fails when either constant
+// changes independently.
+func TestExperimentalPrefix_MatchesSDK(t *testing.T) {
+	if experimentalPrefix != plugin.ExperimentalPrefix {
+		t.Fatalf("experimentalPrefix drift: application=%q vs plugin.ExperimentalPrefix=%q",
+			experimentalPrefix, plugin.ExperimentalPrefix)
+	}
 }

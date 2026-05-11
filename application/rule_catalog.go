@@ -126,17 +126,27 @@ func ListRuleManifests(rules []domain.AnalysisRule) []RuleManifest {
 	// Stability is forced to "experimental" until v1.0 (ADR-015).
 	for _, pr := range plugins {
 		name := pr.Rule.Name()
-		desc := firstLineSummary(name)
-		if desc == name {
-			// Plugin authors don't write into RuleExplanations; fall
-			// back to a generic description so the catalog row isn't
-			// confusingly empty.
-			desc = "External plugin rule"
+		// Prefer the plugin-author-supplied Description; fall back to
+		// the rule's RuleExplanations entry (rare for external rules,
+		// possible if a plugin author edits the explanations map via
+		// fork), and finally to a generic label so catalog rows are
+		// never empty. Codex Slice A #1: surfacing author Description
+		// is the v0.9 contract — plugin catalog entries should be
+		// indistinguishable from built-ins to consumers like SARIF /
+		// IDE hovers, modulo the stability flag.
+		desc := pr.Manifest.Description
+		if desc == "" {
+			if expl := firstLineSummary(name); expl != name {
+				desc = expl
+			} else {
+				desc = "External plugin rule"
+			}
 		}
 		manifest := RuleManifest{
 			Name:        name,
 			Severity:    pr.Manifest.Severity,
 			SeverityStr: pr.Manifest.Severity.String(),
+			Fixable:     pr.Manifest.Fixable,
 			Description: desc,
 			Frameworks:  pr.Manifest.Frameworks,
 			Tags:        pr.Manifest.Tags,
