@@ -13,7 +13,7 @@
 | D | SARIF reporter | `infrastructure/reporter/sarif*.go` | ✅ done — see below |
 | E | ADK-Go parser | `infrastructure/parser/adkgo*.go`, `domain/graph.go` | ✅ done — see below |
 | F | Rule catalog + domain | `application/rule_catalog.go`, NodeType marshalling | ✅ done — see below |
-| G | Tests & fixtures meta | `*_test.go` new, `testdata/` new | pending |
+| G | Tests & fixtures meta | `*_test.go` new, `testdata/` new | ✅ done — see below |
 
 ## Slice A: Plugin SDK public API
 
@@ -130,3 +130,32 @@ All suite green.
 - `TestRegister_DescriptionMustBeSingleLine`
 
 All suite green.
+
+## Slice G: Tests & fixtures meta
+
+**5 findings**: Medium=3, Low=2.
+
+| # | Severity | Site | Action |
+|---|---|---|---|
+| 1 | Medium | `TestADKGoParser_SequentialAgentIsSequenceNotLoop` only covers bare-struct; the real-API fixture was orphaned | **Fixed**: added `TestADKGoParser_SequentialAgentRealAPIIsSequence` for `sequentialagent.New(...)` factory pattern. |
+| 2 | Medium | `TestADKGoParser_AmbiguousRootsNoSpuriousCritical` only checks parser fields, not the rule | **Fixed**: added e2e `TestRun_AmbiguousADKRootNoCritical` calling public `cli.Run` to validate orchestrator + reachability path. |
+| 3 | Medium | `TestRun_ReturnsAnalysisExitCode` uses a local helper, not the public `Run()` | **Fixed**: new e2e test directly invokes `Run([]string{...})` for ambiguous-root scenario. |
+| 4 | Low | UX-wording substring assertions are brittle | **Accepted**: contract test, intentional. |
+| 5 | Low | gofmt drift in 3 files | **Fixed**: `gofmt -w` applied. |
+
+**Regression tests added (2):**
+- `TestADKGoParser_SequentialAgentRealAPIIsSequence`
+- `TestRun_AmbiguousADKRootNoCritical`
+
+All suite green.
+
+---
+
+## Audit summary (slices A–G)
+
+- **Total findings**: 44 across all slices (Critical=0, High=7, Medium=20, Low=17)
+- **Fixed**: 25 + 1 from round-2 follow-up
+- **Backlog**: 7 (mostly architectural / API ergonomics)
+- **OK/Accepted**: 12
+- **Regression tests added**: ~25
+- All slices green, full suite passing.

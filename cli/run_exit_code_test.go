@@ -88,3 +88,37 @@ func runWithSilencedRoot(root interface {
 	}
 	return 0
 }
+
+// TestRun_AmbiguousADKRootNoCritical is the end-to-end half of
+// Slice E #1 + Slice G #2: an ambiguous-root ADK-Go file flows
+// through the parser, reachability rule, and orchestrator without
+// emitting the spurious `entry node is not set` Critical that the
+// pre-fix swap surfaced. The parser-only test
+// (TestADKGoParser_AmbiguousRootsNoSpuriousCritical) covers half;
+// this one closes the loop.
+func TestRun_AmbiguousADKRootNoCritical(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "agents.go")
+	if err := os.WriteFile(src, []byte(`package agents
+
+func NewA() agent.Agent {
+	a, _ := llmagent.New(llmagent.Config{Name: "agent_a", Model: "gpt-4o"})
+	return a
+}
+
+func NewB() agent.Agent {
+	a, _ := llmagent.New(llmagent.Config{Name: "agent_b", Model: "gpt-4o"})
+	return a
+}
+`), 0o644); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+	// Call Run() directly to exercise the public contract, not a
+	// local mirror (Slice G #3). Output goes to os.Stdout; the test
+	// only asserts the exit code which should be 0 (no Critical) or
+	// 1 (Warning), never the pre-fix Critical (which would be 2).
+	args := []string{"analyze", "--input", src, "--format", "adk-go", "--output", "json"}
+	if code := Run(args); code == 2 {
+		t.Errorf("Run() returned 2 (Critical) — ambiguous-root regression: spurious 'entry node not set' or similar")
+	}
+}

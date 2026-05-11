@@ -126,9 +126,9 @@ func TestVerifyRequiredPlugins_BuiltinNameRejected(t *testing.T) {
 // validation pass when both apply.
 func TestVerifyRequiredPlugins_MixedErrorsReported(t *testing.T) {
 	p := &Policy{Plugins: []string{
-		"cycle_detection",       // bad prefix
-		"experimental:absent",   // wrong binary
-		"experimental:present",  // ok
+		"cycle_detection",      // bad prefix
+		"experimental:absent",  // wrong binary
+		"experimental:present", // ok
 	}}
 	available := []string{"experimental:present"}
 	err := VerifyRequiredPlugins(p, available)
@@ -191,12 +191,12 @@ func TestPluginNameSuffix_MatchesSDK(t *testing.T) {
 		"experimental:a",
 	}
 	bad := []string{
-		"experimental:",          // empty
-		"experimental:Foo",       // uppercase
-		"experimental:foo-bar",   // hyphen
-		"experimental:foo/bar",   // path sep
-		"experimental:foo bar",   // space
-		"experimental:1bad",      // digit start
+		"experimental:",        // empty
+		"experimental:Foo",     // uppercase
+		"experimental:foo-bar", // hyphen
+		"experimental:foo/bar", // path sep
+		"experimental:foo bar", // space
+		"experimental:1bad",    // digit start
 	}
 	avail := map[string]struct{}{
 		"experimental:foo":    {},

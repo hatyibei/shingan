@@ -27,7 +27,7 @@ func errorsIs(err, target error) bool { return errors.Is(err, target) }
 // stubRule is the minimal AnalysisRule satisfying the contract.
 type stubRule struct{ name string }
 
-func (s stubRule) Name() string                                       { return s.name }
+func (s stubRule) Name() string                                   { return s.name }
 func (stubRule) Analyze(_ *domain.WorkflowGraph) []domain.Finding { return nil }
 
 func TestRegister_RequiresExperimentalPrefix(t *testing.T) {
@@ -44,9 +44,9 @@ func TestRegister_RequiresExperimentalPrefix(t *testing.T) {
 func TestRegister_RequiresFrameworksAndTags(t *testing.T) {
 	t.Cleanup(resetForTest)
 	cases := []Manifest{
-		{Tags: []string{"x"}},                       // no frameworks
-		{Frameworks: []string{"langgraph"}},         // no tags
-		{},                                          // both empty
+		{Tags: []string{"x"}},               // no frameworks
+		{Frameworks: []string{"langgraph"}}, // no tags
+		{},                                  // both empty
 	}
 	for i, m := range cases {
 		err := Register(stubRule{name: "experimental:r"}, m)
@@ -153,7 +153,7 @@ func TestMustRegister_PanicsOnError(t *testing.T) {
 // can register multiple unique names without redefining the type.
 type stubRuleNamed struct{ name string }
 
-func (s stubRuleNamed) Name() string                                    { return s.name }
+func (s stubRuleNamed) Name() string                                   { return s.name }
 func (stubRuleNamed) Analyze(_ *domain.WorkflowGraph) []domain.Finding { return nil }
 
 // TestRegister_MinShinganVersion_TooOld asserts a plugin requiring a
@@ -301,16 +301,16 @@ func TestRegisteredRules_ReturnsDeepCopy(t *testing.T) {
 func TestRegister_NameValidationStrict(t *testing.T) {
 	t.Cleanup(resetForTest)
 	bad := []string{
-		"experimental:",              // empty suffix
-		"experimental:1bad",          // starts with digit
-		"experimental:Foo",           // uppercase
-		"experimental:foo bar",       // whitespace
-		"experimental:foo-bar",       // hyphen (deliberately disallowed at v0.x)
-		"experimental:foo/bar",       // path separator
-		"experimental:foo\nbar",      // newline
-		"experimental:foo\x00bar",    // NUL
-		"experimental:foo​bar",  // zero-width space
-		"experimental:../foo",        // path traversal
+		"experimental:",                           // empty suffix
+		"experimental:1bad",                       // starts with digit
+		"experimental:Foo",                        // uppercase
+		"experimental:foo bar",                    // whitespace
+		"experimental:foo-bar",                    // hyphen (deliberately disallowed at v0.x)
+		"experimental:foo/bar",                    // path separator
+		"experimental:foo\nbar",                   // newline
+		"experimental:foo\x00bar",                 // NUL
+		"experimental:foo​bar",                    // zero-width space
+		"experimental:../foo",                     // path traversal
 		"experimental:" + strings.Repeat("a", 65), // length cap
 	}
 	m := Manifest{Frameworks: []string{"all"}, Tags: []string{"x"}}

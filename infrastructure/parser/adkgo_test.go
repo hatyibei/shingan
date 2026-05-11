@@ -1118,3 +1118,39 @@ func NewB() agent.Agent {
 		t.Errorf("EntryNodeID must remain empty when ambiguous; got %q", graph.EntryNodeID)
 	}
 }
+
+// TestADKGoParser_SequentialAgentRealAPIIsSequence covers the
+// SDK-style `sequentialagent.New(sequentialagent.Config{...})` path
+// that the original Slice E regression test missed (Slice G #1).
+// The earlier regression only exercised the bare-struct path,
+// leaving the real-world factory shape that triggered the dogfood
+// FP (google/adk-samples llm-auditor) un-locked.
+func TestADKGoParser_SequentialAgentRealAPIIsSequence(t *testing.T) {
+	src := []byte(`package agents
+
+func NewAuditor() agent.Agent {
+	rootAgent, _ := sequentialagent.New(sequentialagent.Config{
+		AgentConfig: agent.Config{
+			Name: "llm_auditor",
+			SubAgents: []agent.Agent{
+				criticAgent,
+				reviserAgent,
+			},
+		},
+	})
+	return rootAgent
+}
+`)
+	p := parser.NewADKGoParser()
+	graph, err := p.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	node := graph.Nodes["llm_auditor"]
+	if node == nil {
+		t.Fatalf("expected 'llm_auditor' node; got %v", nodeKeys(graph))
+	}
+	if node.Type != domain.NodeTypeSequence {
+		t.Errorf("real-API SequentialAgent Type=%v, want NodeTypeSequence", node.Type)
+	}
+}
