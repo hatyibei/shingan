@@ -622,6 +622,49 @@ func TestLangGraphParser_BareRouterPartial(t *testing.T) {
 	}
 }
 
+// TestLangGraphParser_ForLoopEdges locks in the v0.8.7 FP-1 fix: the
+// AST fallback must unroll `for member in [<str-literal>, …]:
+// graph.add_edge(member, "Target")`. Without this, the
+// `unreachable_node` rule flagged QualityReview/NoteTaker on
+// starpig1129/DATAGEN workflow.py despite the for-loop wiring all
+// `members → QualityReview` and the conditional from there to
+// NoteTaker.
+func TestLangGraphParser_ForLoopEdges(t *testing.T) {
+	requirePythonLangGraph(t)
+	dir := findTestdataDir(t)
+
+	p, err := parser.NewLangGraphParser(parser.WithLangGraphScriptPath(findShim(t)))
+	if err != nil {
+		t.Fatalf("NewLangGraphParser: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	graph, err := p.ParseFile(filepath.Join(dir, "for_loop_edges.py"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+
+	hasEdge := func(from, to string) bool {
+		for _, e := range graph.Edges {
+			if e.From == from && e.To == to {
+				return true
+			}
+		}
+		return false
+	}
+	for _, member := range []string{"Visualization", "Search", "Coder", "Report"} {
+		if !hasEdge(member, "QualityReview") {
+			t.Errorf("expected unrolled for-loop edge %q → QualityReview; edges: %+v", member, graph.Edges)
+		}
+	}
+	if _, ok := graph.Nodes["QualityReview"]; !ok {
+		t.Errorf("QualityReview node missing; nodes: %v", nodeIDList(graph))
+	}
+	if _, ok := graph.Nodes["NoteTaker"]; !ok {
+		t.Errorf("NoteTaker node missing; nodes: %v", nodeIDList(graph))
+	}
+}
+
 // nodeIDList returns the sorted node ID slice for diagnostic messages.
 func nodeIDList(g *domain.WorkflowGraph) []string {
 	out := make([]string, 0, len(g.Nodes))

@@ -1125,6 +1125,14 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
         self._command_goto_map: Dict[str, set[str]] = {
             name: set(dests) for name, dests in self._BUILTIN_ROUTER_LITERALS.items()
         }
+        # Active loop-variable substitutions while traversing the body
+        # of a `for x in [<str-literals>]: …` statement. `_str_arg` checks
+        # this map so `add_edge(x, "QualityReview")` resolves correctly
+        # for each unrolled iteration. Dogfood (starpig1129/DATAGEN,
+        # workflow.py:119): `for member in ["Visualization","Search",
+        # "Coder","Report"]: workflow.add_edge(member, "QualityReview")`
+        # previously made QualityReview/NoteTaker appear unreachable.
+        self._loop_subst: Dict[str, str] = {}
 
     # ---- Command(goto=...) discovery -----------------------------------
 
@@ -1369,6 +1377,51 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
                     self._handle_set_entry(graph_id, node)
         self.generic_visit(node)
 
+    def visit_For(self, node: _ast.For) -> None:
+        """Unroll `for x in [<str-literal>, …]: …` so builder calls inside
+        the body see each literal as a constant.
+
+        Pattern (starpig1129/DATAGEN, workflow.py:119):
+
+            for member in ["Visualization", "Search", "Coder", "Report"]:
+                workflow.add_edge(member, "QualityReview")
+
+        was producing two false-positive `unreachable_node` findings on
+        nodes reachable only through this loop. The unrolling is
+        deliberately narrow: only literal `list`/`tuple` iterators with
+        all-string-constant elements, and only when the loop target is
+        a single `Name`. Anything else (generators, range(), tuple
+        unpacking) falls through to plain `generic_visit`.
+        """
+        target = node.target
+        iter_node = node.iter
+        target_name: Optional[str] = None
+        if isinstance(target, _ast.Name):
+            target_name = target.id
+        if (
+            target_name is not None
+            and isinstance(iter_node, (_ast.List, _ast.Tuple))
+            and iter_node.elts
+            and all(
+                isinstance(elt, _ast.Constant) and isinstance(elt.value, str)
+                for elt in iter_node.elts
+            )
+        ):
+            saved = self._loop_subst.get(target_name)
+            for elt in iter_node.elts:
+                self._loop_subst[target_name] = elt.value  # type: ignore[union-attr]
+                for stmt in node.body:
+                    self.visit(stmt)
+            if saved is None:
+                self._loop_subst.pop(target_name, None)
+            else:
+                self._loop_subst[target_name] = saved
+            # Skip the `else:` clause (LangGraph idiom doesn't use it for
+            # graph construction) and generic_visit of `node` itself,
+            # because we've already walked the body manually.
+            return
+        self.generic_visit(node)
+
     def _resolve_router_callable(self, expr: _ast.expr) -> Optional[str]:
         """Best-effort resolution of `add_conditional_edges`'s 2nd arg
         to a function name registered in `_command_goto_map`.
@@ -1443,11 +1496,17 @@ class _StateGraphASTVisitor(_ast.NodeVisitor):
             return call.func.attr
         return ""
 
-    @staticmethod
-    def _str_arg(node: _ast.expr) -> Optional[str]:
-        """Extract a string literal value, or None for non-literal args."""
+    def _str_arg(self, node: _ast.expr) -> Optional[str]:
+        """Extract a string literal value, or None for non-literal args.
+
+        Also resolves bare-name references to active loop-variable
+        substitutions (see visit_For), so unrolled
+        `add_edge(member, "X")` inside `for member in [...]:` works.
+        """
         if isinstance(node, _ast.Constant) and isinstance(node.value, str):
             return node.value
+        if isinstance(node, _ast.Name) and node.id in self._loop_subst:
+            return self._loop_subst[node.id]
         return None
 
     @staticmethod

@@ -200,3 +200,49 @@ crew = Crew(agents=[a, b], tasks=[t1, t2], process=Process.sequential)
 		t.Errorf("expected >=2 delegate edges (bidirectional), got %d", delegateEdges)
 	}
 }
+
+// TestCrewAIParser_AgentsOnlyModuleSkipped locks in the v0.8.7 FP-2
+// fix: a definition-only module (Agent ctors only, no Task / Crew)
+// should produce an empty graph via the AST fallback so the
+// `unreachable_node` rule has nothing to flag. Mirrors Devyan's
+// agents.py — without this guard, the first agent became entry and
+// the other 3 were wrongly flagged as unreachable.
+func TestCrewAIParser_AgentsOnlyModuleSkipped(t *testing.T) {
+	requirePythonCrewAI(t)
+	p, err := parser.NewCrewAIParser(parser.WithCrewAIScriptPath(findCrewAIShim(t)))
+	if err != nil {
+		t.Fatalf("NewCrewAIParser: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	// Agent factory methods inside a class — no top-level Crew, so the
+	// live worker can't materialise a graph and falls back to AST.
+	src := `
+from crewai import Agent
+
+class CustomAgents:
+    def architect_agent(self, tools):
+        return Agent(role="Software Architect", goal="g", backstory="b",
+                     tools=tools, allow_delegation=False)
+    def programmer_agent(self, tools):
+        return Agent(role="Software Programmer", goal="g", backstory="b",
+                     tools=tools, allow_delegation=False)
+    def tester_agent(self, tools):
+        return Agent(role="Software Tester", goal="g", backstory="b",
+                     tools=tools, allow_delegation=False)
+`
+	graph, err := p.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(graph.Nodes) != 0 {
+		nodeIDs := make([]string, 0, len(graph.Nodes))
+		for k := range graph.Nodes {
+			nodeIDs = append(nodeIDs, k)
+		}
+		t.Errorf("expected 0 nodes for agents-only module, got %d: %v", len(graph.Nodes), nodeIDs)
+	}
+	if len(graph.Edges) != 0 {
+		t.Errorf("expected 0 edges for agents-only module, got %d", len(graph.Edges))
+	}
+}

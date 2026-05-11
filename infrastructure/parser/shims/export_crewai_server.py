@@ -1144,6 +1144,27 @@ class _CrewASTVisitor(_ast.NodeVisitor):
         self._tasks.append(node_dict)
 
     def build(self) -> Dict[str, Any]:
+        # Definition-only modules (e.g. devyan/agents.py: 4 `Agent(...)`
+        # ctors, 0 `Task(...)` ctors) aren't workflows in their own right
+        # — they're imported by the entrypoint. CrewAI's mental model is
+        # task-centric: the graph is `Crew.tasks` order, and Agents are
+        # resources bound by `Task(agent=…)`. Emitting agent nodes from
+        # an agents-only file produced `unreachable_node` FPs (Devyan
+        # dogfood, 2026-05-11), so when there are no Tasks we return an
+        # empty graph and let the orchestrator move on to the file that
+        # actually wires the crew.
+        if not self._tasks:
+            return {
+                "nodes": [],
+                "edges": [],
+                "entry_node_id": "",
+                "metadata": {
+                    "source_format":           "crewai",
+                    "source_file":             self._source_path,
+                    "extraction":              "ast_fallback_skipped_no_tasks",
+                    "conditional_edge_reason": "exact_static_match",
+                },
+            }
         out_nodes = list(self._agents.values()) + self._tasks
         edges: list[Dict[str, Any]] = []
         # Sequential link Tasks head-to-tail (default Process for AST mode).

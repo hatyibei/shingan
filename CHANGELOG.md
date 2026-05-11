@@ -4,6 +4,43 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-05-11
+
+Round-2 dogfood (mid-sized active OSS) closed two real false positives.
+No new rules; both fixes are AST-fallback precision improvements driven
+by failures on real projects.
+
+### Fixed
+
+- **LangGraph parser**: AST fallback now unrolls `for <var> in
+  [<str-literal>, …]: graph.add_edge(<var>, "T")` (and the `add_edge(
+  "S", <var>)` mirror). Closes a false-positive `unreachable_node` pair
+  on `starpig1129/AI-Data-Analysis-MultiAgent` (a.k.a. DATAGEN, 1.7K★)
+  where `QualityReview` and `NoteTaker` were flagged unreachable
+  despite the for-loop wiring `Visualization/Search/Coder/Report →
+  QualityReview` and the conditional from there to `NoteTaker`. The
+  unrolling is deliberately narrow: literal list/tuple iterators only,
+  single `Name` target only, all-string-constant elements only —
+  anything dynamic falls through to plain `generic_visit` so we don't
+  hallucinate edges from generators, `range()`, or destructuring.
+- **CrewAI parser**: AST fallback returns an empty graph when a module
+  defines `Agent(...)` ctors with no `Task(...)` or `Crew(...)` at
+  module top level. Closes the false-positive `unreachable_node` triad
+  (Programmer/Tester/Reviewer) on `theyashwanthsai/Devyan` whose
+  `agents.py` is a definition-only module imported by the entrypoint.
+  CrewAI's mental model is task-centric: the graph is `Crew.tasks`
+  order; Agents are resources bound by `Task(agent=…)`. An agents-only
+  file therefore isn't a workflow in its own right and shouldn't
+  manufacture an arbitrary "first agent is entry" topology.
+
+### Testing
+
+- New regression fixture `testdata/langgraph/for_loop_edges.py` +
+  `TestLangGraphParser_ForLoopEdges` covering the DATAGEN pattern.
+- New regression fixture `testdata/crewai/agents_only_module.py` +
+  `TestCrewAIParser_AgentsOnlyModuleSkipped` covering the Devyan
+  pattern.
+
 ## [0.8.6] - 2026-05-09
 
 Continuation of the dogfood-driven brushup loop started in v0.8.5.
