@@ -113,6 +113,8 @@ The fixes below were all triggered by real OSS — not by synthetic test cases. 
 
 | Release | Fix | Source repo | Pattern closed |
 | --- | --- | --- | --- |
+| v0.9.2 | ADK-Go `<pkg>tool.New(arg, ...)` constructor unwrap | google/adk-samples financial-advisor | inline `agenttool.New(dataAnalyst, nil)` extracted "new" as Tool name; now recurses on first arg → "data_analyst" |
+| v0.9.2 | ADK-Go entry-node selection prefers LLM roots | google/adk-samples financial-advisor | fallback entry picked alphabetic first (a leaf tool) over the LLM coordinator; now selects nodes with zero in-degree, LLM-typed first |
 | v0.9.1 | ADK-Go SequentialAgent → NodeTypeSequence | google/adk-samples llm-auditor | SequentialAgent FP'd as Loop, triggered spurious Critical loop_guard finding |
 | v0.8.7 | LangGraph for-loop edge unrolling | DATAGEN | `for x in [<lit>, …]: g.add_edge(x, "T")` |
 | v0.8.7 | CrewAI agents-only empty-graph | Devyan | `agents.py` factory-style module |

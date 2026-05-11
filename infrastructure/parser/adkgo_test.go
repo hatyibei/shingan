@@ -936,3 +936,77 @@ var fanout = &ParallelAgent{
 		t.Error("ParallelAgent must NOT be classified as Loop/Control")
 	}
 }
+
+// TestADKGoParser_AgentToolNewUnwrapsArg locks in the v0.9.2
+// agenttool.New unwrap fix. Inline `agenttool.New(dataAnalyst, nil)`
+// in a Tools slice used to produce a Tool node named "new" (the
+// constructor's Sel name) because the parser walked the CallExpr
+// to its Fun selector. After the fix, the parser detects
+// `<pkg>tool.New(...)` constructors and recurses on the first arg,
+// yielding the wrapped resource's identifier as the tool name.
+//
+// The fixture mirrors google/adk-samples financial-advisor's
+// factory pattern (function body wraps llmagent.New(...) with
+// Tools containing agenttool.New unwraps).
+func TestADKGoParser_AgentToolNewUnwrapsArg(t *testing.T) {
+	src := []byte(`package agents
+
+func NewCoordinator() agent.Agent {
+	a, _ := llmagent.New(llmagent.Config{
+		Name:  "coordinator",
+		Model: "gpt-4o",
+		Tools: []tool.Tool{
+			agenttool.New(dataAnalyst, nil),
+			agenttool.New(tradingAnalyst, nil),
+		},
+	})
+	return a
+}
+`)
+	p := parser.NewADKGoParser()
+	graph, err := p.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	for _, want := range []string{"data_analyst", "trading_analyst"} {
+		if graph.Nodes[want] == nil {
+			t.Errorf("expected tool node %q, missing; nodes=%v", want, nodeKeys(graph))
+		}
+	}
+	if _, badFP := graph.Nodes["new"]; badFP {
+		t.Errorf("must NOT extract constructor name 'new' as a tool — v0.9.1 FP")
+	}
+}
+
+// TestADKGoParser_EntryPrefersLLMRoot covers the entry-selection
+// half of the same v0.9.2 fix. Pre-fix, firstStandaloneAgentID
+// sorted node IDs alphabetically and picked the first — so a graph
+// with `data_analyst`, `coordinator`, etc. picked the leaf
+// `data_analyst` as entry. Post-fix, the LLM with zero incoming
+// edges (`coordinator`) is chosen, which avoids cascading
+// `unreachable_node` FPs on the actual sub-agents.
+func TestADKGoParser_EntryPrefersLLMRoot(t *testing.T) {
+	src := []byte(`package agents
+
+func NewCoordinator() agent.Agent {
+	a, _ := llmagent.New(llmagent.Config{
+		Name:  "coordinator",
+		Model: "gpt-4o",
+		Tools: []tool.Tool{
+			agenttool.New(dataAnalyst, nil),
+			agenttool.New(executor, nil),
+		},
+	})
+	return a
+}
+`)
+	p := parser.NewADKGoParser()
+	graph, err := p.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if graph.EntryNodeID != "coordinator" {
+		t.Errorf("EntryNodeID = %q, want \"coordinator\" (the LLM root). nodes=%v",
+			graph.EntryNodeID, nodeKeys(graph))
+	}
+}

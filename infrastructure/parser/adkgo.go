@@ -285,21 +285,56 @@ func extractFuncToolName(expr ast.Expr) string {
 	return stringFieldValue(fields, "Name")
 }
 
-// firstStandaloneAgentID returns a 1-element slice containing the first
-// LlmAgent node — used as a fallback entry when the file declares no
-// orchestrator (Sequential/Loop/Parallel) but does declare one or more
-// standalone LlmAgents (factory pattern in google/adk-samples). Order
-// is alphabetic-by-id for deterministic output.
+// firstStandaloneAgentID returns a 1-element slice with the most
+// plausible graph entry — used as a fallback when the file declares no
+// orchestrator (Sequential/Loop/Parallel). Selection preference:
+//
+//  1. LLM nodes with zero incoming edges (the root agent that wraps
+//     others as tools, e.g. `financial_coordinator` in
+//     google/adk-samples/financial-advisor).
+//  2. Any node with zero incoming edges (handles cases where the
+//     root happens to be a Tool/Loop/Sequence).
+//  3. Alphabetically-first node id (legacy fallback for graphs with
+//     no clear root — every node has an incoming edge, typically a
+//     pure cycle).
+//
+// Without preference #1 the parser picked `data_analyst` over
+// `financial_coordinator` purely on alphabetic order, which then
+// made the other four agents wrongly report as `unreachable_node`
+// from the perspective of an entry that's actually a leaf.
 func (b *adkgoBuilder) firstStandaloneAgentID() []string {
 	if len(b.nodes) == 0 {
 		return nil
 	}
-	ids := make([]string, 0, len(b.nodes))
+	inDegree := make(map[string]int, len(b.nodes))
 	for id := range b.nodes {
-		ids = append(ids, id)
+		inDegree[id] = 0
 	}
-	sort.Strings(ids)
-	return ids[:1]
+	for _, e := range b.edges {
+		inDegree[e.To]++
+	}
+	var rootLLMs, rootAny []string
+	for id, n := range b.nodes {
+		if inDegree[id] == 0 {
+			rootAny = append(rootAny, id)
+			if n != nil && n.Type == domain.NodeTypeLLM {
+				rootLLMs = append(rootLLMs, id)
+			}
+		}
+	}
+	pickFrom := rootLLMs
+	if len(pickFrom) == 0 {
+		pickFrom = rootAny
+	}
+	if len(pickFrom) == 0 {
+		// Every node has an incoming edge — graph is a closed cycle.
+		// Fall back to alphabetic id for deterministic output.
+		for id := range b.nodes {
+			pickFrom = append(pickFrom, id)
+		}
+	}
+	sort.Strings(pickFrom)
+	return pickFrom[:1]
 }
 
 // findEntryCandidates walks the AST to find all top-level orchestrator agents
@@ -933,6 +968,39 @@ func (b *adkgoBuilder) processToolElement(expr ast.Expr) string {
 		}
 	}
 
+	// `<pkg>tool.New(arg, ...)` constructor calls — unwrap to the first
+	// positional argument so the tool name reflects what's being wrapped
+	// rather than the constructor verb "New". Triggered by
+	// google/adk-samples financial-advisor (2026-05-11):
+	//   `agenttool.New(dataAnalyst, nil)` previously surfaced as a tool
+	//   named "new" because extractIdentOrSelectorName walked through
+	//   the CallExpr to its Fun selector and returned "New".
+	if call, ok := expr.(*ast.CallExpr); ok && isToolConstructorCall(call) && len(call.Args) > 0 {
+		// `functiontool.New(Config{Name: "..."}, handler)` — inline
+		// form (not assigned to a var first). Pull the declared name
+		// straight from the Config literal so the tool node carries
+		// the user-intended identifier, not the wrapped variable's
+		// name. Symmetric with the var-assigned path resolved via
+		// varFuncToolNames above.
+		if toolName := extractFuncToolName(call); toolName != "" {
+			nodeID := toSnakeCase(toolName)
+			if _, exists := b.nodes[nodeID]; !exists {
+				b.nodes[nodeID] = &domain.Node{
+					ID:     nodeID,
+					Name:   toolName,
+					Type:   domain.NodeTypeTool,
+					Config: map[string]any{"category": inferToolCategory(toolName)},
+					Pos:    b.sourcePos(call.Pos()),
+				}
+			}
+			return nodeID
+		}
+		// Other tool constructors (agenttool.New, ...): the first arg
+		// is the wrapped resource, so use its identifier as the tool
+		// reference.
+		return b.processToolElement(call.Args[0])
+	}
+
 	name := extractIdentOrSelectorName(expr)
 	if name == "" {
 		return ""
@@ -1109,6 +1177,37 @@ func intFieldValue(fields map[string]ast.Expr, key string) *int {
 		n = n*10 + int(ch-'0')
 	}
 	return &n
+}
+
+// isToolConstructorCall reports whether call is `<pkg>tool.New(...)`
+// — the conventional ADK-Go pattern for wrapping a resource as a
+// Tool (agenttool.New, functiontool.New, etc.). Used by
+// processToolElement so inline tool-constructor calls in a Tools
+// slice unwrap to the wrapped argument rather than emitting "New"
+// as the tool name.
+//
+// Match rule: Fun is a SelectorExpr where the Sel name is "New" and
+// the package identifier ends with "tool" (case-insensitive). Catches
+// the four established ADK-Go constructors (functiontool, agenttool,
+// langchaintool, mcptool) plus future "*tool" packages without
+// hard-coding each.
+func isToolConstructorCall(call *ast.CallExpr) bool {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel == nil || sel.Sel.Name != "New" {
+		return false
+	}
+	// Unwrap generic instantiation: `functiontool.New[T,R]`.
+	x := sel.X
+	if idx, ok := x.(*ast.IndexExpr); ok {
+		x = idx.X
+	} else if idx, ok := x.(*ast.IndexListExpr); ok {
+		x = idx.X
+	}
+	pkgIdent, ok := x.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	return strings.HasSuffix(strings.ToLower(pkgIdent.Name), "tool")
 }
 
 // extractIdentOrSelectorName extracts an identifier or selector name from an expression.
