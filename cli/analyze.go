@@ -13,6 +13,7 @@ import (
 	baselineio "github.com/hatyibei/shingan/infrastructure/baseline"
 	"github.com/hatyibei/shingan/infrastructure/factory"
 	"github.com/hatyibei/shingan/infrastructure/parser"
+	"github.com/hatyibei/shingan/infrastructure/reporter"
 	"github.com/hatyibei/shingan/plugin"
 	"github.com/spf13/cobra"
 )
@@ -225,9 +226,33 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 // exit-code semantics.
 func emitFindings(flags *analyzeFlags, outputFormat string, findings []domain.Finding) (int, error) {
 	reporterFactory := factory.NewReporterFactory()
-	formatter, err := reporterFactory.Create(outputFormat)
-	if err != nil {
-		return 1, fmt.Errorf("create reporter: %w", err)
+	var formatter application.ReportFormatter
+	if outputFormat == "sarif" {
+		// Enrich SARIF rule descriptors with the full manifest
+		// catalog so GitHub Code Scanning surfaces stability flags,
+		// helpUri, descriptions, and framework/category tags. The
+		// catalog is built once here (cheap: ~22 entries) and
+		// passed through to the SARIF reporter; other formats keep
+		// the legacy zero-arg constructor.
+		analyzerFactoryLocal := factory.NewAnalyzerFactory()
+		manifests := application.ListRuleManifests(analyzerFactoryLocal.CreateAll())
+		metadata := make(map[string]reporter.RuleMetadata, len(manifests))
+		for _, m := range manifests {
+			metadata[m.Name] = reporter.RuleMetadata{
+				Description: m.Description,
+				Stability:   m.Stability,
+				Tags:        m.Tags,
+				Frameworks:  m.Frameworks,
+				DocsURL:     m.DocsURL,
+			}
+		}
+		formatter = reporterFactory.CreateSARIFWithMetadata(metadata)
+	} else {
+		f, err := reporterFactory.Create(outputFormat)
+		if err != nil {
+			return 1, fmt.Errorf("create reporter: %w", err)
+		}
+		formatter = f
 	}
 
 	output, err := formatter.Format(findings)

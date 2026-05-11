@@ -76,7 +76,35 @@ without special-casing.
 normal analysis output and are subject to the same severity overrides
 / ignore comments / baseline suppression as built-ins.
 
-**Plugin version compat check ✓ (this commit).** Plugins declare the
+**SARIF taxonomy with plugin namespace ✓ (this commit).** SARIF
+output (`shingan analyze --output=sarif`) now carries the full rule
+manifest on every `reportingDescriptor`:
+
+```json
+{
+  "id": "experimental:todo_node_marker",
+  "helpUri": "https://example.com/plugin-docs",
+  "shortDescription": { "text": "..." },
+  "properties": {
+    "stability": "experimental",
+    "frameworks": ["langgraph"],
+    "tags": [
+      "shingan-rule",
+      "stability:experimental",
+      "category:company-convention",
+      "framework:langgraph"
+    ]
+  }
+}
+```
+
+GitHub Code Scanning renders `properties.tags` as filter chips, so
+teams can scope alerts by `stability:stable` vs
+`stability:experimental` to triage built-in vs plugin findings
+separately. The legacy SARIF shape (no helpUri, no tags) is preserved
+when no metadata is attached — backwards compatible.
+
+**Plugin version compat check ✓ (previous commit).** Plugins declare the
 minimum shingan release they were built against:
 
 ```go

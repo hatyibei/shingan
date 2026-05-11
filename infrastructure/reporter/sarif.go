@@ -14,13 +14,51 @@ const (
 	toolInfoURI  = "https://github.com/hatyibei/shingan"
 )
 
+// RuleMetadata is the SARIF-facing slice of a rule manifest. It is
+// optional input to SARIFReporter — when supplied, the reporter emits
+// `reportingDescriptor` entries with `helpUri`, descriptions, and a
+// rich `properties.tags` set including the rule's stability flag,
+// declared frameworks, and category tags. GitHub Code Scanning uses
+// `properties.tags` for filtering, and we lean on the same machinery
+// to let users distinguish built-in rules from plugin rules
+// (stability=experimental).
+//
+// Defined here (rather than in domain or application) because it is
+// pure SARIF-emission metadata — the source-of-truth lives in
+// application.RuleManifest; the CLI converts to this struct before
+// instantiating the reporter so the Onion direction
+// (infrastructure ← cli) stays correct.
+type RuleMetadata struct {
+	Description string
+	Stability   string   // "stable" | "experimental"
+	Tags        []string // domain category tags ("security", "cost", …)
+	Frameworks  []string // ("langgraph", "all", …)
+	DocsURL     string   // becomes reportingDescriptor.helpUri
+}
+
 // SARIFReporter implements application.ReportFormatter for SARIF v2.1.0 output,
 // compatible with GitHub Code Scanning.
-type SARIFReporter struct{}
+type SARIFReporter struct {
+	// metadata is keyed by rule name. nil = legacy output (no
+	// descriptions, no tags, no helpUri) so the public constructor
+	// stays backwards compatible.
+	metadata map[string]RuleMetadata
+}
 
-// NewSARIFReporter returns a new SARIFReporter.
+// NewSARIFReporter returns a new SARIFReporter without per-rule
+// metadata. Use WithRuleMetadata to attach a manifest catalog so the
+// emitted `reportingDescriptor` entries carry stability flags,
+// helpUri, tags, and descriptions.
 func NewSARIFReporter() *SARIFReporter {
 	return &SARIFReporter{}
+}
+
+// WithRuleMetadata attaches the metadata catalog used to enrich the
+// SARIF `reportingDescriptor` entries. Pass nil to clear. Returns the
+// receiver so the call chains in factory wiring.
+func (r *SARIFReporter) WithRuleMetadata(m map[string]RuleMetadata) *SARIFReporter {
+	r.metadata = m
+	return r
 }
 
 // ContentType returns the MIME type for SARIF output.
@@ -82,6 +120,7 @@ type sarifRule struct {
 	Name             string                 `json:"name"`
 	ShortDescription sarifMessage           `json:"shortDescription"`
 	FullDescription  sarifMessage           `json:"fullDescription"`
+	HelpURI          string                 `json:"helpUri,omitempty"`
 	DefaultConfig    sarifDefaultConfig     `json:"defaultConfiguration"`
 	Properties       map[string]interface{} `json:"properties,omitempty"`
 }
@@ -141,15 +180,56 @@ func (r *SARIFReporter) Format(findings []domain.Finding) ([]byte, error) {
 
 	rules := make([]sarifRule, 0, len(orderedRules))
 	for _, rk := range orderedRules {
+		// Default — emitted when metadata is nil so legacy behaviour
+		// (rule ID as both descriptions, no helpUri, no tags) is
+		// preserved.
+		shortDesc := rk.name
+		fullDesc := rk.name
+		helpURI := ""
+		props := map[string]interface{}{
+			"precision": sarifPrecision(rk.confidence),
+		}
+
+		// Plugin namespace separation lives here: stability flag,
+		// declared frameworks, and category tags ride along as
+		// SARIF `properties.tags`. GitHub Code Scanning surfaces this
+		// array as filter chips so security teams can scope to
+		// "shingan-stable + tag:security" without writing a query.
+		if md, ok := r.metadata[rk.name]; ok {
+			if md.Description != "" {
+				shortDesc = md.Description
+				fullDesc = md.Description
+			}
+			helpURI = md.DocsURL
+
+			tags := make([]string, 0, 2+len(md.Tags)+len(md.Frameworks))
+			tags = append(tags, "shingan-rule")
+			if md.Stability != "" {
+				tags = append(tags, "stability:"+md.Stability)
+			}
+			for _, t := range md.Tags {
+				tags = append(tags, "category:"+t)
+			}
+			for _, fw := range md.Frameworks {
+				tags = append(tags, "framework:"+fw)
+			}
+			props["tags"] = tags
+			if md.Stability != "" {
+				props["stability"] = md.Stability
+			}
+			if len(md.Frameworks) > 0 {
+				props["frameworks"] = md.Frameworks
+			}
+		}
+
 		rules = append(rules, sarifRule{
 			ID:               rk.name,
 			Name:             rk.name,
-			ShortDescription: sarifMessage{Text: rk.name},
-			FullDescription:  sarifMessage{Text: rk.name},
+			ShortDescription: sarifMessage{Text: shortDesc},
+			FullDescription:  sarifMessage{Text: fullDesc},
+			HelpURI:          helpURI,
 			DefaultConfig:    sarifDefaultConfig{Level: sarifLevel(rk.severity)},
-			Properties: map[string]interface{}{
-				"precision": sarifPrecision(rk.confidence),
-			},
+			Properties:       props,
 		})
 	}
 
