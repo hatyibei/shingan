@@ -49,6 +49,15 @@ CORPUS=(
   "open-multi-agent-canvas langgraph https://github.com/CopilotKit/open-multi-agent-canvas.git"
   "letta                   langgraph https://github.com/letta-ai/letta.git"
   "langgraph-supervisor    langgraph https://github.com/langchain-ai/langgraph-supervisor-py.git"
+  # ADK-Go (added 2026-05-11 after the corpus blind-spot called out).
+  # adk-samples is the canonical Google ADK-Go sample collection;
+  # each agent under go/agents/ is a separate workflow, so we sweep
+  # those subdirectories rather than the repo root.
+  "adk-samples-boat-agent          adk-go https://github.com/google/adk-samples.git#go/agents/boat-agent"
+  "adk-samples-financial-advisor   adk-go https://github.com/google/adk-samples.git#go/agents/financial-advisor"
+  "adk-samples-llm-auditor         adk-go https://github.com/google/adk-samples.git#go/agents/llm-auditor"
+  "adk-samples-navallist           adk-go https://github.com/google/adk-samples.git#go/agents/navallist"
+  "adk-samples-sail-researcher     adk-go https://github.com/google/adk-samples.git#go/agents/sail-researcher"
 )
 
 INDEX="$OUT_DIR/INDEX.md"
@@ -60,12 +69,27 @@ printf "| Repo | Framework | Findings | Critical | Report |\n|---|---|---|---|--
 for row in "${CORPUS[@]}"; do
   # shellcheck disable=SC2086
   set -- $row
-  slug="$1"; framework="$2"; url="$3"
-  repo_dir="$OUT_DIR/$slug"
+  slug="$1"; framework="$2"; raw_url="$3"
+  # Support `url#subdir` so multiple slugs can target different
+  # subdirectories of the same upstream repo (e.g. adk-samples
+  # hosts 5 distinct agent workflows under go/agents/*).
+  url="${raw_url%%#*}"
+  subdir=""
+  if [ "$raw_url" != "$url" ]; then
+    subdir="${raw_url#*#}"
+  fi
+  # Use the repo URL's basename for the local clone dir so multiple
+  # slugs targeting the same repo share one checkout.
+  clone_key=$(basename "$url" .git)
+  repo_dir="$OUT_DIR/$clone_key"
+  analyze_dir="$repo_dir"
+  if [ -n "$subdir" ]; then
+    analyze_dir="$repo_dir/$subdir"
+  fi
   report="$OUT_DIR/$slug.report.md"
 
   if [ ! -d "$repo_dir/.git" ]; then
-    echo "→ clone $slug"
+    echo "→ clone $clone_key (for $slug)"
     rm -rf "$repo_dir"
     git clone --depth=1 --quiet "$url" "$repo_dir" || {
       echo "  ! clone failed for $slug — skipping"
@@ -73,13 +97,19 @@ for row in "${CORPUS[@]}"; do
       continue
     }
   else
-    echo "→ reuse $slug (already cloned)"
+    echo "→ reuse $clone_key (for $slug)"
+  fi
+
+  if [ ! -d "$analyze_dir" ]; then
+    echo "  ! analyze dir $analyze_dir missing — skipping"
+    printf "| %s | %s | _subdir missing_ | — | — |\n" "$slug" "$framework" >> "$INDEX"
+    continue
   fi
 
   echo "→ analyze $slug ($framework)"
   if ! "$SHINGAN" analyze \
        --format="$framework" \
-       --input="$repo_dir" \
+       --input="$analyze_dir" \
        --output=markdown \
        --min-confidence="$MIN_CONF" \
        > "$report" 2>/dev/null; then
