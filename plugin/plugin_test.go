@@ -387,3 +387,35 @@ func TestCheckShinganVersion_VPrefixOnBinaryAccepted(t *testing.T) {
 		}
 	})
 }
+
+// TestRegister_DescriptionMustBeSingleLine: Codex Slice F #7.
+// A plugin Description containing newline / control chars would
+// break the terminal table renderer in `shingan rules`. Reject at
+// Register time so plugin authors discover the issue before users.
+func TestRegister_DescriptionMustBeSingleLine(t *testing.T) {
+	t.Cleanup(resetForTest)
+	bad := []string{
+		"line one\nline two",
+		"line one\rline two",
+		"with\x00null",
+	}
+	for _, d := range bad {
+		err := Register(stubRule{name: "experimental:descvalid"}, Manifest{
+			Description: d,
+			Frameworks:  []string{"all"},
+			Tags:        []string{"x"},
+		})
+		if err == nil {
+			t.Errorf("Description=%q must be rejected", d)
+		}
+		resetForTest()
+	}
+	// Good: single-line description accepted.
+	if err := Register(stubRule{name: "experimental:descvalid"}, Manifest{
+		Description: "single line description ok",
+		Frameworks:  []string{"all"},
+		Tags:        []string{"x"},
+	}); err != nil {
+		t.Errorf("single-line description rejected: %v", err)
+	}
+}

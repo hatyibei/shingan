@@ -12,7 +12,7 @@
 | C | Policy enforcement + analyze flow | `application/policy.go`, `cli/analyze.go` flow | ✅ done — see below |
 | D | SARIF reporter | `infrastructure/reporter/sarif*.go` | ✅ done — see below |
 | E | ADK-Go parser | `infrastructure/parser/adkgo*.go`, `domain/graph.go` | ✅ done — see below |
-| F | Rule catalog + domain | `application/rule_catalog.go`, NodeType marshalling | pending |
+| F | Rule catalog + domain | `application/rule_catalog.go`, NodeType marshalling | ✅ done — see below |
 | G | Tests & fixtures meta | `*_test.go` new, `testdata/` new | pending |
 
 ## Slice A: Plugin SDK public API
@@ -111,5 +111,22 @@ All suite green.
 
 **Regression tests added (1):**
 - `TestADKGoParser_AmbiguousRootsNoSpuriousCritical` — EntryAmbiguous=true on multi-root factory file
+
+All suite green.
+
+## Slice F: Rule catalog + domain
+
+**8 findings**: Low=2 actionable + 6 OK confirmations. No High or Medium.
+
+| # | Severity | Site | Action |
+|---|---|---|---|
+| 1 | Low | NodeTypeSequence/Parallel lacked direct JSON round-trip test | **Fixed**: TestNodeType_SequenceParallelRoundTrip + TestNodeType_ControlBackwardCompat. |
+| 7 | Low | plugin Description with `\n` could wrap terminal table | **Fixed**: Register rejects newlines + control chars in Description. |
+| 2-6, 8 | — | Confirmed OK or minor backlog | Backlog: integer-form NodeType JSON acceptance hardening (low risk). |
+
+**Regression tests added (3):**
+- `TestNodeType_SequenceParallelRoundTrip`
+- `TestNodeType_ControlBackwardCompat`
+- `TestRegister_DescriptionMustBeSingleLine`
 
 All suite green.

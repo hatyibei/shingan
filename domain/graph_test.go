@@ -204,3 +204,37 @@ func TestSourcePos_IsZero(t *testing.T) {
 		})
 	}
 }
+
+// TestNodeType_SequenceParallelRoundTrip covers Codex Slice F #1:
+// NodeTypeSequence / NodeTypeParallel must survive JSON marshal then
+// unmarshal. Previously only Loop/Condition/Control had explicit
+// coverage. Pre-fix, a fixture-author would have a 50/50 chance of
+// regressing the new types without noticing.
+func TestNodeType_SequenceParallelRoundTrip(t *testing.T) {
+	for _, nt := range []domain.NodeType{domain.NodeTypeSequence, domain.NodeTypeParallel} {
+		raw, err := nt.MarshalJSON()
+		if err != nil {
+			t.Fatalf("MarshalJSON(%v): %v", nt, err)
+		}
+		var got domain.NodeType
+		if err := got.UnmarshalJSON(raw); err != nil {
+			t.Fatalf("UnmarshalJSON(%s): %v", raw, err)
+		}
+		if got != nt {
+			t.Errorf("round-trip changed type: %v → %v (via %s)", nt, got, raw)
+		}
+	}
+}
+
+// TestNodeType_ControlBackwardCompat: the legacy "control" string
+// continues to unmarshal to NodeTypeLoop. Important because existing
+// testdata JSON predating the Sequence/Parallel split uses "control".
+func TestNodeType_ControlBackwardCompat(t *testing.T) {
+	var got domain.NodeType
+	if err := got.UnmarshalJSON([]byte(`"control"`)); err != nil {
+		t.Fatalf("UnmarshalJSON: %v", err)
+	}
+	if got != domain.NodeTypeLoop {
+		t.Errorf("\"control\" → %v, want NodeTypeLoop", got)
+	}
+}

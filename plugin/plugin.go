@@ -228,6 +228,16 @@ func Register(rule domain.AnalysisRule, m Manifest) error {
 			}
 		}
 	}
+	// Description: optional, but if supplied must be single-line so
+	// the terminal table renderer doesn't wrap mid-row. Codex Slice F #7.
+	for _, r := range m.Description {
+		if r == '\n' || r == '\r' {
+			return fmt.Errorf("plugin: rule %q: Description must be a single line (no \\n/\\r)", name)
+		}
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("plugin: rule %q: Description contains control character %q", name, r)
+		}
+	}
 	// Version compatibility (optional opt-in).
 	if err := checkShinganVersion(m.MinShinganVersion); err != nil {
 		return fmt.Errorf("plugin: rule %q: %w", name, err)
