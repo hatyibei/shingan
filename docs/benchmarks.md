@@ -127,8 +127,23 @@ The fixes below were all triggered by real OSS — not by synthetic test cases. 
 
 ## Reproducing the accuracy benchmark
 
+The full corpus is one Make target:
+
 ```bash
-# Clone each repo, run shingan on it, output report.
+make dogfood
+# → clones every repo in the corpus to /tmp/shingan-dogfood,
+#   runs `shingan analyze` against each, writes one Markdown
+#   report per repo plus a summary INDEX.md.
+#
+# Env overrides (any combination):
+#   OUT_DIR=/path/to/dir   different working directory
+#   SHINGAN=./bin/shingan  use a locally built binary
+#   MIN_CONF=0.5           lower the confidence threshold
+```
+
+Or run one repo at a time:
+
+```bash
 git clone --depth=1 https://github.com/starpig1129/AI-Data-Analysis-MultiAgent /tmp/datagen
 shingan analyze --format=langgraph --input=/tmp/datagen \
                 --output=markdown --min-confidence=0.7
@@ -137,6 +152,12 @@ shingan analyze --format=langgraph --input=/tmp/datagen \
 # zero unreachable_node FPs. Earlier versions emitted 2 FPs on
 # QualityReview / NoteTaker before the for-loop unrolling fix.
 ```
+
+The corpus tracked by `make dogfood` is the source of truth for the
+[track-record table](#cumulative-track-record-12-oss-v050--v087) above.
+When a new release lands, re-run `make dogfood` and update the table
+from the resulting `INDEX.md` so the published numbers stay in sync
+with what you can reproduce locally.
 
 ## Zero-FP guarantee policy
 

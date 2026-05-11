@@ -2,7 +2,7 @@ GOA     ?= $(HOME)/go/bin/goa
 DESIGN  := github.com/hatyibei/shingan/design
 BIN_DIR := /tmp
 
-.PHONY: gen test build-all bench bench-rules gen-cli sample-% check-reason lint
+.PHONY: gen test build-all bench bench-rules dogfood gen-cli sample-% check-reason lint
 
 ## gen: regenerate goa HTTP handlers and OpenAPI spec from design/design.go
 gen:
@@ -40,3 +40,8 @@ bench:
 ## bench-rules: run only domain/rules benchmarks
 bench-rules:
 	go test -bench=. -benchmem -run=^$$ ./domain/rules/...
+
+## dogfood: clone the corpus + run shingan on each repo, write reports to /tmp/shingan-dogfood
+##          backs the "Real-World Accuracy" table in docs/benchmarks.md.
+dogfood:
+	@./scripts/dogfood_sweep.sh
