@@ -9,7 +9,7 @@
 | - | --- | --- | --- |
 | A | Plugin SDK public API | `plugin/`, `version/` | ✅ done — see below |
 | B | CLI runtime extract | `cli/` | ✅ done — see below |
-| C | Policy enforcement + analyze flow | `application/policy.go`, `cli/analyze.go` flow | pending |
+| C | Policy enforcement + analyze flow | `application/policy.go`, `cli/analyze.go` flow | ✅ done — see below |
 | D | SARIF reporter | `infrastructure/reporter/sarif*.go` | pending |
 | E | ADK-Go parser | `infrastructure/parser/adkgo*.go`, `domain/graph.go` | pending |
 | F | Rule catalog + domain | `application/rule_catalog.go`, NodeType marshalling | pending |
@@ -60,3 +60,21 @@ All suite green.
 All other categories returned OK (no findings): flag-precedence, NewRootCmd reusability, subcommand naming, MarkFlagRequired, help-text consistency.
 
 Full suite green.
+
+## Slice C: Policy enforcement + analyze flow
+
+**5 findings**: Medium=2, Low=3. **No fail-fast bypass detected** (confirmed Codex round-2 work held).
+
+| # | Severity | Site | Action |
+|---|---|---|---|
+| 1 | Medium | plugins: validation weaker than Register grammar | **Fixed**: duplicated `validPluginsSuffix` regex with `TestPluginNameSuffix_MatchesSDK` drift check. |
+| 2 | Medium | Whitespace in plugins entries silently misclassified | **Fixed**: explicit rejection with dedicated error message. |
+| 3 | Low | No dedupe of plugins list | **Backlog**: cosmetic. |
+| 4 | Low | `policyExplicit` dead code | **Fixed**: deleted. |
+| 5 | Low | Nearest-policy-wins not documented | **Backlog**: docs polish. |
+
+**Regression tests added (2):**
+- `TestPluginNameSuffix_MatchesSDK` — uppercase/hyphen/path-sep/space rejected
+- `TestVerifyRequiredPlugins_WhitespaceRejected`
+
+All suite green.

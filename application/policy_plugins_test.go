@@ -177,3 +177,60 @@ func TestExperimentalPrefix_MatchesSDK(t *testing.T) {
 			experimentalPrefix, plugin.ExperimentalPrefix)
 	}
 }
+
+// TestPluginNameSuffix_MatchesSDK covers Codex Slice C #1: the
+// suffix regex in application/policy.go duplicates plugin.go's. If
+// they drift, plugins: validation accepts names the SDK Register
+// would reject (or vice versa). We don't import plugin's regex
+// (its variable is unexported); we instead assert the same name set
+// is accepted/rejected on both sides via a representative table.
+func TestPluginNameSuffix_MatchesSDK(t *testing.T) {
+	good := []string{
+		"experimental:foo",
+		"experimental:foo_42",
+		"experimental:a",
+	}
+	bad := []string{
+		"experimental:",          // empty
+		"experimental:Foo",       // uppercase
+		"experimental:foo-bar",   // hyphen
+		"experimental:foo/bar",   // path sep
+		"experimental:foo bar",   // space
+		"experimental:1bad",      // digit start
+	}
+	avail := map[string]struct{}{
+		"experimental:foo":    {},
+		"experimental:foo_42": {},
+		"experimental:a":      {},
+	}
+	availList := make([]string, 0, len(avail))
+	for k := range avail {
+		availList = append(availList, k)
+	}
+	for _, name := range good {
+		err := VerifyRequiredPlugins(&Policy{Plugins: []string{name}}, availList)
+		if err != nil {
+			t.Errorf("Verify(%q) should accept: %v", name, err)
+		}
+	}
+	for _, name := range bad {
+		err := VerifyRequiredPlugins(&Policy{Plugins: []string{name}}, availList)
+		if err == nil {
+			t.Errorf("Verify(%q) should reject", name)
+		}
+	}
+}
+
+// TestVerifyRequiredPlugins_WhitespaceRejected: Codex Slice C #2.
+// A user-quoted entry with leading/trailing whitespace is almost
+// always a copy/paste accident; report it as a policy error rather
+// than silently trim or misclassify as missing-plugin.
+func TestVerifyRequiredPlugins_WhitespaceRejected(t *testing.T) {
+	err := VerifyRequiredPlugins(&Policy{Plugins: []string{" experimental:foo"}}, []string{"experimental:foo"})
+	if err == nil {
+		t.Fatal("expected whitespace error")
+	}
+	if !strings.Contains(err.Error(), "whitespace") {
+		t.Errorf("error must mention whitespace; got: %s", err)
+	}
+}

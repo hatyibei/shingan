@@ -120,7 +120,6 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 	//    enforcing the fail-fast contract for missing-plugin builds.
 	analyzerFactory := factory.NewAnalyzerFactory()
 	policyPath := flags.policy
-	policyExplicit := policyPath != ""
 	if policyPath == "" {
 		if discovered, _ := application.DiscoverPolicy(""); discovered != "" {
 			policyPath = discovered
@@ -153,7 +152,6 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 			}
 		}
 	}
-	_ = policyExplicit // reserved for future "policy required" enforcement
 
 	// 1. Resolve --since FIRST so we can short-circuit before spawning any
 	//    parser (in particular: --format=langgraph eagerly forks a Python

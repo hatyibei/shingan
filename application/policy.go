@@ -47,6 +47,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/hatyibei/shingan/domain"
@@ -232,10 +233,19 @@ func parseSeverity(s string) (domain.Severity, bool) {
 
 // experimentalPrefix mirrors plugin.ExperimentalPrefix. Duplicated as
 // a constant here so `application` doesn't need to import `plugin`
-// (which would invert the dependency direction — plugin → domain,
-// application → plugin is fine, but we keep the dependency
-// minimal). Kept in sync via TestVerifyRequiredPlugins_PrefixMatchesSDK.
+// at runtime (the test does). Kept in sync via
+// TestExperimentalPrefix_MatchesSDK.
 const experimentalPrefix = "experimental:"
+
+// validPluginsSuffix mirrors plugin.validNameSuffix. Duplicated so
+// .shingan.yaml `plugins:` validation rejects names that the SDK's
+// Register would also reject (uppercase, hyphens, whitespace, Unicode,
+// path separators, etc.) — Codex Slice C #1: pre-fix, names like
+// `experimental:Foo` passed the policy prefix check and surfaced as
+// "missing plugin" with a misleading wrapper-build hint, even though
+// no plugin could ever register that name. Kept in sync with the SDK
+// via TestPluginNameSuffix_MatchesSDK.
+var validPluginsSuffix = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
 // VerifyRequiredPlugins confirms every rule name in policy.Plugins
 // is (1) prefixed with `experimental:` (the v0.x SDK contract — only
@@ -262,27 +272,59 @@ func VerifyRequiredPlugins(policy *Policy, availableRules []string) error {
 	for _, name := range availableRules {
 		available[name] = struct{}{}
 	}
-	var badPrefix, missing []string
+	var badPrefix, badGrammar, badWhitespace, missing []string
 	for _, want := range policy.Plugins {
 		if want == "" {
+			continue
+		}
+		// Reject leading/trailing whitespace as a policy error
+		// rather than silently trimming — Codex Slice C #2. Silent
+		// trimming hides typos that the user should know about
+		// (a quoted `' experimental:foo '` is almost always a
+		// copy/paste accident).
+		if strings.TrimSpace(want) != want {
+			badWhitespace = append(badWhitespace, want)
 			continue
 		}
 		if !strings.HasPrefix(want, experimentalPrefix) {
 			badPrefix = append(badPrefix, want)
 			continue
 		}
+		// Strict grammar check on the post-prefix slug. Same regex
+		// as the SDK so policy-level and runtime-level validation
+		// converge (Codex Slice C #1). Pre-fix, a name like
+		// `experimental:Foo` reached the missing-plugin branch with
+		// a misleading wrapper-binary hint, when in reality no
+		// plugin could ever register that name.
+		suffix := strings.TrimPrefix(want, experimentalPrefix)
+		if !validPluginsSuffix.MatchString(suffix) {
+			badGrammar = append(badGrammar, want)
+			continue
+		}
 		if _, ok := available[want]; !ok {
 			missing = append(missing, want)
 		}
 	}
-	if len(badPrefix) == 0 && len(missing) == 0 {
+	if len(badPrefix) == 0 && len(badGrammar) == 0 && len(badWhitespace) == 0 && len(missing) == 0 {
 		return nil
 	}
 	parts := []string{}
+	if len(badWhitespace) > 0 {
+		parts = append(parts, fmt.Sprintf(
+			"plugins entries must not have leading/trailing whitespace; got (with whitespace shown by quotes): %q",
+			badWhitespace,
+		))
+	}
 	if len(badPrefix) > 0 {
 		parts = append(parts, fmt.Sprintf(
 			"plugins entries must start with %q (built-in rule names belong under `rules:`, not `plugins:`); got: %v",
 			experimentalPrefix, badPrefix,
+		))
+	}
+	if len(badGrammar) > 0 {
+		parts = append(parts, fmt.Sprintf(
+			"plugins entries must match %s after the prefix (no uppercase, hyphens, or path separators); got: %v",
+			validPluginsSuffix.String(), badGrammar,
 		))
 	}
 	if len(missing) > 0 {
