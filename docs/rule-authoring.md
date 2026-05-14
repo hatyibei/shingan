@@ -5,8 +5,8 @@
 This guide is for internal contributors who implement Shingan **builtin rules**.
 It serves as the primary reference when writing the 10 rules (6 Local / 4 Path) planned for Phase 2 of v0.x.
 
-> **Audience**: Anyone editing `domain/rules/*.go` in the Shingan repository.
-> **Out of scope**: Anyone who wants to plug in rules dynamically as external plugins. Per ADR-010, the **Plugin SDK stays internal-only until v1.0**, so the externally facing documentation will land separately at v1.0 as `docs/plugins/getting-started.md`. This guide is the precursor to that document.
+> **Audience**: Anyone editing `domain/rules/*.go` in the Shingan repository (builtin rules).
+> **External plugin authors**: see **[docs/plugin-sdk.md](./plugin-sdk.md)** instead — the public `plugin.Register` API shipped in v0.9 lets you ship rules from your own repo with an `experimental:` prefix (no fork required). ADR-010 originally deferred all external exposure to v1.0; the v0.9 implementation supersedes that with the prefix-gated early-access path, and the ABI stability promise still lands at v1.0.
 
 Referenced ADRs:
 - [ADR-006](../shingan-adr.md) — ESLint-style visitor + selector + listener (1walk dispatcher)

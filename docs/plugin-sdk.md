@@ -1,8 +1,10 @@
-# Plugin SDK roadmap (v0.x foundation → v1.0 GA)
+# Plugin SDK (v0.9 public → v1.0 GA)
 
-ADR-015 in `shingan-adr.md` is the strategic document; this page is the
-operational state of the rollout — what ships today, what's planned, and
-what stability promise covers each surface.
+ADR-010 in `shingan-adr.md` recorded the original "Plugin SDK stays
+internal-only until v1.0" decision; the v0.9 implementation supersedes it
+with a prefix-gated early-access path (see the ADR-010 status note). This
+page is the operational state of the rollout — what ships today, what's
+planned, and what stability promise covers each surface.
 
 ## Why a Plugin SDK
 
@@ -13,7 +15,7 @@ plugins, Ruff has 800+ rules across categories, golangci-lint has
 same trajectory so the 22 built-in rules don't become the ceiling on
 what the tool can catch in production agent workflows.
 
-## What ships today (v0.8.7)
+## What ships today (v0.9)
 
 **Rule catalog (in-tree, machine-readable).** Every built-in rule
 publishes a `RuleManifest` — Name, Severity, Fixable, Description,
@@ -43,40 +45,41 @@ file gets a one-line entry. The CI test
 `TestListRuleManifests_StaticTableCoversAllRules` (`cmd/shingan/`)
 fails the build if a registered rule is missing from the table.
 
-**Internal-only registry.** `domain/rules/registry.go` exports
-`AllBuiltins()` but keeps `registerBuiltin` unexported. External
-packages cannot register their own rules yet — that's deliberate per
-ADR-015 ("v0.x 期間中は `experimental:` prefix 必須、no stability
-promise").
+**Two registries, by design.** `domain/rules/registry.go` exports
+`AllBuiltins()` and keeps `registerBuiltin` unexported — built-in rules
+self-register there at `init()` time. *External* rules register through
+the separate public `plugin` package (below). Built-ins and plugin rules
+stay in distinct registries so the catalog can always tell them apart
+(stability flag, SARIF taxonomy namespace, `experimental:` prefix).
 
-## What ships at v0.9 (partial — landing in commits)
+## v0.9 public surface
 
-**Public registration API ✓ (this commit).** Package
+**Public registration API.** Package
 `github.com/hatyibei/shingan/plugin` exports `Register`,
 `MustRegister`, the `Manifest` type, and registry accessors. See the
 package doc for the authoring contract and validation rules
 (experimental: prefix mandatory through v0.x, at least one framework
 + tag, no collisions with built-ins).
 
-**Working example ✓ (this commit).** `examples/plugin-template/`
+**Working example ✓** `examples/plugin-template/`
 ships a runnable plugin (`experimental:todo_node_marker`) plus tests
 that side-effect-import it and assert it appears in the
 `shingan rules` catalog. This is the reference implementation plugin
 authors should mirror.
 
-**Catalog integration ✓ (this commit).** `application.ListRuleManifests`
+**Catalog integration ✓** `application.ListRuleManifests`
 merges plugin rules into the catalog so `shingan rules` and
 `shingan rules --format=json` surface them with
 `"stability": "experimental"`. The same output flows to IDE rule
 hovers, SARIF taxonomy emitters, and `.shingan.yaml` generators
 without special-casing.
 
-**Analyze integration ✓ (this commit).** `shingan analyze` appends
+**Analyze integration ✓** `shingan analyze` appends
 `plugin.Rules()` to the built-in slice so plugin findings appear in
 normal analysis output and are subject to the same severity overrides
 / ignore comments / baseline suppression as built-ins.
 
-**Plugin author helpers ✓ (this commit).** Two small helpers replace
+**Plugin author helpers ✓** Two small helpers replace
 the boilerplate plugin authors otherwise rewrite per rule:
 
 ```go
@@ -95,7 +98,7 @@ Scope is deliberately narrow — the SDK ships only helpers that 80% of
 real rules will use. More helpers will land as patterns surface from
 actual plugin authors (Plugin SDK is experimental until v1.0).
 
-**SARIF taxonomy with plugin namespace ✓ (previous commit).** SARIF
+**SARIF taxonomy with plugin namespace ✓** SARIF
 output (`shingan analyze --output=sarif`) now carries the full rule
 manifest on every `reportingDescriptor`:
 
@@ -123,7 +126,7 @@ teams can scope alerts by `stability:stable` vs
 separately. The legacy SARIF shape (no helpUri, no tags) is preserved
 when no metadata is attached — backwards compatible.
 
-**Plugin version compat check ✓ (previous commit).** Plugins declare the
+**Plugin version compat check ✓** Plugins declare the
 minimum shingan release they were built against:
 
 ```go
@@ -151,7 +154,7 @@ panic: plugin.MustRegister: plugin: shingan binary is older than
 plugin's MinShinganVersion: binary=0.8.0, plugin requires >=0.9.0
 ```
 
-**`.shingan.yaml plugins:` declaration ✓ (previous commit).** Projects
+**`.shingan.yaml plugins:` declaration ✓** Projects
 declare which plugin rules they depend on:
 
 ```yaml
@@ -170,7 +173,7 @@ plugin list that teams expect their project config to capture: the
 YAML declares intent, the build pipeline produces a binary that
 fulfils it. Empty/missing `plugins:` key opts out of the check.
 
-**Custom binary build flow ✓ (this commit).** The CLI runtime is
+**Custom binary build flow ✓** The CLI runtime is
 exposed as `github.com/hatyibei/shingan/cli` with two exports:
 `Run(args []string) int` and `NewRootCmd() *cobra.Command`. Plugin
 wrapper binaries `_ "your-plugin"` + `cli.Run(os.Args[1:])` and they
@@ -180,13 +183,15 @@ explain) with the plugin's rules merged in. See
 canonical 5-line wrapper.
 
 **Sample external repo ⏳ (planned).**
-`github.com/hatyibei/shingan-rule-template` will be a forkable repo
-that mirrors `examples/plugin-template/` plus the wrapper binary,
-once the CLI extraction lands.
+`github.com/hatyibei/shingan-rule-template` will be a standalone
+forkable repo that mirrors `examples/plugin-template/` (rule + tests +
+wrapper binary + GitHub Actions workflow). The in-tree
+`examples/plugin-template/` is the reference today; the standalone repo
+just removes the "clone the monorepo to see the example" friction.
 
 ### v0.9 API quick reference
 
-The public surface that's stable as of this commit:
+The public surface that's stable as of v0.9:
 
 ```go
 package plugin
@@ -205,10 +210,13 @@ func MustRegister(rule domain.AnalysisRule, m Manifest)
 // Manifest is the external-author-facing rule metadata, validated at
 // Register() time and surfaced in `shingan rules --format=json`.
 type Manifest struct {
-    Severity   domain.Severity // optional; defaults to Info
-    Frameworks []string        // at least one of: langgraph, crewai, n8n, adk-go, samurai, json, all
-    Tags       []string        // at least one
-    DocsURL    string          // optional; surfaced in IDE rule hovers
+    Severity          domain.Severity // optional; defaults to Info
+    Description       string          // optional; one-line summary (no \n / control chars). Surfaced in `shingan rules`, IDE rule-hover, SARIF shortDescription
+    Fixable           bool            // optional; whether the rule can emit an autofix
+    Frameworks        []string        // required; at least one of: langgraph, crewai, n8n, adk-go, samurai, json, all
+    Tags              []string        // required; at least one non-empty entry
+    DocsURL           string          // optional; surfaced in IDE rule hovers + SARIF helpUri (must be absolute)
+    MinShinganVersion string          // optional; minimum binary semver (no leading `v`); empty opts out of the compat check
 }
 
 // RegisteredRules / Rules: catalog accessors used by the
@@ -254,35 +262,59 @@ func (CompanyNaming) Analyze(g *domain.WorkflowGraph) []domain.Finding {
 }
 
 func init() {
-    plugin.Register(CompanyNaming{}, plugin.Manifest{
-        Frameworks: []string{"langgraph"},
-        Tags:       []string{"company-convention"},
-        DocsURL:    "https://acme.example/shingan-rules/company-naming",
+    plugin.MustRegister(CompanyNaming{}, plugin.Manifest{
+        Description:       "Flags agent names that violate the company convention",
+        Frameworks:        []string{"langgraph"},
+        Tags:              []string{"company-convention"},
+        DocsURL:           "https://acme.example/shingan-rules/company-naming",
+        MinShinganVersion: "0.9.0",
     })
 }
 ```
 
-User config to consume it:
+**Building a binary that includes the plugin.** Go's `plugin` package
+isn't cross-compilable, so v0.9 uses `init()`-time static linkage, not
+dynamic loading. The plugin author (or the consuming team) ships a tiny
+wrapper `main` that side-effect-imports the rule package and calls
+`cli.Run` — that single binary is the full official command tree with
+the plugin's rules merged in:
+
+```go
+package main
+
+import (
+    "os"
+
+    "github.com/hatyibei/shingan/cli"
+    _ "github.com/acme/shingan-rules" // init() registers the rule
+)
+
+func main() { os.Exit(cli.Run(os.Args[1:])) }
+```
+
+See `examples/plugin-template/cmd/shingan-with-plugins/main.go` for the
+canonical version. (A future `shingan build --with-plugin=...` helper
+that generates this wrapper automatically — mirroring golangci-lint's
+"custom" build flow — is on the v0.10+ roadmap, not shipped.)
+
+**User config to consume it.** `.shingan.yaml` declares which plugin
+rules the project depends on by *rule name* (the `experimental:`-prefixed
+`Name()`, not a repo path); analyze fails fast if the running binary
+doesn't carry them. Severity is tuned through the same `rules:` key as
+built-ins:
 
 ```yaml
 # .shingan.yaml
 plugins:
-  - github.com/acme/shingan-rules
+  - experimental:company_naming   # rule name, verified against the binary's catalog
 
-severity_overrides:
-  experimental:company_naming: warning
+rules:
+  experimental:company_naming:
+    severity: warning
 ```
 
-Shingan will need to be rebuilt with the plugin imported — Go's
-`plugin` package isn't cross-compilable, so v0.9 uses `init()`-time
-static linkage rather than dynamic loading. A wrapper command
-`shingan build --with-plugin=github.com/acme/shingan-rules` writes a
-small main module, runs `go build`, and outputs a custom `shingan`
-binary. Mirrors golangci-lint's "custom" build flow.
-
-**Sample external rule repo.** `github.com/hatyibei/shingan-rule-template`
-ships with a single rule, GitHub Actions workflow, and the manifest
-metadata so plugin authors have a starting point.
+See [`docs/severity-policy.md`](./severity-policy.md) for the full
+`.shingan.yaml` schema.
 
 ## What ships at v1.0
 
@@ -302,29 +334,31 @@ built-ins.
 | Surface | Stable through | Notes |
 | --- | --- | --- |
 | `shingan rules --format=json` schema | v1.0 | additive fields only; existing fields never renamed/typed-changed |
-| `RuleManifest` Go struct | v1.0 internal; v1.0 public | external import deferred to v0.9 |
+| `plugin.Manifest` struct | v0.9 experimental; v1.0 GA | additive fields possible before v1.0; existing fields won't be renamed |
+| `plugin.Register` / `MustRegister` signature | v0.9 experimental; v1.0 GA | `experimental:` prefix mandatory until v1.0 |
+| `version.Version` string format | v0.x onwards | semver, no leading `v`; part of the `MinShinganVersion` compat contract |
 | `domain.AnalysisRule` interface | v2.0 | the load-bearing rule contract — promise won't move |
-| `plugin.Register` signature | v0.9 experimental; v1.0 GA | `experimental:` prefix mandatory until v1.0 |
+| `application.RuleManifest` Go struct | v1.0 (external import) | the in-tree catalog struct; plugin authors don't import it — they supply `plugin.Manifest` |
 | `.shingan.yaml` `plugins:` key | v0.9 onwards | not present in v0.8 |
 
-## Pre-v0.9 escape hatches (today)
+## Authoring a built-in rule (upstream contribution)
 
-If you need a custom rule before v0.9 ships, the supported path is:
+The plugin path above is for rules that live in *your* repo. If instead
+you want a rule merged into Shingan itself as a built-in:
 
-1. Fork `github.com/hatyibei/shingan`.
-2. Add your rule to `domain/rules/` with an `init()` that calls
+1. Add your rule to `domain/rules/` with an `init()` that calls
    `registerBuiltin`.
-3. Add the corresponding row to `staticRuleMeta` in
+2. Add the corresponding row to `staticRuleMeta` in
    `application/rule_catalog.go`.
-4. Add an explanation block to `application/explain.go`
+3. Add an explanation block to `application/explain.go`
    (`RuleExplanations` map).
-5. Run `go test ./...` to confirm the catalog tests pass.
-6. Build a custom binary from your fork.
+4. Run `go test ./...` to confirm the catalog tests pass.
+5. Open a PR.
 
-This is identical to how the built-in rules are authored — there's no
-hidden API. The only thing v0.9 changes is dropping the fork
-requirement: rules will live in *your* repo, registered at `init()`
-time by importing the `plugin` package.
+This is identical to how the existing built-in rules are authored —
+there's no hidden API. See [`docs/rule-authoring.md`](./rule-authoring.md)
+for the full builtin-authoring guide (three-tier templates,
+ConfidenceReason selection, TDD patterns).
 
 ## Roadmap pointer
 

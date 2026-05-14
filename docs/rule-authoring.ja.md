@@ -5,8 +5,8 @@
 本ガイドは Shingan の **builtin rule** を実装する内部 contributor 向けの手引きです。
 v0.x の Phase 2 で追加予定の 10 ルール (Local 6 / Path 4) を書くときの一次参照ドキュメントとして利用します。
 
-> **対象読者**: Shingan リポジトリで `domain/rules/*.go` を編集する人。
-> **対象外**: 外部から plugin として動的に rule を差し込みたい人。 ADR-010 で **Plugin SDK は v1.0 まで internal-only** と決定したため、外部公開向けのドキュメントは v1.0 で `docs/plugins/getting-started.md` として別途整備します。本ガイドはその先行版です。
+> **対象読者**: Shingan リポジトリで `domain/rules/*.go` を編集する人 (builtin ルール)。
+> **外部 plugin author**: 代わりに **[docs/plugin-sdk.md](./plugin-sdk.md)** を参照してください。 public な `plugin.Register` API は v0.9 で公開済みで、`experimental:` prefix を付ければ自分の repo からルールを配布できます (fork 不要)。 ADR-010 は当初すべての外部公開を v1.0 まで defer する判断でしたが、v0.9 実装が prefix ゲート付き early-access 経路でこれを更新しました。ABI 安定保証は v1.0 のままです。
 
 参照 ADR:
 - [ADR-006](../shingan-adr.md) — ESLint 方式 visitor + selector + listener 採用 (1walk dispatcher)

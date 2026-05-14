@@ -1101,7 +1101,9 @@ LSP 起動時:
 # ADR-010: Plugin SDK internal-first 戦略
 
 ## ステータス
-Proposed (2026-05-04)
+Proposed (2026-05-04) → **Superseded by v0.9 implementation (2026-05-13)**
+
+> **更新 (2026-05-13)**: 本 ADR の決定「Plugin SDK は v1.0 まで internal-only」は v0.9 実装で覆された。`experimental:` prefix を必須とする条件付きで public な `plugin.Register` / `MustRegister` / `Manifest` API を v0.9 で公開済み。ADR-010 が懸念した「v0.x で API 固定圧力が発生する」問題は、(1) `experimental:` prefix によるシグナリング、(2) Manifest / Register シグネチャのみ公開し WorkflowGraph 等の内部型は public 表面に含めない設計、(3) ABI 安定保証は v1.0 まで明示的に保留、で緩和している。運用状態の最新は **[docs/plugin-sdk.md](docs/plugin-sdk.md)** を参照。以下の本文は判断の歴史的記録として残す。
 
 ## コンテキスト
 

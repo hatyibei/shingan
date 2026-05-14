@@ -22,7 +22,7 @@ Every workflow framework reduces to the same primitive: a directed graph of node
 
 A static analyzer wins or loses on **operational ergonomics** (how disruptive it is to your CI), not just rule count. Honest current state:
 
-| Operational dimension | Shingan v0.8.3 | What you'd need before flipping CI to fail-on-finding |
+| Operational dimension | Shingan v0.8.7 | What you'd need before flipping CI to fail-on-finding |
 |---|:---:|---|
 | Multi-framework (LangGraph / CrewAI / n8n / ADK-Go / JSON / Samurai) | ✅ | — |
 | AST-based fallback (factory / instance-method / `@CrewBase` / Flow) | ✅ | — |
@@ -30,13 +30,13 @@ A static analyzer wins or loses on **operational ergonomics** (how disruptive it
 | MCP + LSP (Cursor / Claude Code / Neovim / VS Code / LangGraph Studio) | ✅ | — |
 | Severity × Confidence two-axis model | ✅ | — |
 | Diff mode (`--since main`) + `--baseline` JSON | ✅ | — |
-| `// shingan:ignore` line / file comments | ⏳ v0.9 | required for low-friction adoption |
-| Severity-policy-as-code (per-rule / per-team) | ⏳ v0.9 | required for organisations with mixed risk tolerances |
+| `// shingan:ignore` line / file comments | ✅ | — |
+| Severity-policy-as-code (`.shingan.yaml`, per-rule / per-path) | ✅ | — |
 | PR bot (inline comments on changed nodes) | ⏳ v0.10 | required for "informational → blocking" promotion |
 | Org dashboard (cost / PII / cycle metrics over time) | ⏳ v0.10+ | required for AppSec / Platform team adoption |
 | Public false-positive rate (measured against ≥100 OSS workflows) | ⏳ v0.9 | required for procurement / vendor evaluation |
 | OWASP Agentic Top 10 — full mapping | ⏳ v0.9 | required for SOC 2 / ISO 42001 / enterprise auditors |
-| Plugin SDK (community rules) | internal-only | will go public at v1.0 (ADR-010) |
+| Plugin SDK (community rules) | ✅ v0.9 (`experimental:`) | stability promise lands at v1.0 (ADR-010) |
 
 So: today's recommended use is **`continue-on-error: true` informational CI** plus IDE feedback via the LSP. v0.9–v0.10 is closing the operational gap.
 
@@ -359,7 +359,7 @@ When adding a new rule, see [docs/rule-authoring.md](./docs/rule-authoring.md).
 
 ### Contributing → New rules
 
-Internal contributors implementing new builtin rules should start with **[docs/rule-authoring.md](./docs/rule-authoring.md)**. It covers the Local / Path / Global three-tier templates (ADR-007), ConfidenceReason selection guide (ADR-008), the `check_confidence_reason.sh` linter, TDD patterns, and design notes for every existing rule. Per ADR-010, the Plugin SDK stays internal-only until v1.0 — external contributors should participate via fork → upstream PR.
+Contributors implementing new builtin rules should start with **[docs/rule-authoring.md](./docs/rule-authoring.md)**. It covers the Local / Path / Global three-tier templates (ADR-007), ConfidenceReason selection guide (ADR-008), the `check_confidence_reason.sh` linter, TDD patterns, and design notes for every existing rule. External rule authors who want to ship rules from their own repo (no fork required) should read **[docs/plugin-sdk.md](./docs/plugin-sdk.md)** — the public `plugin.Register` API shipped in v0.9 with an `experimental:` prefix requirement; the stability promise on the ABI lands at v1.0 (ADR-010 originally deferred all external exposure to v1.0; the v0.9 implementation supersedes that with the prefix-gated early-access path).
 
 ## License
 
