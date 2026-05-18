@@ -42,23 +42,51 @@ type exitCodeError struct{ code int }
 func (e *exitCodeError) Error() string { return fmt.Sprintf("exit code %d", e.code) }
 
 // NewRootCmd builds the root cobra command tree with every subcommand
-// shingan ships with (analyze, list-rules, explain, rules). External
-// wrapper binaries call this when they need to add their own
-// subcommands before invoking Execute().
+// shingan ships with (analyze, demo, list-rules, explain, rules,
+// version). External wrapper binaries call this when they need to add
+// their own subcommands before invoking Execute().
 func NewRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "shingan",
 		Short: "Shingan — AI Agent Workflow Static Analyzer",
-		Long: `Shingan (心眼) detects structural bugs in AI agent workflows
-before they reach production.
+		Long: `Shingan (心眼) catches structural bugs in AI agent workflows
+before they ever run — infinite loops, unreachable nodes, missing error
+handlers, runaway-cost paths, prompt-injection sinks, PII leak paths,
+code-execution from LLM output, and more.
 
-Supported analyses:
-  • Cycle detection (infinite-loop risk)
-  • Unreachable node detection (dead code)
-  • Error handler checker (missing failure paths)`,
+20+ built-in rules across LangGraph, CrewAI, ADK-Go, n8n, and native JSON.
+Output: markdown, JSON, or SARIF (GitHub Code Scanning compatible).`,
+		Example: `  # Run a built-in sample (no setup, no input file)
+  shingan demo
+
+  # Analyze a JSON workflow
+  shingan analyze --input workflow.json --output markdown
+
+  # Analyze ADK-Go agents in a directory
+  shingan analyze --format adk-go --input ./agents/
+
+  # Analyze a LangGraph project (needs `+"`pip install langgraph`"+`)
+  shingan analyze --format langgraph --input ./agents/
+
+  # Show every rule the binary knows about
+  shingan list-rules`,
+		// When invoked with zero args, cobra's default RunE prints the
+		// full usage page — a wall of text that hides the "what do I
+		// type first?" answer. Replace it with a 4-line guided banner
+		// pointing at `demo` (the only zero-config entry point).
+		Run: func(cmd *cobra.Command, args []string) {
+			out := cmd.OutOrStderr()
+			fmt.Fprintln(out, "Shingan — AI Agent Workflow Static Analyzer")
+			fmt.Fprintln(out)
+			fmt.Fprintln(out, "Get started:")
+			fmt.Fprintln(out, "  shingan demo                          run a built-in example (no setup)")
+			fmt.Fprintln(out, "  shingan analyze --input workflow.json analyze a single JSON workflow")
+			fmt.Fprintln(out, "  shingan --help                        list every command and flag")
+		},
 	}
 
 	cmd.AddCommand(newAnalyzeCmd())
+	cmd.AddCommand(newDemoCmd())
 	cmd.AddCommand(newListRulesCmd())
 	cmd.AddCommand(newExplainCmd())
 	cmd.AddCommand(newRulesCmd())

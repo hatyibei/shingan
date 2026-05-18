@@ -91,21 +91,52 @@ Onion Architecture — 内側から外側への依存のみ許容。
 - `ParserFactory` — フォーマット別パーサー (`application.WorkflowParser`) の切替
 - `ReporterFactory` — 出力形式別レポーター (`application.ReportFormatter`) の切替
 
+## クイックスタート (30 秒、セットアップ不要)
+
+組み込みサンプルをパイプラインに通して、本物の findings レポートが見れる。入力ファイル不要。
+
+```bash
+npx --yes shingan-lint demo
+# → exit 2、loop_guard (Critical) / unreachable_node (Warning) ほか検出
+```
+
+自分の workflow JSON に対して試す:
+
+```bash
+# わざと欠陥のある最小ワークフローを書き出して解析
+cat > workflow.json <<'EOF'
+{
+  "entry_node_id": "start",
+  "nodes": [
+    {"id": "start", "type": "llm",  "name": "Planner"},
+    {"id": "loop",  "type": "loop", "name": "Retry Loop"},
+    {"id": "step",  "type": "llm",  "name": "Worker"}
+  ],
+  "edges": [
+    {"from": "start", "to": "loop"},
+    {"from": "loop",  "to": "step"},
+    {"from": "step",  "to": "loop"}
+  ]
+}
+EOF
+npx --yes shingan-lint analyze --input workflow.json --output markdown
+```
+
 ## インストール
 
 ### npm (推奨、ゼロセットアップ)
 
 ```bash
-# 一回だけ実行
-npx shingan-lint analyze --format=langgraph ./agents/
+# 一回だけ実行 (インストールなし)
+npx --yes shingan-lint demo
 
 # プロジェクトに固定
 pnpm add -D shingan-lint
-pnpm exec shingan analyze --since main
+pnpm exec shingan demo
 
 # グローバルに
 npm install -g shingan-lint
-shingan analyze --input ./testdata/buggy.json
+shingan demo
 ```
 
 [`shingan-lint`](https://www.npmjs.com/package/shingan-lint) は薄い Node ラッパで、`postinstall` で plat-specific Go バイナリを GitHub Release から取得 + SHA256 検証 + `~/.cache/shingan-lint/v<ver>/` にキャッシュする。Linux / macOS / Windows × amd64 / arm64 を全部サポート。
@@ -114,6 +145,7 @@ shingan analyze --input ./testdata/buggy.json
 
 ```bash
 go install github.com/hatyibei/shingan/cmd/shingan@latest
+shingan demo
 ```
 
 ### ソースからビルド
@@ -122,33 +154,34 @@ go install github.com/hatyibei/shingan/cmd/shingan@latest
 git clone https://github.com/hatyibei/shingan.git
 cd shingan
 go build -o shingan ./cmd/shingan
+./shingan demo
 ```
 
 ### Docker
 
 ```bash
 docker pull ghcr.io/hatyibei/shingan:latest
-docker run --rm -v "$(pwd)":/work ghcr.io/hatyibei/shingan analyze --input /work/buggy.json
+docker run --rm ghcr.io/hatyibei/shingan demo
 ```
 
 ## 使い方
 
-JSON入力の例:
+JSON入力の例 (デフォルト):
 
 ```bash
-shingan analyze --format json --input workflow.json --output markdown
+shingan analyze --input workflow.json --output markdown
 ```
 
-ADK-Go入力の例:
+ADK-Go 入力の例（`.go` ファイルのディレクトリ）:
 
 ```bash
 shingan analyze --format adk-go --input ./agents/ --output markdown
 ```
 
-LangGraph (Python) 入力の例:
+LangGraph (Python) 入力の例 — 解析対象のプロジェクト依存が import 可能である必要あり:
 
 ```bash
-# 事前: pip install langgraph
+# 事前: pip install langgraph    (＋プロジェクトが import するもの)
 shingan analyze --format langgraph --input agent.py --output markdown
 shingan analyze --format langgraph --input ./agents/ --output sarif --output-file findings.sarif
 ```

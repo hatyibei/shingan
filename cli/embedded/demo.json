@@ -1,0 +1,47 @@
+{
+  "entry_node_id": "planner",
+  "nodes": [
+    {
+      "id": "planner",
+      "name": "Planner",
+      "type": "llm",
+      "config": { "model": "gpt-4o" }
+    },
+    {
+      "id": "browser",
+      "name": "Browser Tool",
+      "type": "tool",
+      "config": { "category": "browser" }
+    },
+    {
+      "id": "retry",
+      "name": "Retry Loop",
+      "type": "loop",
+      "config": {}
+    },
+    {
+      "id": "worker",
+      "name": "Worker LLM",
+      "type": "llm",
+      "config": { "model": "gpt-4o-mini" }
+    },
+    {
+      "id": "output",
+      "name": "Final Output",
+      "type": "output"
+    },
+    {
+      "id": "orphan",
+      "name": "Orphaned LLM",
+      "type": "llm",
+      "config": { "model": "claude-3-5-sonnet" }
+    }
+  ],
+  "edges": [
+    { "from": "planner", "to": "browser" },
+    { "from": "browser", "to": "retry" },
+    { "from": "retry",   "to": "worker" },
+    { "from": "worker",  "to": "retry" },
+    { "from": "retry",   "to": "output", "condition": "done == true" }
+  ]
+}

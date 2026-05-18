@@ -3,17 +3,25 @@
 > AI Agent Workflow Static Analyzer — `npx`-installable wrapper for [Shingan](https://github.com/hatyibei/shingan).
 
 ```bash
-# zero-install one-shot
-npx shingan-lint analyze --format adk-go --input ./agents
+# 30-second smoke test — no input file needed
+npx --yes shingan-lint demo
 
-# project-local
+# Analyze your own JSON workflow
+npx --yes shingan-lint analyze --input workflow.json --output markdown
+
+# Analyze ADK-Go agents
+npx --yes shingan-lint analyze --format adk-go --input ./agents/
+
+# Project-local install
 pnpm add -D shingan-lint
-pnpm exec shingan analyze --format json --input ./testdata/buggy.json
+pnpm exec shingan demo
 
-# global
+# Global install
 npm install -g shingan-lint
-shingan analyze --since main
+shingan demo
 ```
+
+Run `shingan --help` (or `npx shingan-lint --help`) to see every command and flag with copy-paste examples.
 
 ## What it does
 
