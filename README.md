@@ -91,21 +91,52 @@ Onion Architecture — dependencies flow inward only.
 - `ParserFactory` — switches parsers by input format (`application.WorkflowParser`)
 - `ReporterFactory` — switches reporters by output format (`application.ReportFormatter`)
 
+## Quick start (30 seconds, no setup)
+
+The fastest way to see Shingan working — runs a bundled sample workflow through the full pipeline and prints a real findings report. No input file needed.
+
+```bash
+npx --yes shingan-lint demo
+# → exit 2, surfaces loop_guard (Critical) + unreachable_node (Warning) + more
+```
+
+Then run it on your own workflow JSON:
+
+```bash
+# A minimal but failing workflow, written to disk and analyzed in one shot.
+cat > workflow.json <<'EOF'
+{
+  "entry_node_id": "start",
+  "nodes": [
+    {"id": "start", "type": "llm",  "name": "Planner"},
+    {"id": "loop",  "type": "loop", "name": "Retry Loop"},
+    {"id": "step",  "type": "llm",  "name": "Worker"}
+  ],
+  "edges": [
+    {"from": "start", "to": "loop"},
+    {"from": "loop",  "to": "step"},
+    {"from": "step",  "to": "loop"}
+  ]
+}
+EOF
+npx --yes shingan-lint analyze --input workflow.json --output markdown
+```
+
 ## Install
 
 ### npm (recommended, zero setup)
 
 ```bash
-# one-shot run
-npx shingan-lint analyze --format=langgraph ./agents/
+# one-shot run (no install)
+npx --yes shingan-lint demo
 
 # project-pinned
 pnpm add -D shingan-lint
-pnpm exec shingan analyze --since main
+pnpm exec shingan demo
 
 # global
 npm install -g shingan-lint
-shingan analyze --input ./testdata/buggy.json
+shingan demo
 ```
 
 [`shingan-lint`](https://www.npmjs.com/package/shingan-lint) is a thin Node wrapper. Its `postinstall` step downloads the platform-specific Go binary from GitHub Releases, verifies the SHA-256 checksum, and caches it under `~/.cache/shingan-lint/v<ver>/`. Linux, macOS, and Windows on amd64 / arm64 are all supported.
@@ -114,6 +145,7 @@ shingan analyze --input ./testdata/buggy.json
 
 ```bash
 go install github.com/hatyibei/shingan/cmd/shingan@latest
+shingan demo
 ```
 
 ### Build from source
@@ -122,33 +154,34 @@ go install github.com/hatyibei/shingan/cmd/shingan@latest
 git clone https://github.com/hatyibei/shingan.git
 cd shingan
 go build -o shingan ./cmd/shingan
+./shingan demo
 ```
 
 ### Docker
 
 ```bash
 docker pull ghcr.io/hatyibei/shingan:latest
-docker run --rm -v "$(pwd)":/work ghcr.io/hatyibei/shingan analyze --input /work/buggy.json
+docker run --rm ghcr.io/hatyibei/shingan demo
 ```
 
 ## Usage
 
-JSON input:
+JSON input (default format):
 
 ```bash
-shingan analyze --format json --input workflow.json --output markdown
+shingan analyze --input workflow.json --output markdown
 ```
 
-ADK-Go input:
+ADK-Go input (directory of `.go` files):
 
 ```bash
 shingan analyze --format adk-go --input ./agents/ --output markdown
 ```
 
-LangGraph (Python) input:
+LangGraph (Python) input — requires the analyzed project's deps to be importable:
 
 ```bash
-# prerequisite: pip install langgraph
+# prerequisite: pip install langgraph   (plus whatever your project imports)
 shingan analyze --format langgraph --input agent.py --output markdown
 shingan analyze --format langgraph --input ./agents/ --output sarif --output-file findings.sarif
 ```

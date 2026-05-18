@@ -4,6 +4,40 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Added
+
+- **`shingan demo` subcommand** — runs a small embedded workflow
+  through the full analyzer pipeline and prints a real markdown
+  findings report. No input file needed; exits with the standard
+  `0/1/2` semantics so it doubles as a one-line install smoke test.
+  The bundled sample (`cli/embedded/demo.json`) intentionally
+  triggers `loop_guard` (Critical) + `unreachable_node` (Warning) so
+  the demo exits 2.
+- **Guided banner when `shingan` runs with zero args** — replaces
+  cobra's default "wall-of-usage" with a four-line pointer at
+  `shingan demo` / `shingan analyze --input` / `shingan --help`.
+  Closes the "I ran `npx shingan-lint` and nothing useful happened"
+  UX gap.
+- **`--help` examples** — `shingan --help` and `shingan analyze
+  --help` now ship copy-pasteable example blocks via cobra's
+  `Example:` field, covering JSON, ADK-Go, LangGraph, SARIF output,
+  and `--since` diff mode.
+
+### Fixed
+
+- **README install/quick-start commands were all broken.** All three
+  examples under `## Install` in both `README.md` and `README.ja.md`
+  either failed with `required flag(s) "input" not set`
+  (`npx shingan-lint analyze --format=langgraph ./agents/`,
+  `pnpm exec shingan analyze --since main`) or pointed at
+  `testdata/buggy.json` which is not shipped via npm. Rewritten
+  around `shingan demo` + a self-contained `cat > workflow.json
+  <<EOF` heredoc so every code block on the landing page actually
+  runs.
+- **npm/README.md** updated to use `shingan demo` as the first
+  example and replace the broken `--since main` / `testdata/...`
+  paths.
+
 ## [0.8.7] - 2026-05-11
 
 Round-2 dogfood (mid-sized active OSS) closed two real false positives.

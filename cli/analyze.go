@@ -58,7 +58,25 @@ analysis rules concurrently, and writes the findings to stdout (or a file).
 Exit codes:
   0  No findings, or only Info-level findings
   1  At least one Warning finding (and no Critical findings)
-  2  At least one Critical finding`,
+  2  At least one Critical finding
+
+Tip: try ` + "`shingan demo`" + ` first to see a real findings report without
+needing your own input file.`,
+		Example: `  # JSON workflow (default format)
+  shingan analyze --input workflow.json --output markdown
+
+  # ADK-Go: directory of *.go files
+  shingan analyze --format adk-go --input ./agents/
+
+  # LangGraph (requires the project's Python deps to be importable)
+  shingan analyze --format langgraph --input ./agents/
+
+  # Emit SARIF for GitHub Code Scanning
+  shingan analyze --format adk-go --input ./agents/ \
+      --output sarif --output-file findings.sarif
+
+  # Diff mode: only analyze files changed since main
+  shingan analyze --format adk-go --input ./agents/ --since main`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Thread cobra's writers through so wrappers and tests
 			// using root.SetOut/SetErr can capture report and warning
