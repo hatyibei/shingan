@@ -4,6 +4,11 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-05-18
+
+First-run UX fixes — `npx shingan-lint` is now a working entry point
+rather than a dead end.
+
 ### Added
 
 - **`shingan demo` subcommand** — runs a small embedded workflow
