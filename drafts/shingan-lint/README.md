@@ -68,6 +68,12 @@
 |---|---------|---------|
 | 27 | feat(langgraph): static discovery without import | `prs/27-feat-langgraph-static.md` |
 
+### Positioning / マーケティング
+
+| # | タイトル | ファイル |
+|---|---------|---------|
+| 28 | docs(positioning): pre-deployment static analysis tagline | `prs/28-docs-positioning.md` |
+
 ## トーンと進め方
 
 - 初手は Issue で「この方向で良いか」確認してからPR
