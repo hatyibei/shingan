@@ -178,6 +178,66 @@ func TestEvalMissing_SinkByNamePattern(t *testing.T) {
 	}
 }
 
+// ─── Case 7b: benign names that merely *contain* eval/exec are NOT sinks ────
+//
+// Regression for the dogfood Critical false positive on adk-samples
+// financial-advisor: the Tool node "execution_analyst" (an LLM sub-agent
+// wrapped via agenttool.New) was misread as a code-execution sink because the
+// old unanchored regex matched the "exec" substring of "execution". The
+// token-based classifier must leave these alone.
+func TestEvalMissing_BenignNamesNotSink(t *testing.T) {
+	benign := []string{
+		"execution_analyst", // the actual dogfood FP
+		"executive_summary",
+		"executor_agent",
+		"evaluator_agent", // "evaluator" nodes are ubiquitous in agent graphs
+		"evaluation",
+		"retrieval_node", // "retrieval" contains "eval"
+		"retrieval",
+	}
+	for _, name := range benign {
+		t.Run(name, func(t *testing.T) {
+			g := buildEval(t, testutil.NewBuilder().
+				AddNode("llm_node", domain.NodeTypeLLM).
+				AddNode(name, domain.NodeTypeTool).
+				AddEdge("llm_node", name).
+				Entry("llm_node"))
+
+			findings := rules.NewEvalMissing().Analyze(g)
+			if len(findings) != 0 {
+				t.Errorf("expected 0 findings for benign Tool name %q, got %d: %+v",
+					name, len(findings), findings)
+			}
+		})
+	}
+}
+
+// ─── Case 7c: a Tool merely *named* code_interpreter is a sink ──────────────
+//
+// Previously only Config["tool"] == "code_interpreter" was recognised; the
+// name regex omitted "interpreter", so a Tool named "code_interpreter" with no
+// config slipped through (a documented §6 false negative). Token compounds
+// close that gap.
+func TestEvalMissing_CodeInterpreterByName(t *testing.T) {
+	for _, name := range []string{"code_interpreter", "CodeInterpreter"} {
+		t.Run(name, func(t *testing.T) {
+			g := buildEval(t, testutil.NewBuilder().
+				AddNode("llm_node", domain.NodeTypeLLM).
+				AddNode(name, domain.NodeTypeTool).
+				AddEdge("llm_node", name).
+				Entry("llm_node"))
+
+			findings := rules.NewEvalMissing().Analyze(g)
+			if len(findings) != 1 {
+				t.Fatalf("expected 1 finding for name=%q, got %d", name, len(findings))
+			}
+			if findings[0].Severity != domain.Critical {
+				t.Errorf("Severity = %v, want Critical", findings[0].Severity)
+			}
+		})
+	}
+}
+
 // ─── Case 8: sink by Config["category"] == "code_eval" ──────────────────────
 
 func TestEvalMissing_SinkByCodeEvalCategory(t *testing.T) {

@@ -36,9 +36,11 @@ LLM ベースのエージェントが「自然言語で書かれた手順を **�
 |---|---|
 | Config["category"] | `code_execution` または `code_eval` |
 | Config["tool"] | `eval` / `exec` / `code_interpreter` / `python_runner` / `shell` のいずれか (大小文字無視) |
-| Name / ID regex | `(?i)(eval\|exec\|code[_]?runner\|python[_]?runner\|shell\|bash)` 部分一致 |
+| Name / ID トークン | 名前を **トークン分割** (区切り文字 + camelCase 境界) し、単語単位で照合: いずれかのトークン ∈ {`eval`, `exec`, `shell`, `bash`}、または隣接トークン対 ∈ {`code runner`, `python runner`, `code interpreter`} |
 
-`code_runner` / `python_runner` のような snake_case と `CodeRunner` / `PythonRunner` のような PascalCase の両方にマッチする。
+`code_runner` / `python_runner` のような snake_case と `CodeRunner` / `PythonRunner` のような PascalCase の両方にマッチする。判定は **無境界の部分一致ではなくトークン単位** なので、`execution_analyst` / `evaluator_agent` / `retrieval_node` のように断片を含むだけの良性名には発火しない。複合対の修飾子 (`code` / `python`) は必須で、単独の `runner` / `interpreter` トークンだけでは発火しない。
+
+> **経緯**: v0.9.2 までこの行は無境界正規表現 `(?i)(eval|exec|…)` で、断片を *含む* 任意の名前に部分一致していた。dogfood sweep で adk-samples `financial-advisor` の Tool `execution_analyst` (`agenttool.New` でラップされた LLM サブエージェント。コード実行ではない) が "exec"ution の部分一致で Critical を誤発火していたのを検出し、トークン判定に置き換えた。
 
 ### 2.3 Path 上の gate
 
@@ -148,8 +150,7 @@ result = eval(llm_response)  # ← 本ルールが Critical で発火
 
 - **runtime sandbox 経由の eval**: LangGraph などで「Tool 内部で seccomp 経由 fork-exec」していても、graph 上は `code_execution` カテゴリの Tool が見えるだけなので Critical で発火する。`--min-confidence 0.95` で抑制可能、または Tool ノード側で `category` を `sandboxed_code` のような独自カテゴリに変更すれば fall through する。
 - **Condition による downgrade ガードの過大評価**: Condition の中身が「常に true を返すスタブ」のような場合でも Warning は出る。逆に「実際にはほぼ完璧な validator」でも Severity は同じ Warning。中身の妥当性は静的解析の対象外。
-
-### False Negative
+- **Name トークンの同形語 (v0.9.2 で緩和)**: 名前が `eval` / `exec` / `shell` / `bash` に *完全一致* するトークンを持つ Tool は、意味的に無関係でも sink 扱いになる (例: テキストをエコーするだけの `bash` という名の良性ツール)。これは稀で、断片を含むだけ (`execution` / `evaluator` / `retrieval`) で発火していた旧来の部分一致オーバーマッチよりはるかに限定的。必要なら `Config["category"]` で上書きするかリネームする。
 
 - **Tool ノードを介さない eval**: LLM 出力をそのまま Python の `exec(llm_out)` で評価する LangChain 風書き方を、Tool ノード以外の場所 (例: コードベース直書き) でやられると graph 上に sink ノードが現れず検出不能。`dynamic_node_construction` rule (sibling rule) が `Config["body"]` 等の文字列値レベルで補完する。
 - **Loop 経由の遅延注入**: Loop 内で次イテレーションの input に LLM 出力を挿入し、別系統の Tool で eval させるパターン。forward BFS では Loop の back edge 越しの伝播は見ているが、subgraph 上で source が visible でないと検出できない。

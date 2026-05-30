@@ -36,9 +36,11 @@ Among `NodeType.Tool` nodes, those matching any of the following are treated as 
 |---|---|
 | Config["category"] | `code_execution` or `code_eval` |
 | Config["tool"] | `eval` / `exec` / `code_interpreter` / `python_runner` / `shell` (case-insensitive) |
-| Name / ID regex | partial match against `(?i)(eval\|exec\|code[_]?runner\|python[_]?runner\|shell\|bash)` |
+| Name / ID tokens | the name is **tokenised** (split on separators *and* camelCase humps) and matched as whole words: any token ∈ {`eval`, `exec`, `shell`, `bash`}, or an adjacent token pair ∈ {`code runner`, `python runner`, `code interpreter`} |
 
-This matches both snake_case (`code_runner` / `python_runner`) and PascalCase (`CodeRunner` / `PythonRunner`).
+Tokenisation matches both snake_case (`code_runner` / `python_runner`) and PascalCase (`CodeRunner` / `PythonRunner`), and — because matching is **token-based rather than raw substring** — it does *not* fire on benign words that merely contain these fragments (`execution_analyst`, `evaluator_agent`, `retrieval_node`). The qualifier on the compound pairs is required so a bare `runner` / `interpreter` token never fires on its own.
+
+> **History**: until v0.9.2 this row used an unanchored regex `(?i)(eval|exec|…)` that partial-matched any name *containing* the fragment. The dogfood sweep caught it firing a Critical on adk-samples `financial-advisor` — the Tool `execution_analyst` (an LLM sub-agent wrapped via `agenttool.New`, not a code runner) matched the `exec` substring of `exec`ution. The token-based classifier replaced it.
 
 ### 2.3 Gates Along the Path
 
@@ -148,6 +150,7 @@ Concrete mitigations:
 
 - **Eval through a runtime sandbox**: Even when LangGraph etc. invoke "Tool internal seccomp via fork-exec", the graph only shows a `code_execution`-categorized Tool, so Critical fires. Suppress with `--min-confidence 0.95`, or fall through by changing the Tool node's `category` to a custom value such as `sandboxed_code`.
 - **Overestimating the Condition downgrade gate**: Even if the Condition body is "a stub that always returns true", Warning still fires. Conversely a "near-perfect validator in practice" still reads as the same Warning. Validity of the body is outside static analysis.
+- **Name-token homographs (mitigated v0.9.2)**: A Tool whose name *tokenises* to exactly `eval` / `exec` / `shell` / `bash` is treated as a sink even if it is semantically unrelated (e.g. a benign tool literally named `bash` that only echoes text). This is rare and far narrower than the previous substring over-match, which fired on any name *containing* the fragment (`execution`, `evaluator`, `retrieval`). Override via `Config["category"]` or rename if needed.
 
 ### False Negative
 
