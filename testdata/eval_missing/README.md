@@ -8,6 +8,7 @@
 |---|---|---|
 | `leak.json` | LLM `plan_llm` → `python_runner` (Tool, `category="code_execution"`) に直結。バリデーションも Human 承認も挟まない | 1件 (Critical, Confidence 0.9, ConfidenceReason heuristic_pattern) |
 | `safe.json` | 同じ LLM → `python_runner` の構造だが、間に Human (`human_approver`) を挿入。Human 承認が path 上に存在するため発火しない | 0件 |
+| `benign_name.json` | LLM `financial_coordinator` → `execution_analyst` (Tool だが LLM サブエージェント; コード実行ではない)。名前に "exec" を含むだけの良性ノード | 0件 (名前部分一致による Critical 誤検知の回帰防止) |
 
 ## 検証コマンド
 
@@ -26,4 +27,5 @@ shingan analyze --format json --input testdata/eval_missing/safe.json
 - **leak.json** の Critical 発火点 = LLM 出力が code_execution Tool に直接到達する経路。Severity は path 上の gate 種別で決まる: 何も挟まない → Critical / Condition だけ → Warning / Human が path 上にある → 発火しない。
 - **safe.json** が安全な理由 = Human ノード `human_approver` が path 上に存在するため、forward BFS は Human 以降の経路を展開しない (PII leak scanner と同型の Human-gate 規則)。
 - 静的解析の限界として、**runtime での sandbox / sanitization** は graph 上に現れないため検出できない。Confidence 0.9 でも true positive 確定ではなく、ユーザーがレビューすべき構造的攻撃面の提示に留まる。
-- `category` 以外の検出経路として `Config["tool"]` ∈ {eval, exec, code_interpreter, python_runner, shell} と name regex (`(?i)(eval|exec|code[_]?runner|python[_]?runner|shell|bash)`) もある。実装は `domain/rules/eval_missing.go:isEvalSink`。
+- `category` 以外の検出経路として `Config["tool"]` ∈ {eval, exec, code_interpreter, python_runner, shell} と **name のトークン判定** (`nameLooksLikeEvalSink`) もある。実装は `domain/rules/eval_missing.go:isEvalSink`。
+- **benign_name.json** が 0件である理由 = name 判定はトークン境界ベース。`execution_analyst` は `["execution","analyst"]` に分割され、単独トークン {eval, exec, shell, bash} にも複合 {code runner, python runner, code interpreter} にも一致しない。旧実装の無境界正規表現 (`(?i)(eval|exec|…)`) は "exec"ution に部分一致して Critical 誤検知を出していた (dogfood: adk-samples financial-advisor)。

@@ -1,0 +1,33 @@
+{
+  "entry_node_id": "financial_coordinator",
+  "nodes": [
+    {
+      "id": "financial_coordinator",
+      "name": "financial_coordinator",
+      "type": "llm",
+      "config": {
+        "model": "gpt-4o",
+        "prompt_template": "Coordinate the analysts and summarise their findings."
+      }
+    },
+    {
+      "id": "execution_analyst",
+      "name": "execution_analyst",
+      "type": "tool",
+      "config": {
+        "category": "agent",
+        "description": "LLM sub-agent (agenttool.New) that analyses trade execution strategies and returns text. NOT a code runner."
+      }
+    },
+    {
+      "id": "output",
+      "name": "final_response",
+      "type": "output",
+      "config": {}
+    }
+  ],
+  "edges": [
+    { "from": "financial_coordinator", "to": "execution_analyst" },
+    { "from": "execution_analyst",     "to": "output" }
+  ]
+}

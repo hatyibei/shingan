@@ -2,7 +2,6 @@ package rules
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/hatyibei/shingan/domain"
@@ -15,7 +14,9 @@ import (
 // Tier: Path (ADR-007). Sources are LLM nodes; Sinks are Tool nodes whose
 // Config["category"] is "code_execution" / "code_eval", whose Config["tool"]
 // is one of {eval, exec, code_interpreter, python_runner, shell}, or whose
-// name matches an eval/exec/runner pattern.
+// name *tokenises* to an eval/exec/runner sink. Name matching is token-based
+// (not raw substring) so benign words like "execution_analyst" /
+// "evaluator_agent" / "retrieval_node" are not misclassified.
 //
 // ConfidenceReason: ReasonHeuristicPattern. Sink classification relies on
 // naming and config-key heuristics; the path traversal guarantees only
@@ -71,18 +72,36 @@ var evalSinkCategories = map[string]bool{
 	"code_eval":      true,
 }
 
-// evalSinkNamePattern matches names that look like code-execution sinks. The
-// alternatives mirror the values in evalSinkToolValues plus common synonyms
-// (code_runner, bash) and are case-insensitive. The optional `[_]?` between
-// "python"/"code" and "runner" lets PascalCase ("PythonRunner") and
-// snake_case ("python_runner") both match.
-var evalSinkNamePattern = regexp.MustCompile(`(?i)(eval|exec|code[_]?runner|python[_]?runner|shell|bash)`)
+// evalSinkNameTokens are single word-tokens that, standing alone, mark a node
+// name as a code-execution sink. They are matched against *tokenised* names
+// (see nameLooksLikeEvalSink), never as raw substrings: the previous
+// unanchored regex `(?i)(eval|exec|…)` fired on benign words that merely
+// *contain* these fragments — "exec"ution_analyst, "eval"uator_agent,
+// retri"eval"_node, "exec"utive_summary — which surfaced as Critical false
+// positives in the dogfood sweep (adk-samples financial-advisor).
+var evalSinkNameTokens = map[string]bool{
+	"eval":  true,
+	"exec":  true,
+	"shell": true,
+	"bash":  true,
+}
+
+// evalSinkNameCompounds are adjacent word-token pairs that mark a sink. The
+// qualifier ("code" / "python") is required so a bare "runner" / "interpreter"
+// token — common in benign node names — does not fire on its own. This also
+// lets a node merely *named* "code_interpreter" match, closing the §6 gap where
+// only Config["tool"] == "code_interpreter" used to be recognised.
+var evalSinkNameCompounds = [][2]string{
+	{"code", "runner"},
+	{"python", "runner"},
+	{"code", "interpreter"},
+}
 
 // isEvalSink reports whether n is classified as a code-execution Tool sink.
 // The check examines, in order:
 //  1. Config["category"] ∈ {code_execution, code_eval}
 //  2. Config["tool"] ∈ {eval, exec, code_interpreter, python_runner, shell}
-//  3. Name (or ID) matches evalSinkNamePattern
+//  3. Name (or ID) tokenises to an eval/exec sink (nameLooksLikeEvalSink)
 func isEvalSink(n *domain.Node) bool {
 	if n == nil || n.Type != domain.NodeTypeTool {
 		return false
@@ -93,13 +112,74 @@ func isEvalSink(n *domain.Node) bool {
 	if tool := strings.ToLower(stringConfig(n, "tool")); evalSinkToolValues[tool] {
 		return true
 	}
-	if evalSinkNamePattern.MatchString(n.Name) {
-		return true
-	}
-	if evalSinkNamePattern.MatchString(n.ID) {
+	if nameLooksLikeEvalSink(n.Name) || nameLooksLikeEvalSink(n.ID) {
 		return true
 	}
 	return false
+}
+
+// nameLooksLikeEvalSink reports whether s (a node Name or ID) tokenises to
+// something that names a code-execution sink. Tokenisation splits on
+// non-alphanumeric separators *and* camelCase humps, so "python_runner",
+// "PythonRunner" and "shell_exec" all match, while "execution_analyst",
+// "evaluator_agent" and "retrieval_node" — which the old substring regex
+// wrongly flagged — do not.
+func nameLooksLikeEvalSink(s string) bool {
+	toks := tokenizeName(s)
+	for _, t := range toks {
+		if evalSinkNameTokens[t] {
+			return true
+		}
+	}
+	for i := 0; i+1 < len(toks); i++ {
+		for _, pair := range evalSinkNameCompounds {
+			if toks[i] == pair[0] && toks[i+1] == pair[1] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// tokenizeName lower-cases s and splits it into word tokens on any
+// non-alphanumeric run and at lowercase/digit→uppercase camelCase boundaries.
+// "PythonRunner" → ["python","runner"]; "Bash_node" → ["bash","node"].
+func tokenizeName(s string) []string {
+	var toks []string
+	var b strings.Builder
+	flush := func() {
+		if b.Len() > 0 {
+			toks = append(toks, strings.ToLower(b.String()))
+			b.Reset()
+		}
+	}
+	var prev rune
+	for i, r := range s {
+		switch {
+		case !isASCIIAlphaNum(r):
+			flush()
+		case i > 0 && isCamelBoundary(prev, r):
+			flush()
+			b.WriteRune(r)
+		default:
+			b.WriteRune(r)
+		}
+		prev = r
+	}
+	flush()
+	return toks
+}
+
+func isASCIIAlphaNum(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+}
+
+// isCamelBoundary reports a token break between a lowercase letter or digit and
+// a following uppercase letter ("nR" in "PythonRunner").
+func isCamelBoundary(prev, cur rune) bool {
+	prevLowerOrDigit := (prev >= 'a' && prev <= 'z') || (prev >= '0' && prev <= '9')
+	curUpper := cur >= 'A' && cur <= 'Z'
+	return prevLowerOrDigit && curUpper
 }
 
 // Sources implements domain.PathRule. It returns every LLM node — these are
