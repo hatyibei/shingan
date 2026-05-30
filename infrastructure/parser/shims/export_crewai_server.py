@@ -656,7 +656,12 @@ def _build_graph(crew: Any, source_path: str) -> Dict[str, Any]:
             out_nodes.append({
                 "id":     t_id,
                 "name":   t_label[:80],
-                "type":   "tool",
+                # A CrewAI Task is a leaf unit of agent work, not an
+                # external API/code tool. Emitting it as NodeTypeTask
+                # keeps the tool-oriented rules (error_handler_checker
+                # et al.) from false-positiving on it. Wild-sweep
+                # 2026-05-31: 65 error_handler FPs across 15 repos.
+                "type":   "task",
                 "config": cfg,
                 "pos":    {"file": source_path, "line": 0, "col": 0},
             })
@@ -1066,6 +1071,21 @@ class _CrewASTVisitor(_ast.NodeVisitor):
         self._tools: Dict[str, Dict[str, Any]] = {}     # tool_name → node
         self._edges: list[Dict[str, Any]] = []
         self._source_path = source_path
+        # Name → agent node id (terminal bindings). Populated from
+        # `x = Agent(role=...)`, factory methods `def m(self): Agent(
+        # role=...)`, and `self.x = Agent(role=...)`. Mirrors the runtime
+        # path's agent_id_by_role lookup for the AST fallback.
+        self._name_to_agent_id: Dict[str, str] = {}
+        # Name → Name alias edges for indirections that don't terminate
+        # in an Agent() ctor, e.g. `self.x = self._make_x()` (x → _make_x)
+        # or `self.x = y`. _resolve_agent() walks this chain. This is the
+        # CrewBase idiom (ADR-014: ~97% of agent code lives in instance
+        # methods); wild-sweep 2026-05-31 rn0311-security.
+        self._name_alias: Dict[str, str] = {}
+        # parallel to self._tasks: the `agent=` reference name per task
+        # (or None). Resolved in build() so forward references still link.
+        # Wild-sweep 2026-05-31: 42 unreachable-agent FPs across 8 repos.
+        self._task_agent_refs: list[Optional[str]] = []
 
     @staticmethod
     def _str_arg(node: _ast.expr) -> Optional[str]:
@@ -1090,6 +1110,21 @@ class _CrewASTVisitor(_ast.NodeVisitor):
             return call.func.attr
         return ""
 
+    @staticmethod
+    def _agent_ref_name(expr) -> Optional[str]:
+        # Resolve the binding name from a Task(agent=...) value:
+        #   agent=x            → "x"           (Name)
+        #   agent=self.x       → "x"           (Attribute)
+        #   agent=self.x()     → "x"           (Call of Attribute)
+        #   agent=make_agent() → "make_agent"  (Call of Name)
+        if isinstance(expr, _ast.Name):
+            return expr.id
+        if isinstance(expr, _ast.Attribute):
+            return expr.attr
+        if isinstance(expr, _ast.Call):
+            return _CrewASTVisitor._agent_ref_name(expr.func)
+        return None
+
     def visit_Call(self, node: _ast.Call) -> None:
         name = self._call_name(node)
         if name == "Agent":
@@ -1099,6 +1134,57 @@ class _CrewASTVisitor(_ast.NodeVisitor):
         # Crew(...) itself: we let agents/tasks accumulate; the
         # final graph is assembled in build().
         self.generic_visit(node)
+
+    def visit_Assign(self, node: _ast.Assign) -> None:
+        # Record name bindings so `Task(agent=<ref>)` resolves in build().
+        # Targets may be a module var (`x = …`) or an instance attribute
+        # (`self.x = …`); we key on the bare name either way. generic_visit
+        # still descends into any Agent() call so the node is created by
+        # visit_Call → _handle_agent as before.
+        names = [n for n in (self._target_name(t) for t in node.targets) if n]
+        if names:
+            val = node.value
+            if isinstance(val, _ast.Call) and self._call_name(val) == "Agent":
+                role = self._kw_str(val, "role")
+                if role:
+                    agent_id = "crew::agent::" + _safe_id(role)
+                    for n in names:
+                        self._name_to_agent_id[n] = agent_id
+            else:
+                # `self.x = self._make_x()` / `self.x = y` → alias hop.
+                ref = self._agent_ref_name(val)
+                if ref:
+                    for n in names:
+                        self._name_alias[n] = ref
+        self.generic_visit(node)
+
+    @staticmethod
+    def _target_name(tgt) -> Optional[str]:
+        if isinstance(tgt, _ast.Name):
+            return tgt.id
+        if isinstance(tgt, _ast.Attribute):
+            return tgt.attr
+        return None
+
+    def visit_FunctionDef(self, node: _ast.FunctionDef) -> None:
+        self._bind_agent_factory(node)
+        self.generic_visit(node)
+
+    def visit_AsyncFunctionDef(self, node) -> None:
+        self._bind_agent_factory(node)
+        self.generic_visit(node)
+
+    def _bind_agent_factory(self, node) -> None:
+        # Map a factory method `def x(self): ... Agent(role=...)` to its
+        # agent id so `Task(agent=self.x)` resolves. We take the first
+        # Agent(role=literal) constructed in the body; the node itself is
+        # still created by visit_Call descending via generic_visit.
+        for child in _ast.walk(node):
+            if isinstance(child, _ast.Call) and self._call_name(child) == "Agent":
+                role = self._kw_str(child, "role")
+                if role:
+                    self._name_to_agent_id[node.name] = "crew::agent::" + _safe_id(role)
+                    break
 
     def _handle_agent(self, node: _ast.Call) -> None:
         role = self._kw_str(node, "role") or ""
@@ -1134,14 +1220,36 @@ class _CrewASTVisitor(_ast.NodeVisitor):
         v = self._kw_str(node, "expected_output")
         if v:
             cfg["expected_output"] = v
+        # Capture the `agent=` reference so build() can wire Task→Agent.
+        agent_ref: Optional[str] = None
+        for kw in node.keywords:
+            if kw.arg == "agent":
+                agent_ref = self._agent_ref_name(kw.value)
+                break
         node_dict = {
             "id":     task_id,
             "name":   label[:80],
-            "type":   "tool",
+            # Leaf unit of agent work → NodeTypeTask, not NodeTypeTool
+            # (parity with the runtime path; keeps tool rules from FPing).
+            "type":   "task",
             "config": cfg,
             "pos":    {"file": self._source_path, "line": getattr(node, "lineno", 0), "col": 0},
         }
         self._tasks.append(node_dict)
+        self._task_agent_refs.append(agent_ref)
+
+    def _resolve_agent(self, ref: Optional[str]) -> Optional[str]:
+        # Follow ref → alias → … → agent_id (with a cycle guard) so a
+        # task's `agent=self.x` resolves through `self.x = self._make_x()`
+        # to the Agent built in `_make_x`.
+        cur = ref
+        seen: set = set()
+        while cur and cur not in seen:
+            seen.add(cur)
+            if cur in self._name_to_agent_id:
+                return self._name_to_agent_id[cur]
+            cur = self._name_alias.get(cur)
+        return None
 
     def build(self) -> Dict[str, Any]:
         # Definition-only modules (e.g. devyan/agents.py: 4 `Agent(...)`
@@ -1170,6 +1278,20 @@ class _CrewASTVisitor(_ast.NodeVisitor):
         # Sequential link Tasks head-to-tail (default Process for AST mode).
         for i in range(len(self._tasks) - 1):
             edges.append({"from": self._tasks[i]["id"], "to": self._tasks[i + 1]["id"]})
+        # Task → Agent edges (AST mirror of the runtime _build_graph path).
+        # A task's `agent=` variable resolves via the binding collected in
+        # visit_Assign; without this the agents are orphaned and the
+        # reachability rule flags every one as unreachable (wild-sweep
+        # 2026-05-31: 42 FPs across 8 crewai repos).
+        agent_ids = {a["id"] for a in self._agents.values()}
+        for i, task in enumerate(self._tasks):
+            ref = self._task_agent_refs[i] if i < len(self._task_agent_refs) else None
+            if not ref:
+                continue
+            assigned = self._resolve_agent(ref)
+            if assigned and assigned in agent_ids:
+                task["config"]["assigned_agent"] = assigned
+                edges.append({"from": task["id"], "to": assigned})
         # If multiple agents have allow_delegation=True, emit bidirectional
         # delegate edges so circular_dep_agents fires.
         delegating = [a["id"] for a in self._agents.values()
