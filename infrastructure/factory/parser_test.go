@@ -172,6 +172,26 @@ func TestParserFactory_LlamaIndex(t *testing.T) {
 	}
 }
 
+func TestParserFactory_AutoGen(t *testing.T) {
+	// AST-only Python shim — python3 alone suffices (no autogen install).
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skipf("python3 not found in PATH: %v", err)
+	}
+	f := factory.NewParserFactory()
+	p, err := f.Create("autogen")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ap, ok := p.(*parser.AutoGenParser); ok {
+		t.Cleanup(func() { _ = ap.Close() })
+	} else {
+		t.Errorf("expected *parser.AutoGenParser, got %T", p)
+	}
+	if got := p.SupportedFormat(); got != "autogen" {
+		t.Errorf("SupportedFormat() = %q, want %q", got, "autogen")
+	}
+}
+
 func TestParserFactory_UnknownFormat(t *testing.T) {
 	f := factory.NewParserFactory()
 	p, err := f.Create("yaml")
