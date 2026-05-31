@@ -8,11 +8,17 @@ import (
 	"path/filepath"
 )
 
-// shimsFS bundles the Python shim sources into the binary so the npm
-// distribution (which ships only `shingan` + a wrapper, not the repo's
-// `scripts/` directory) can still spawn the LangGraph and CrewAI workers.
+// shimsFS bundles the shim sources into the binary so the npm distribution
+// (which ships only `shingan` + a wrapper, not the repo's `scripts/`
+// directory) can still spawn the LangGraph / CrewAI (Python) and LangGraph.js
+// (Node `.mjs`) workers. The LangGraph.js shim is the ~21KB source
+// `export_langgraphjs_server.mjs`; it imports the TypeScript Compiler API at
+// runtime, which `ensureLangGraphJSDeps` provides via `npm install` next to
+// the extracted shim (the matching `package.json` is embedded alongside).
+// Shipping the source instead of a ~10MB bundled compiler keeps the binary
+// small — ADR-015's "runtime npm install" distribution model.
 //
-//go:embed shims/*.py
+//go:embed shims/*.py shims/*.mjs shims/package.json
 var shimsFS embed.FS
 
 // extractEmbeddedShim writes the bundled shim of the given filename to

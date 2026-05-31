@@ -103,7 +103,7 @@ needing your own input file.`,
 	}
 
 	cmd.Flags().StringVar(&flags.input, "input", "", "Path to the workflow file or directory (required)")
-	cmd.Flags().StringVar(&flags.format, "format", "json", "Input format: json, adk-go, samurai, langgraph, n8n, or crewai")
+	cmd.Flags().StringVar(&flags.format, "format", "json", "Input format: json, adk-go, samurai, langgraph, n8n, crewai, or langgraph-js")
 	cmd.Flags().StringVar(&flags.output, "output", "json", "Output format: json, markdown, or sarif")
 	cmd.Flags().StringVar(&flags.outputFile, "output-file", "", "Output file path (default: stdout)")
 	cmd.Flags().Float64Var(&flags.minConfidence, "min-confidence", 0.0, "Exclude findings with confidence below this threshold (0.0–1.0)")
@@ -368,17 +368,36 @@ func loadAsMulti(path, inputFormat string, p application.WorkflowParser, allow [
 		return []application.GraphWithSource{{Graph: g, SourceFile: path}}, nil
 	}
 
-	// Directory input — pick the extension by format.
-	var ext string
+	// Directory input — pick the extension(s) by format.
+	var exts []string
 	switch inputFormat {
 	case "adk-go":
-		ext = ".go"
+		exts = []string{".go"}
 	case "langgraph", "crewai":
-		ext = ".py"
+		exts = []string{".py"}
+	case "langgraph-js":
+		exts = langGraphJSExts
 	default:
-		return nil, fmt.Errorf("directory input is only supported for adk-go, langgraph, and crewai formats; use a single JSON file for json/samurai/n8n formats")
+		return nil, fmt.Errorf("directory input is only supported for adk-go, langgraph, crewai, and langgraph-js formats; use a single JSON file for json/samurai/n8n formats")
 	}
-	return parseSourceDirectoryAsMulti(path, p, allow, ext)
+	return parseSourceDirectoryAsMulti(path, p, allow, exts...)
+}
+
+// langGraphJSExts are the file extensions walked for `--format langgraph-js`
+// directory input. The Node shim parses TypeScript and JavaScript (incl. JSX /
+// TSX), so a project mixing these must not be silently analyzed as empty
+// (codex review 2026-05-31).
+var langGraphJSExts = []string{".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"}
+
+// extInSet reports whether the file extension e (as returned by filepath.Ext,
+// leading dot included) is one of exts.
+func extInSet(e string, exts []string) bool {
+	for _, x := range exts {
+		if e == x {
+			return true
+		}
+	}
+	return false
 }
 
 // parseSourceDirectoryAsMulti walks a directory, parses every matching
@@ -389,13 +408,13 @@ func loadAsMulti(path, inputFormat string, p application.WorkflowParser, allow [
 //
 // Files that fail to parse are skipped with a warning (mirrors CLI
 // resilience for incremental refactors); fatal walk errors propagate.
-func parseSourceDirectoryAsMulti(dir string, p application.WorkflowParser, allow []string, ext string) ([]application.GraphWithSource, error) {
+func parseSourceDirectoryAsMulti(dir string, p application.WorkflowParser, allow []string, exts ...string) ([]application.GraphWithSource, error) {
 	var out []application.GraphWithSource
 	walkErr := filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return fmt.Errorf("walk error at %q: %w", path, walkErr)
 		}
-		if info.IsDir() || filepath.Ext(path) != ext {
+		if info.IsDir() || !extInSet(filepath.Ext(path), exts) {
 			return nil
 		}
 		if allow != nil && !fileInAllowlist(path, allow) {
@@ -447,8 +466,10 @@ func loadGraphFiltered(path, inputFormat string, p application.WorkflowParser, a
 		return parseSourceDirectoryFiltered(path, p, allow, ".go")
 	case "langgraph", "crewai":
 		return parseSourceDirectoryFiltered(path, p, allow, ".py")
+	case "langgraph-js":
+		return parseSourceDirectoryFiltered(path, p, allow, langGraphJSExts...)
 	default:
-		return nil, fmt.Errorf("directory input is only supported for adk-go, langgraph, and crewai formats; use a single JSON file for json/samurai/n8n formats")
+		return nil, fmt.Errorf("directory input is only supported for adk-go, langgraph, crewai, and langgraph-js formats; use a single JSON file for json/samurai/n8n formats")
 	}
 }
 
@@ -505,7 +526,7 @@ func parseADKGoDirectoryFiltered(dir string, p application.WorkflowParser, allow
 // inputs to share the same merge / dedup / allowlist logic.
 //
 // `ext` must include the leading dot (e.g. ".go", ".py").
-func parseSourceDirectoryFiltered(dir string, p application.WorkflowParser, allow []string, ext string) (*domain.WorkflowGraph, error) {
+func parseSourceDirectoryFiltered(dir string, p application.WorkflowParser, allow []string, exts ...string) (*domain.WorkflowGraph, error) {
 	merged := &domain.WorkflowGraph{
 		Nodes: make(map[string]*domain.Node),
 	}
@@ -517,7 +538,7 @@ func parseSourceDirectoryFiltered(dir string, p application.WorkflowParser, allo
 		if info.IsDir() {
 			return nil
 		}
-		if filepath.Ext(path) != ext {
+		if !extInSet(filepath.Ext(path), exts) {
 			return nil
 		}
 		if allow != nil && !fileInAllowlist(path, allow) {

@@ -52,11 +52,23 @@ const (
 	jsonRPCMethodNotFound = -32601
 )
 
-// PythonWorker manages a single long-lived Python subprocess that speaks the
+// PythonWorker manages a single long-lived subprocess that speaks the
 // Shingan JSON-RPC dialect. The struct itself is goroutine-safe.
+//
+// Despite the name, the worker is language-agnostic: `binary` defaults to
+// "python3" but `WithPythonBinary("node")` (or any interpreter) repoints it,
+// and the JSON-RPC framing / timeout / kill / reap logic is binary-independent.
+// The LangGraph.js parser (ADR-015) reuses it verbatim with a Node binary and
+// a `.mjs` shim. See the `subprocessWorker` type alias below.
 type PythonWorker struct {
 	scriptPath string
-	pythonBin  string
+	binary     string
+
+	// missingBinHint is appended to the "not found in PATH" spawn error so
+	// callers get a binary-appropriate install hint (Python vs Node). It
+	// defaults (in NewPythonWorker) to the historical Python text so existing
+	// behaviour/tests are byte-for-byte unchanged.
+	missingBinHint string
 
 	mu      sync.Mutex // protects cmd / stdin / stdout / nextID
 	cmd     *exec.Cmd
@@ -69,15 +81,35 @@ type PythonWorker struct {
 	reaped atomic.Bool
 }
 
+// subprocessWorker is the language-agnostic core of PythonWorker. The alias
+// documents that nothing in this type is Python-specific beyond defaults; the
+// LangGraph.js parser constructs one with `WithPythonBinary("node")` and a
+// Node install hint. Kept as an alias (not a rename) so the many existing
+// "python worker:" call sites and tests stay untouched.
+type subprocessWorker = PythonWorker
+
 // PythonWorkerOption configures a PythonWorker at construction time.
 type PythonWorkerOption func(*PythonWorker)
 
-// WithPythonBinary overrides the python executable used for the worker.
-// Defaults to “python3“ (PATH lookup).
+// WithPythonBinary overrides the interpreter executable used for the worker.
+// Defaults to “python3“ (PATH lookup). Despite the name, any binary works —
+// the LangGraph.js parser passes "node".
 func WithPythonBinary(bin string) PythonWorkerOption {
 	return func(w *PythonWorker) {
 		if bin != "" {
-			w.pythonBin = bin
+			w.binary = bin
+		}
+	}
+}
+
+// WithMissingBinaryHint overrides the install hint appended to the
+// "<bin> not found in PATH; <hint>" spawn error. Defaults (in NewPythonWorker)
+// to the Python hint so existing behaviour is unchanged; the LangGraph.js
+// parser passes a Node-flavoured hint.
+func WithMissingBinaryHint(hint string) PythonWorkerOption {
+	return func(w *PythonWorker) {
+		if hint != "" {
+			w.missingBinHint = hint
 		}
 	}
 }
@@ -103,8 +135,12 @@ func NewPythonWorker(scriptPath string, opts ...PythonWorkerOption) (*PythonWork
 
 	w := &PythonWorker{
 		scriptPath: scriptPath,
-		pythonBin:  "python3",
-		timeout:    defaultCallTimeout,
+		binary:     "python3",
+		// Default hint preserves the historical Python message verbatim so
+		// existing error-string assertions (TestPythonWorker_PythonNotFound,
+		// TestCrewAIParser_PythonUnavailable) stay green.
+		missingBinHint: "install Python 3.10+ to use the LangGraph parser",
+		timeout:        defaultCallTimeout,
 	}
 	for _, opt := range opts {
 		opt(w)
@@ -120,7 +156,7 @@ func NewPythonWorker(scriptPath string, opts ...PythonWorkerOption) (*PythonWork
 // the worker placed in its own process group (so we can kill any children).
 // Caller must hold w.mu (or be in construction phase).
 func (w *PythonWorker) spawn() error {
-	cmd := exec.Command(w.pythonBin, w.scriptPath)
+	cmd := exec.Command(w.binary, w.scriptPath)
 	cmd.Stderr = os.Stderr // forward Python tracebacks for human debugging.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -137,9 +173,11 @@ func (w *PythonWorker) spawn() error {
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
-		// Translate the most common failure into actionable text.
+		// Translate the most common failure into actionable text. The hint
+		// is binary-specific (Python vs Node) but the "not found in PATH"
+		// fragment is asserted by tests; keep it stable.
 		if isExecNotFound(err) {
-			return fmt.Errorf("python worker: %q not found in PATH; install Python 3.10+ to use the LangGraph parser", w.pythonBin)
+			return fmt.Errorf("python worker: %q not found in PATH; %s", w.binary, w.missingBinHint)
 		}
 		return fmt.Errorf("python worker: start: %w", err)
 	}
@@ -424,13 +462,16 @@ func LocateShimNamed(scriptFilename string) (string, error) {
 }
 
 // envSuffixFromShim derives the uppercase token between "export_" and
-// "_server.py" for use in the override env-var name.
+// "_server.<ext>" for use in the override env-var name. The extension may be
+// .py (Python shims) or .mjs (the LangGraph.js Node shim).
 //
-//	export_crewai_server.py  → CREWAI
-//	export_langgraph_server.py → LANGGRAPH
-//	custom_shim.py             → CUSTOM_SHIM
+//	export_crewai_server.py      → CREWAI
+//	export_langgraph_server.py   → LANGGRAPH
+//	export_langgraphjs_server.mjs → LANGGRAPHJS
+//	custom_shim.py               → CUSTOM_SHIM
 func envSuffixFromShim(name string) string {
 	trim := strings.TrimSuffix(name, ".py")
+	trim = strings.TrimSuffix(trim, ".mjs")
 	trim = strings.TrimPrefix(trim, "export_")
 	trim = strings.TrimSuffix(trim, "_server")
 	if trim == "" {
