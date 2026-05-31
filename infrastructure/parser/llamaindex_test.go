@@ -395,3 +395,52 @@ func TestLlamaIndexParser_NonWorkflowFile(t *testing.T) {
 		t.Errorf("expected node run after worker recovered (nodes=%v)", liNodeIDs(good))
 	}
 }
+
+// TestLlamaIndexParser_AliasedImports locks the codex-review P2 fix: aliased
+// framework imports (Workflow as WF, step as li_step, StartEvent/StopEvent
+// aliased) must still be recognised — they previously yielded an empty graph.
+func TestLlamaIndexParser_AliasedImports(t *testing.T) {
+	p := newLIParser(t)
+	dir := findLlamaIndexTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "aliased_imports.py"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, id := range []string{"begin", "finish"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Fatalf("expected node %q despite aliased imports (nodes=%v)", id, liNodeIDs(graph))
+		}
+	}
+	if !liHasEdge(graph, "begin", "finish") {
+		t.Errorf("expected edge begin->finish via the (non-aliased) MidEvent (edges=%v)", graph.Edges)
+	}
+	if graph.EntryNodeID != "begin" {
+		t.Errorf("EntryNodeID = %q, want begin (consumes aliased StartEvent)", graph.EntryNodeID)
+	}
+	if graph.Nodes["finish"] == nil || !graph.Nodes["finish"].HasExitBranch {
+		t.Errorf("finish should have HasExitBranch (returns aliased StopEvent)")
+	}
+}
+
+// TestLlamaIndexParser_KeywordOnlyEvent locks the codex-review P2 fix: a step
+// declaring its event keyword-only (`async def run(self, *, ev: StartEvent)`)
+// must still be located, so the entry resolves and is not ambiguous.
+func TestLlamaIndexParser_KeywordOnlyEvent(t *testing.T) {
+	p := newLIParser(t)
+	dir := findLlamaIndexTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "kwonly_event.py"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	if graph.EntryNodeID != "run" {
+		t.Errorf("EntryNodeID = %q, want run (keyword-only StartEvent param)", graph.EntryNodeID)
+	}
+	if graph.EntryAmbiguous {
+		t.Errorf("entry must not be ambiguous when the kwonly StartEvent consumer is found")
+	}
+	if graph.Nodes["run"] == nil || !graph.Nodes["run"].HasExitBranch {
+		t.Errorf("run should have HasExitBranch (returns StopEvent)")
+	}
+}

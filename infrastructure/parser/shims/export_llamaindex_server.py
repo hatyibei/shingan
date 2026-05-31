@@ -130,6 +130,38 @@ _STEP_DECORATOR = "step"
 # Base class leaf name that marks a workflow class.
 _WORKFLOW_BASE = "Workflow"
 
+# Aliased imports — `from llama_index... import StartEvent as SE` /
+# `Workflow as WF` / `step as li_step` — would defeat the leaf-name matching
+# above (codex review 2026-05-31: aliased source silently produced empty
+# graphs). _ALIASES maps `<alias> -> <framework symbol>` for the current parse;
+# _canon() resolves a leaf name back through it before every framework-name
+# comparison. Populated per-parse by _try_extract (the worker is single-threaded
+# per request, so a module-level map is safe).
+_FRAMEWORK_NAMES = frozenset(
+    _START_EVENT_NAMES | _STOP_EVENT_NAMES | _BASE_EVENT_NAMES
+    | _CONTEXT_TYPE_NAMES | {_STEP_DECORATOR, _WORKFLOW_BASE}
+)
+_ALIASES: Dict[str, str] = {}
+
+
+def _canon(name: Optional[str]) -> Optional[str]:
+    """Resolve an import alias back to the framework symbol it names."""
+    if name is None:
+        return None
+    return _ALIASES.get(name, name)
+
+
+def _collect_aliases(tree: _ast.Module) -> Dict[str, str]:
+    """Map `<alias> -> <framework symbol>` from `import X as alias` /
+    `from M import X as alias` where X is a framework name."""
+    aliases: Dict[str, str] = {}
+    for node in _ast.walk(tree):
+        if isinstance(node, (_ast.Import, _ast.ImportFrom)):
+            for al in node.names:
+                if al.asname and al.name in _FRAMEWORK_NAMES:
+                    aliases[al.asname] = al.name
+    return aliases
+
 
 def _base_name(expr: _ast.expr) -> Optional[str]:
     """Return the bare identifier of an expression, looking through subscripts
@@ -240,7 +272,7 @@ def _is_step_method(func: _ast.AST) -> bool:
     if not isinstance(func, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
         return False
     for deco in func.decorator_list:
-        if _base_name(deco) == _STEP_DECORATOR:
+        if _canon(_base_name(deco)) == _STEP_DECORATOR:
             return True
     return False
 
@@ -250,7 +282,7 @@ def _is_workflow_class(cls: _ast.ClassDef) -> bool:
     _base_name understands). Leaf-name match — the framework is never loaded.
     """
     for base in cls.bases:
-        if _base_name(base) == _WORKFLOW_BASE:
+        if _canon(_base_name(base)) == _WORKFLOW_BASE:
             return True
     return False
 
@@ -277,13 +309,15 @@ def _consumed_events(func) -> List[str]:
     annotation.
     """
     args = func.args
-    positional = list(args.posonlyargs) + list(args.args)
-    for arg in positional:
+    # Include kwonlyargs: a step may declare its event keyword-only
+    # (`async def run(self, *, ev: StartEvent)`) — codex review 2026-05-31.
+    params = list(args.posonlyargs) + list(args.args) + list(args.kwonlyargs)
+    for arg in params:
         if arg.arg == "self":
             continue
         ann = arg.annotation
         # Skip the Context param (by annotation leaf or by conventional name).
-        if ann is not None and _leaf_name(ann) in _CONTEXT_TYPE_NAMES:
+        if ann is not None and _canon(_leaf_name(ann)) in _CONTEXT_TYPE_NAMES:
             continue
         if ann is None and arg.arg in _CONTEXT_PARAM_NAMES:
             continue
@@ -345,6 +379,7 @@ class _LlamaIndexASTVisitor:
         for name, func in self._steps:
             # Produced events (return annotation, possibly a union).
             for ev in _annotation_event_names(func.returns):
+                ev = _canon(ev)  # resolve aliased StartEvent/StopEvent
                 if ev in _STOP_EVENT_NAMES:
                     exit_nodes.add(name)
                     continue
@@ -360,6 +395,7 @@ class _LlamaIndexASTVisitor:
                     producers[ev].append(name)
             # Consumed event(s) (param annotation, possibly a union).
             for ev in _consumed_events(func):
+                ev = _canon(ev)  # resolve aliased StartEvent/StopEvent
                 if ev in _START_EVENT_NAMES:
                     if name not in start_consumers:
                         start_consumers.append(name)
@@ -465,6 +501,10 @@ def _try_extract(*, path: Optional[str] = None, content: Optional[str] = None,
         tree = _ast.parse(content, filename=source_path)
     except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
         return _empty_graph(source_path)
+    # Resolve import aliases (Workflow as WF, StartEvent as SE, …) so the
+    # leaf-name matching recognises the framework symbols (codex review).
+    global _ALIASES
+    _ALIASES = _collect_aliases(tree)
     visitor = _LlamaIndexASTVisitor(source_path)
     visitor.collect(tree)
     return visitor.build()
