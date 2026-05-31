@@ -103,7 +103,7 @@ needing your own input file.`,
 	}
 
 	cmd.Flags().StringVar(&flags.input, "input", "", "Path to the workflow file or directory (required)")
-	cmd.Flags().StringVar(&flags.format, "format", "json", "Input format: json, adk-go, samurai, langgraph, n8n, crewai, or langgraph-js")
+	cmd.Flags().StringVar(&flags.format, "format", "json", "Input format: json, adk-go, samurai, langgraph, n8n, crewai, langgraph-js, or pydantic-graph")
 	cmd.Flags().StringVar(&flags.output, "output", "json", "Output format: json, markdown, or sarif")
 	cmd.Flags().StringVar(&flags.outputFile, "output-file", "", "Output file path (default: stdout)")
 	cmd.Flags().Float64Var(&flags.minConfidence, "min-confidence", 0.0, "Exclude findings with confidence below this threshold (0.0–1.0)")
@@ -373,12 +373,12 @@ func loadAsMulti(path, inputFormat string, p application.WorkflowParser, allow [
 	switch inputFormat {
 	case "adk-go":
 		exts = []string{".go"}
-	case "langgraph", "crewai":
+	case "langgraph", "crewai", "pydantic-graph":
 		exts = []string{".py"}
 	case "langgraph-js":
 		exts = langGraphJSExts
 	default:
-		return nil, fmt.Errorf("directory input is only supported for adk-go, langgraph, crewai, and langgraph-js formats; use a single JSON file for json/samurai/n8n formats")
+		return nil, fmt.Errorf("directory input is only supported for adk-go, langgraph, crewai, langgraph-js, and pydantic-graph formats; use a single JSON file for json/samurai/n8n formats")
 	}
 	return parseSourceDirectoryAsMulti(path, p, allow, exts...)
 }
@@ -464,12 +464,12 @@ func loadGraphFiltered(path, inputFormat string, p application.WorkflowParser, a
 	switch inputFormat {
 	case "adk-go":
 		return parseSourceDirectoryFiltered(path, p, allow, ".go")
-	case "langgraph", "crewai":
+	case "langgraph", "crewai", "pydantic-graph":
 		return parseSourceDirectoryFiltered(path, p, allow, ".py")
 	case "langgraph-js":
 		return parseSourceDirectoryFiltered(path, p, allow, langGraphJSExts...)
 	default:
-		return nil, fmt.Errorf("directory input is only supported for adk-go, langgraph, crewai, and langgraph-js formats; use a single JSON file for json/samurai/n8n formats")
+		return nil, fmt.Errorf("directory input is only supported for adk-go, langgraph, crewai, langgraph-js, and pydantic-graph formats; use a single JSON file for json/samurai/n8n formats")
 	}
 }
 

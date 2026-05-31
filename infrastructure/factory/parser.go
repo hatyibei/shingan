@@ -17,11 +17,12 @@ func NewParserFactory() *ParserFactory {
 
 // Create returns a WorkflowParser for the given format name.
 // Supported formats: "json", "adk-go", "samurai", "langgraph", "n8n",
-// "crewai", "langgraph-js".
+// "crewai", "langgraph-js", "pydantic-graph".
 // Returns an error for unknown format names.
 //
-// Note: the LangGraph, CrewAI and LangGraph.js parsers each own a subprocess
-// (Python for the first two, Node for langgraph-js).
+// Note: the LangGraph, CrewAI, LangGraph.js and pydantic-graph parsers each own
+// a subprocess (Python for langgraph/crewai/pydantic-graph, Node for
+// langgraph-js).
 // Callers that handle many graphs in one session should keep a single parser
 // instance and reuse it; the factory itself does not memoise instances
 // (matching the existing stateless design for json/adk-go/samurai/n8n).
@@ -56,7 +57,13 @@ func (f *ParserFactory) Create(format string) (application.WorkflowParser, error
 			return nil, fmt.Errorf("create langgraph-js parser: %w", err)
 		}
 		return p, nil
+	case "pydantic-graph":
+		p, err := parser.NewPydanticGraphParser()
+		if err != nil {
+			return nil, fmt.Errorf("create pydantic-graph parser: %w", err)
+		}
+		return p, nil
 	default:
-		return nil, fmt.Errorf("unknown parser format %q: supported formats are \"json\", \"adk-go\", \"samurai\", \"langgraph\", \"n8n\", \"crewai\", \"langgraph-js\"", format)
+		return nil, fmt.Errorf("unknown parser format %q: supported formats are \"json\", \"adk-go\", \"samurai\", \"langgraph\", \"n8n\", \"crewai\", \"langgraph-js\", \"pydantic-graph\"", format)
 	}
 }
