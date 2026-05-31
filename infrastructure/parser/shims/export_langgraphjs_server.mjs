@@ -104,12 +104,22 @@ function stringOf(arg) {
   return null;
 }
 
-// Heuristic NodeType for a node handler argument. PoC default: "llm". If the
-// handler is a reference whose name hints at a tool, classify "tool". We keep
-// this conservative so agent/tools stay non-loop (cycle_detection branch).
-function nodeTypeForHandler(arg) {
+// Constructor name of a `new Foo(...)` / `new ns.Foo(...)` expression, else "".
+function ctorName(newExpr) {
+  if (!newExpr || !ts.isNewExpression(newExpr)) return "";
+  const c = newExpr.expression;
+  if (ts.isIdentifier(c)) return c.text;
+  if (ts.isPropertyAccessExpression(c)) return c.name.text;
+  return "";
+}
+
+// Name-based NodeType hint, mirroring the Python `_node_type_for` heuristic
+// (handler identifier/attribute name → tool/llm). Conservative default "llm".
+// This is the *name* signal; body inspection (classifyHandler in extract)
+// layers on top of it. Returns "tool", "llm", or "" (no name signal).
+function nodeTypeForName(arg) {
   let name = "";
-  if (!arg) return "llm";
+  if (!arg) return "";
   if (ts.isIdentifier(arg)) name = arg.text;
   else if (ts.isPropertyAccessExpression(arg)) name = arg.name.text;
   else if (
@@ -119,8 +129,36 @@ function nodeTypeForHandler(arg) {
     name = arg.name.text;
   const lower = name.toLowerCase();
   if (/(tool|retriev|search|fetch|browser)/.test(lower)) return "tool";
-  return "llm";
+  return "";
 }
+
+// Chat-model / LLM construct identifiers. A handler body that constructs or
+// invokes one of these is an LLM node. The `.bindTools`/`.invoke`/`.stream`
+// method names and the `llm`/`model` identifier hints are matched separately
+// (callee/identifier inspection) since they aren't constructors.
+const LLM_CTORS = new Set([
+  "ChatOpenAI",
+  "ChatAnthropic",
+  "ChatGoogleGenerativeAI",
+  "ChatVertexAI",
+  "ChatBedrock",
+  "ChatMistralAI",
+  "ChatCohere",
+  "ChatFireworks",
+  "ChatGroq",
+  "ChatOllama",
+  "AzureChatOpenAI",
+]);
+// `.bindTools(...)` is unambiguously a chat-model method. `.invoke`/`.stream`
+// are generic Runnable methods, so they only signal an LLM when their receiver
+// is model-like (a ChatX construct or a `model`/`llm` identifier).
+const LLM_BIND_METHODS = new Set(["bindTools", "bind_tools"]);
+const LLM_RUN_METHODS = new Set(["invoke", "stream"]);
+const LLM_IDENTS = new Set(["llm", "model", "chatModel", "chat_model"]);
+// Tool-execution constructs. A `new ToolNode(...)` handler, or a body that
+// references a tools array / calls a tool-execution API, is a tool node.
+const TOOL_CTORS = new Set(["ToolNode"]);
+const TOOL_IDENTS = new Set(["tools", "toolNode", "toolExecutor", "toolnode"]);
 
 // ----- per-graph accumulator -----------------------------------------------
 // We track one builder per `new StateGraph(...)` assignment, keyed by the
@@ -132,6 +170,7 @@ class GraphBuilder {
     this.edges = []; // {from,to,condition}
     this.entry = "";
     this.compiled = false;
+    this.handlers = new Map(); // node id -> handler AST node (for Command goto)
   }
 
   ensureNode(id, name, type, pos) {
@@ -230,9 +269,65 @@ function stateGraphRootOf(expr) {
   return null;
 }
 
+// Harvest router destinations from a return-type annotation, e.g.
+//   function route(s): "tools" | typeof END
+//   (s): "a" | "__end__"
+// We walk the annotation type tree and collect:
+//   * string-literal types ("tools", "__end__")           -> the literal text
+//   * `typeof END` (TypeQueryNode over a sentinel ident)   -> the LG sentinel
+//   * sentinel identifiers / property accesses             -> the LG sentinel
+// Resolution is genuinely impossible for opaque/imported annotation types, in
+// which case nothing is added (no regression). Mirrors the Python
+// `_extract_command_dests_from_annotation` Literal[...] handling.
+function collectAnnotationDests(typeNode, out) {
+  if (!typeNode) return;
+  // Union: `"tools" | typeof END` -> recurse each member.
+  if (ts.isUnionTypeNode(typeNode)) {
+    for (const t of typeNode.types) collectAnnotationDests(t, out);
+    return;
+  }
+  if (ts.isParenthesizedTypeNode && ts.isParenthesizedTypeNode(typeNode)) {
+    collectAnnotationDests(typeNode.type, out);
+    return;
+  }
+  // Literal string type: `"tools"` / `"__end__"`.
+  if (ts.isLiteralTypeNode(typeNode)) {
+    const lit = typeNode.literal;
+    if (lit && ts.isStringLiteralLike(lit)) {
+      if (lit.text === LG_END) out.add(LG_END);
+      else if (lit.text === LG_START) out.add(LG_START);
+      else out.add(lit.text);
+    }
+    return;
+  }
+  // `typeof END` -> TypeQueryNode whose exprName is the sentinel identifier.
+  if (ts.isTypeQueryNode(typeNode)) {
+    const name = typeNode.exprName;
+    let id = "";
+    if (name && ts.isIdentifier(name)) id = name.text;
+    else if (name && ts.isQualifiedName(name)) id = name.right.text;
+    if (END_IDENTS.has(id)) out.add(LG_END);
+    else if (START_IDENTS.has(id)) out.add(LG_START);
+    return;
+  }
+  // Bare type reference to a sentinel (rare): `END` used as a type.
+  if (ts.isTypeReferenceNode(typeNode)) {
+    const tn = typeNode.typeName;
+    let id = "";
+    if (ts.isIdentifier(tn)) id = tn.text;
+    else if (ts.isQualifiedName(tn)) id = tn.right.text;
+    if (END_IDENTS.has(id)) out.add(LG_END);
+    else if (START_IDENTS.has(id)) out.add(LG_START);
+    return;
+  }
+}
+
 // Collect router-function destinations so a conditional whose pathMap is
 // omitted still surfaces END exits. We harvest the END/START sentinels and
-// string-literal returns from a router function body/annotation.
+// string-literal returns from a router function body AND its return-type
+// annotation. Body harvest recurses every `return` (not just the tail), so a
+// `return END` nested in an `if` is caught; the annotation harvest catches END
+// exits a fully-opaque body would otherwise hide.
 function collectRouterReturns(fnNode) {
   const dests = new Set();
   if (!fnNode) return dests;
@@ -249,6 +344,8 @@ function collectRouterReturns(fnNode) {
     ts.forEachChild(n, visit);
   };
   if (fnNode.body) visit(fnNode.body);
+  // Return-type annotation (gap 3a): `function route(s): "tools" | typeof END`.
+  if (fnNode.type) collectAnnotationDests(fnNode.type, dests);
   return dests;
 }
 
@@ -268,6 +365,17 @@ function extract(content, filePath) {
   // passed by reference (addConditionalEdges("a", shouldContinue, map)) can be
   // resolved for END-exit detection.
   const fnDecls = new Map();
+  // Map a variable name -> its initializer expression node, so a handler like
+  // `const toolNode = new ToolNode(tools)` can be resolved for node-type
+  // classification even when it's passed to addNode by reference.
+  const varInits = new Map();
+  // Identity map from a `new StateGraph(...)` NewExpression node -> the variable
+  // it was assigned to. Keying by the AST node *object* (parent nodes are set,
+  // so the same root node instance is shared by the declaration initializer and
+  // by every chained `.addNode(...)` receiver) lets builderForExpr resolve a
+  // `const g = new StateGraph(...).addNode("a", a)` chain to `g` instead of a
+  // synthetic <anon> builder — closing the fluent-chain builder split.
+  const sgNodeToVar = new Map();
 
   // Pre-pass: collect function declarations and arrow/function var bindings.
   const collectFns = (node) => {
@@ -280,6 +388,12 @@ function extract(content, filePath) {
         ts.isFunctionExpression(node.initializer)
       ) {
         fnDecls.set(node.name.text, node.initializer);
+      }
+      // Record the initializer of every simple `const x = <expr>` binding so a
+      // handler passed to addNode by reference (e.g. `const toolNode =
+      // new ToolNode(tools)`) can be classified by inspecting <expr>.
+      if (!varInits.has(node.name.text)) {
+        varInits.set(node.name.text, node.initializer);
       }
     }
     ts.forEachChild(node, collectFns);
@@ -325,7 +439,15 @@ function extract(content, filePath) {
       const sg = stateGraphRootOf(node.initializer);
       if (sg) {
         const vn = rootVarName(node);
-        if (vn) builderFor(vn);
+        if (vn) {
+          builderFor(vn);
+          // Bind the StateGraph root NewExpression *node identity* to its
+          // declared variable. builderForExpr consults this so a chained
+          // `const g = new StateGraph(...).addNode("a", a)` routes "a" to g's
+          // builder — not a synthetic <anon> one — keeping a chain that's then
+          // continued via `g.addNode("b", b)` as a single graph.
+          sgNodeToVar.set(sg, vn);
+        }
       }
     }
     ts.forEachChild(node, registerBuilders);
@@ -346,7 +468,12 @@ function extract(content, filePath) {
     const vn = receiverVar(recv);
     if (vn && builders.has(vn)) return builders.get(vn);
     if (sg) {
-      // Anonymous chain rooted at `new StateGraph(...)`.
+      // A StateGraph root that was assigned to a variable resolves to that
+      // variable's builder even mid-chain (`const g = new StateGraph(...)
+      // .addNode("a", a)`), so the chain is not split off into <anon>.
+      const owner = sgNodeToVar.get(sg);
+      if (owner) return builderFor(owner);
+      // Truly anonymous chain rooted at `new StateGraph(...)`.
       return builderFor("<anon>");
     }
     if (vn && builders.size === 0) {
@@ -361,6 +488,205 @@ function extract(content, filePath) {
     while (cur && ts.isPropertyAccessExpression(cur)) cur = cur.expression;
     if (cur && ts.isCallExpression(cur)) return cur.expression;
     return cur;
+  }
+
+  // Classify a node handler argument as "tool" or "llm" (the conservative
+  // default). This is additive over the Python name heuristic: a name hint
+  // (nodeTypeForName) is honoured first, then the handler's *body / construct*
+  // is inspected. The handler may be:
+  //   addNode("x", fnRef)          -> resolve fnRef via fnDecls / varInits
+  //   addNode("x", () => {...})    -> inspect the inline body directly
+  //   addNode("x", new ToolNode()) -> inspect the construction expression
+  //
+  // Precedence (a wrong type is worse than the safe "llm" default, so the
+  // signals are deliberately ordered, not summed):
+  //   1. name regex says "tool"                          -> tool
+  //   2. handler IS / resolves to a `new ToolNode(...)`  -> tool
+  //   3. body has a chat-model construct/invoke signal   -> llm  (wins ties:
+  //      the classic agent node does `model.bindTools(tools)` — both a model
+  //      and a tools reference — and must stay llm)
+  //   4. body references a tools array / tool-exec API   -> tool
+  //   5. otherwise                                       -> llm
+  function classifyHandler(arg, seen) {
+    if (!arg) return "llm";
+    seen = seen || new Set();
+
+    // Name signal first (cheap, matches Python parity).
+    if (nodeTypeForName(arg) === "tool") return "tool";
+
+    // Resolve a reference (identifier) to its declaration / initializer once.
+    if (ts.isIdentifier(arg)) {
+      const nm = arg.text;
+      if (seen.has(nm)) return "llm";
+      seen.add(nm);
+      const init = varInits.get(nm);
+      if (init && !ts.isArrowFunction(init) && !ts.isFunctionExpression(init)) {
+        // e.g. `const toolNode = new ToolNode(tools)` — classify the value.
+        const t = classifyHandler(init, seen);
+        if (t === "tool") return "tool";
+      }
+      const fn = fnDecls.get(nm);
+      if (fn) return classifyFnBody(fn);
+      // Unresolvable reference: no body to inspect, fall back to llm.
+      return "llm";
+    }
+
+    // `new ToolNode(...)` (or other tool constructor) handler.
+    if (ts.isNewExpression(arg)) {
+      const cn = ctorName(arg);
+      if (cn && TOOL_CTORS.has(cn)) return "tool";
+      if (cn && LLM_CTORS.has(cn)) return "llm";
+      return "llm";
+    }
+
+    // Inline arrow/function handler — inspect its body.
+    if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) {
+      return classifyFnBody(arg);
+    }
+
+    return "llm";
+  }
+
+  // Is `expr` a model-like receiver for a `.invoke`/`.stream` call? True for a
+  // `model`/`llm` identifier, a `new ChatX(...)` construct, or a chain rooted at
+  // either (e.g. `model.bindTools(tools).invoke(...)`,
+  // `new ChatOpenAI(...).bindTools(tools)`). Resolves an identifier through
+  // varInits once so `const model = new ChatOpenAI(...)` counts.
+  function receiverIsModelLike(expr, seen) {
+    if (!expr) return false;
+    if (ts.isIdentifier(expr)) {
+      if (LLM_IDENTS.has(expr.text)) return true;
+      seen = seen || new Set();
+      if (seen.has(expr.text)) return false;
+      seen.add(expr.text);
+      const init = varInits.get(expr.text);
+      return init ? receiverIsModelLike(init, seen) : false;
+    }
+    if (ts.isNewExpression(expr)) {
+      const cn = ctorName(expr);
+      return !!(cn && LLM_CTORS.has(cn));
+    }
+    // Walk through a call/property chain to its head (e.g. `.bindTools(...)`).
+    if (ts.isCallExpression(expr)) return receiverIsModelLike(expr.expression, seen);
+    if (ts.isPropertyAccessExpression(expr)) return receiverIsModelLike(expr.expression, seen);
+    return false;
+  }
+
+  // Inspect a function body for model vs tool signals (precedence: model wins).
+  function classifyFnBody(fn) {
+    if (!fn || !fn.body) return "llm";
+    let sawModel = false;
+    let sawTool = false;
+    const visit = (n) => {
+      // `new ChatOpenAI(...)` / `new ToolNode(...)`.
+      if (ts.isNewExpression(n)) {
+        const cn = ctorName(n);
+        if (cn && LLM_CTORS.has(cn)) sawModel = true;
+        else if (cn && TOOL_CTORS.has(cn)) sawTool = true;
+      }
+      // Method calls: `model.bindTools(...)`, `llm.invoke(...)`, `.stream(...)`.
+      if (
+        ts.isCallExpression(n) &&
+        ts.isPropertyAccessExpression(n.expression)
+      ) {
+        const m = n.expression.name.text;
+        // `.bindTools(...)` is a chat-model method -> LLM signal outright.
+        if (LLM_BIND_METHODS.has(m)) {
+          sawModel = true;
+        } else if (LLM_RUN_METHODS.has(m)) {
+          // `.invoke`/`.stream` are generic Runnable methods; treat as an LLM
+          // signal only when the receiver is model-like (a `model`/`llm`
+          // identifier, or a chained ChatX/.bindTools construct).
+          if (receiverIsModelLike(n.expression.expression)) sawModel = true;
+        }
+      }
+      // Bare identifier references to a model/tools-like name.
+      if (ts.isIdentifier(n)) {
+        if (LLM_IDENTS.has(n.text)) sawModel = true;
+        else if (TOOL_IDENTS.has(n.text)) sawTool = true;
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(fn.body);
+    if (sawModel) return "llm"; // model signal wins ties (agent node case)
+    if (sawTool) return "tool";
+    return "llm";
+  }
+
+  // Resolve a node handler AST argument to the function whose body should be
+  // scanned for `new Command({goto: ...})`. Identifier handlers resolve through
+  // fnDecls; inline arrows/functions are scanned directly. Returns the function
+  // node (with a `.body`) or null when unresolvable (imported handler, etc.).
+  function resolveHandlerFn(arg, seen) {
+    if (!arg) return null;
+    if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) return arg;
+    if (ts.isIdentifier(arg)) {
+      const nm = arg.text;
+      seen = seen || new Set();
+      if (seen.has(nm)) return null;
+      seen.add(nm);
+      const fn = fnDecls.get(nm);
+      if (fn) return fn;
+    }
+    return null;
+  }
+
+  // Harvest `new Command({goto: X})` / `Command({goto: X})` destinations from a
+  // handler function body. Returns a Set of resolved destinations where each is
+  // either the LG_END sentinel or a string node name. `goto` may be a string
+  // literal, the END identifier, a START/END property access, or an array of
+  // those. Mirrors the Python `_extract_command_dests_from_return`, adapted to
+  // JS's object-literal-argument Command shape. Non-literal goto expressions
+  // (a variable, a computed value) are skipped — we can't statically resolve
+  // them, and an over-approximated edge to an unknown target is worse than the
+  // honest omission.
+  function collectCommandGotos(fnNode) {
+    const dests = new Set();
+    if (!fnNode || !fnNode.body) return dests;
+    const harvestGotoValue = (v) => {
+      const sent = sentinelOf(v);
+      if (sent) {
+        dests.add(sent);
+        return;
+      }
+      const s = stringOf(v);
+      if (s) {
+        dests.add(s);
+        return;
+      }
+      if (ts.isArrayLiteralExpression(v)) {
+        for (const el of v.elements) harvestGotoValue(el);
+      }
+    };
+    const visit = (n) => {
+      // Match `new Command({...})` and the (rarer) call form `Command({...})`.
+      let callee = null;
+      let argList = null;
+      if (ts.isNewExpression(n)) {
+        callee = n.expression;
+        argList = n.arguments;
+      } else if (ts.isCallExpression(n)) {
+        callee = n.expression;
+        argList = n.arguments;
+      }
+      if (callee && argList && argList.length) {
+        let cn = "";
+        if (ts.isIdentifier(callee)) cn = callee.text;
+        else if (ts.isPropertyAccessExpression(callee)) cn = callee.name.text;
+        if (cn === "Command" && ts.isObjectLiteralExpression(argList[0])) {
+          for (const prop of argList[0].properties) {
+            if (!ts.isPropertyAssignment(prop)) continue;
+            let key = "";
+            if (ts.isIdentifier(prop.name)) key = prop.name.text;
+            else if (ts.isStringLiteralLike(prop.name)) key = prop.name.text;
+            if (key === "goto") harvestGotoValue(prop.initializer);
+          }
+        }
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(fnNode.body);
+    return dests;
   }
 
   // Process builder method calls in two phases so that fully-chained graphs
@@ -393,9 +719,12 @@ function extract(content, filePath) {
               b.ensureNode(
                 id,
                 name,
-                nodeTypeForHandler(args[1]),
+                classifyHandler(args[1]),
                 posOf(sourceFile, node, filePath)
               );
+              // Stash the handler AST node so a post-pass can scan its body for
+              // `new Command({goto: ...})` dynamic routing (gap 2).
+              if (args[1]) b.handlers.set(id, args[1]);
             }
           } else if (phase === "edges" && method === "addEdge") {
             // addEdge(from, to). from/to may be sentinel or string, or an
@@ -536,6 +865,39 @@ function extract(content, filePath) {
       entry_node_id: "",
       metadata: emptyMeta(filePath),
     };
+  }
+
+  // Command(goto=...) post-pass (gap 2). A node handler that returns
+  // `new Command({goto: X})` routes dynamically — a control-flow edge the
+  // StateGraph builder calls never declare. For each node with a resolvable
+  // handler, scan its body for Command gotos and:
+  //   * goto END / "__end__"          -> mark the node has_exit_branch
+  //   * goto "<known node>"           -> synthesise an over-approximated edge
+  // Edges to destinations that are NOT declared nodes are dropped (mirrors the
+  // Python `dest in node_ids` gate) — a dangling edge to an unknown id would
+  // be a phantom in the Go rules. Runs only on the selected graph, matching the
+  // Python `_augment_runtime_graph_with_command_goto` per-payload augmentation.
+  {
+    const existing = new Set(best.edges.map((e) => `${e.from} ${e.to}`));
+    for (const [nodeIdStr, handlerArg] of best.handlers) {
+      const fn = resolveHandlerFn(handlerArg);
+      if (!fn) continue;
+      const dests = collectCommandGotos(fn);
+      if (!dests.size) continue;
+      for (const dest of dests) {
+        if (dest === LG_END) {
+          best.markExit(nodeIdStr);
+          continue;
+        }
+        if (dest === LG_START) continue;
+        const destId = nodeId(dest);
+        if (!best.nodes.has(destId)) continue; // gate: known node only
+        const key = `${nodeIdStr} ${destId}`;
+        if (existing.has(key)) continue;
+        best.edges.push({ from: nodeIdStr, to: destId, condition: "command_goto" });
+        existing.add(key);
+      }
+    }
   }
 
   // Entry fallback: first node when neither START edge nor setEntryPoint set.

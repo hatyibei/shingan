@@ -241,6 +241,160 @@ func TestLangGraphJSParser_ReactLoop_CycleWarning(t *testing.T) {
 	}
 }
 
+// TestLangGraphJSParser_FluentChainSplit covers gap 1: a StateGraph chain that
+// is the initializer of a variable (`const g = new StateGraph(...).addNode(...)`)
+// continued by `g.addNode(...)` must yield ONE complete graph, not a split where
+// the chained half is recorded under a synthetic <anon> builder and dropped.
+func TestLangGraphJSParser_FluentChainSplit(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "fluent_chain_split.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	// Both halves of the split chain must land in the single selected graph.
+	for _, id := range []string{"a", "b"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Errorf("expected node %q in the unified graph (nodes=%v)", id, nodeIDsJS(graph))
+		}
+	}
+	if len(graph.Nodes) != 2 {
+		t.Errorf("expected exactly 2 nodes (no split), got %d: %v", len(graph.Nodes), nodeIDsJS(graph))
+	}
+	if graph.EntryNodeID != "a" {
+		t.Errorf("EntryNodeID = %q, want %q", graph.EntryNodeID, "a")
+	}
+	// The a->b edge is declared via the `g` receiver; the START->a edge and the
+	// "a" node via the fluent chain. All must coexist in one graph.
+	if !hasEdgeJS(graph, "a", "b") {
+		t.Errorf("expected edge a->b in the unified graph (edges=%v)", graph.Edges)
+	}
+	if !graph.Nodes["b"].HasExitBranch {
+		t.Errorf("node b should have HasExitBranch (b -> END)")
+	}
+}
+
+// TestLangGraphJSParser_CommandGoto covers gap 2: node handlers that return
+// `new Command({goto: X})` route dynamically. goto END marks has_exit_branch
+// (downgrading a cycle to Warning); goto "<node>" synthesises an edge.
+func TestLangGraphJSParser_CommandGoto(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "command_goto.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, id := range []string{"worker", "other"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Fatalf("expected node %q (nodes=%v)", id, nodeIDsJS(graph))
+		}
+	}
+	// Command(goto: "other") on worker and Command(goto: "worker") on other
+	// synthesise the cycle edges (no static addEdge declares them).
+	if !hasEdgeJS(graph, "worker", "other") {
+		t.Errorf("expected synthesised edge worker->other from Command goto (edges=%v)", graph.Edges)
+	}
+	if !hasEdgeJS(graph, "other", "worker") {
+		t.Errorf("expected synthesised edge other->worker from Command goto (edges=%v)", graph.Edges)
+	}
+	// Command(goto: END) on worker is the cycle's exit branch.
+	if !graph.Nodes["worker"].HasExitBranch {
+		t.Fatalf("node worker must have HasExitBranch (Command goto END)")
+	}
+	// Acceptance: the worker<->other cycle must downgrade to Warning, not Critical.
+	findings := rules.NewCycleDetector().Analyze(graph)
+	var cycleFindings []domain.Finding
+	for _, f := range findings {
+		if f.RuleName == "cycle_detection" {
+			cycleFindings = append(cycleFindings, f)
+		}
+	}
+	if len(cycleFindings) == 0 {
+		t.Fatalf("expected a cycle_detection finding for the Command-goto cycle, got none")
+	}
+	for _, f := range cycleFindings {
+		if f.Severity != domain.Warning {
+			t.Errorf("cycle_detection severity = %v, want Warning (Command goto END exit): %+v", f.Severity, f)
+		}
+	}
+}
+
+// TestLangGraphJSParser_AnnotatedRouterEnd covers gap 3a: a react loop whose
+// router is a separately-declared function whose END exit is visible ONLY via
+// its return-type annotation (`function route(s): "tools" | typeof END`) — no
+// pathMap, opaque body. The annotation must still set has_exit_branch on the
+// conditional source so the agent<->tools cycle stays Warning.
+func TestLangGraphJSParser_AnnotatedRouterEnd(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "react_loop_annotated_router.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, id := range []string{"agent", "tools"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Fatalf("expected node %q (nodes=%v)", id, nodeIDsJS(graph))
+		}
+	}
+	// The annotation's "tools" literal materialises the agent->tools edge.
+	if !hasEdgeJS(graph, "agent", "tools") {
+		t.Errorf("expected edge agent->tools from router annotation (edges=%v)", graph.Edges)
+	}
+	if !hasEdgeJS(graph, "tools", "agent") {
+		t.Errorf("expected edge tools->agent (edges=%v)", graph.Edges)
+	}
+	// The annotation's `typeof END` member must mark the conditional source.
+	if !graph.Nodes["agent"].HasExitBranch {
+		t.Fatalf("node agent must have HasExitBranch (annotation typeof END); " +
+			"without it cycle_detection would emit Critical")
+	}
+	findings := rules.NewCycleDetector().Analyze(graph)
+	for _, f := range findings {
+		if f.RuleName == "cycle_detection" && f.Severity == domain.Critical {
+			t.Errorf("cycle_detection reported Critical for annotated-router react loop; want Warning: %+v", f)
+		}
+	}
+}
+
+// TestLangGraphJSParser_NodeTypes covers gap 4: handler-aware node typing. Node
+// names are chosen to NOT match the tool name regex, so each "tool" result here
+// is decided purely by construct/body inspection (the new logic), not the name:
+//   * "step"   inline `new ToolNode(...)`              -> tool (construct)
+//   * "exec"   var bound to `new ToolNode(...)`        -> tool (varInits)
+//   * "agent"  ChatOpenAI + bindTools/invoke + tools   -> llm  (model wins tie)
+//   * "runner" body references the tools array only    -> tool (body signal)
+//   * "plain"  opaque passthrough                      -> llm  (default)
+// Under the pre-change name-only heuristic step/exec/runner would all be llm,
+// so these assertions are load-bearing.
+func TestLangGraphJSParser_NodeTypes(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "node_types.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	cases := map[string]domain.NodeType{
+		"step":   domain.NodeTypeTool, // inline new ToolNode(...)
+		"exec":   domain.NodeTypeTool, // var -> new ToolNode(...) (varInits path)
+		"agent":  domain.NodeTypeLLM,  // model + bindTools/invoke (model wins tie)
+		"runner": domain.NodeTypeTool, // tools-array body, no model signal
+		"plain":  domain.NodeTypeLLM,  // opaque passthrough -> conservative default
+	}
+	for id, want := range cases {
+		n, ok := graph.Nodes[id]
+		if !ok {
+			t.Fatalf("expected node %q (nodes=%v)", id, nodeIDsJS(graph))
+		}
+		if n.Type != want {
+			t.Errorf("node %q type = %q, want %q", id, n.Type, want)
+		}
+	}
+}
+
 // --- small assertion helpers ------------------------------------------------
 
 func nodeIDsJS(g *domain.WorkflowGraph) []string {
