@@ -273,3 +273,35 @@ func TestPydanticGraphParser_NonPydanticFile(t *testing.T) {
 		t.Errorf("expected 0 nodes for a syntax-error file, got %d", len(bad.Nodes))
 	}
 }
+
+// TestPydanticGraphParser_MultiRootAmbiguous locks the codex-review P2 fix: a
+// graph with multiple zero-in-degree roots and no explicit start is entry-
+// ambiguous (pydantic-graph runs from any node), so the parser leaves the
+// entry unset + flags EntryAmbiguous, and reachability SKIPS it rather than
+// picking one root and reporting the other as an unreachable false positive.
+func TestPydanticGraphParser_MultiRootAmbiguous(t *testing.T) {
+	p := newPGParser(t)
+	dir := findPydanticGraphTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "multi_root.py"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, id := range []string{"A", "B"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Errorf("expected node %q (nodes=%v)", id, pgNodeIDs(graph))
+		}
+	}
+	if !graph.EntryAmbiguous {
+		t.Errorf("expected EntryAmbiguous=true for a two-root graph with no explicit start")
+	}
+	if graph.EntryNodeID != "" {
+		t.Errorf("EntryNodeID must be empty when ambiguous, got %q", graph.EntryNodeID)
+	}
+	// Reachability must skip — no unreachable_node FP on the non-chosen root.
+	for _, f := range rules.NewReachabilityChecker().Analyze(graph) {
+		if f.RuleName == "unreachable_node" {
+			t.Errorf("ambiguous-entry graph must not produce unreachable_node findings: %+v", f)
+		}
+	}
+}

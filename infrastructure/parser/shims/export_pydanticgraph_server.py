@@ -374,7 +374,15 @@ class _PydanticGraphASTVisitor:
         return {
             "nodes": out_nodes,
             "edges": out_edges,
-            "entry_node_id": entry,
+            # When the entry is ambiguous (multiple zero-in-degree roots and no
+            # explicit graph.run(Start())), leave entry_node_id empty and signal
+            # entry_ambiguous at the TOP LEVEL so decodeShimGraph propagates
+            # EntryAmbiguous and reachability skips the graph — otherwise it
+            # reports the non-chosen roots as unreachable false positives
+            # (codex review 2026-05-31). pydantic-graph is genuinely runnable
+            # from any node, so multiple roots is valid, not a defect.
+            "entry_node_id": "" if ambiguous else entry,
+            "entry_ambiguous": ambiguous,
             "metadata": metadata,
         }
 

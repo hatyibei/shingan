@@ -220,10 +220,19 @@ type shimGraphMetadata struct {
 // The `metadata` block is informative — Shingan rules don't need it yet but
 // surfacing it through the parser keeps it available for Track R follow-up.
 type shimGraph struct {
-	Nodes       json.RawMessage   `json:"nodes"`
-	Edges       []domain.Edge     `json:"edges"`
-	EntryNodeID string            `json:"entry_node_id"`
-	Metadata    shimGraphMetadata `json:"metadata"`
+	Nodes       json.RawMessage `json:"nodes"`
+	Edges       []domain.Edge   `json:"edges"`
+	EntryNodeID string          `json:"entry_node_id"`
+	// EntryAmbiguous lets a shim signal that the source has multiple
+	// plausible roots and none is statically the canonical entry (e.g. a
+	// pydantic-graph with several zero-in-degree BaseNode classes and no
+	// explicit graph.run(Start())). When true the shim leaves
+	// entry_node_id empty and reachability skips the graph rather than
+	// reporting the non-chosen roots as unreachable. Absent for shims that
+	// always resolve an entry — defaults to false, so existing parsers are
+	// unaffected.
+	EntryAmbiguous bool              `json:"entry_ambiguous,omitempty"`
+	Metadata       shimGraphMetadata `json:"metadata"`
 }
 
 // shimNode mirrors a single node entry. We keep `pos` as the canonical struct
@@ -257,9 +266,10 @@ func decodeShimGraph(raw json.RawMessage) (*domain.WorkflowGraph, error) {
 	}
 
 	graph := &domain.WorkflowGraph{
-		Nodes:       make(map[string]*domain.Node, len(rawNodes)),
-		Edges:       sg.Edges,
-		EntryNodeID: sg.EntryNodeID,
+		Nodes:          make(map[string]*domain.Node, len(rawNodes)),
+		Edges:          sg.Edges,
+		EntryNodeID:    sg.EntryNodeID,
+		EntryAmbiguous: sg.EntryAmbiguous,
 	}
 	for _, n := range rawNodes {
 		dn := &domain.Node{
