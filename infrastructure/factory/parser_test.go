@@ -1,6 +1,7 @@
 package factory_test
 
 import (
+	"os/exec"
 	"testing"
 
 	"github.com/hatyibei/shingan/infrastructure/factory"
@@ -102,6 +103,28 @@ func TestParserFactory_N8nParserCanParseValidInput(t *testing.T) {
 	}
 	if graph.EntryNodeID != "Webhook" {
 		t.Errorf("EntryNodeID = %q, want \"Webhook\"", graph.EntryNodeID)
+	}
+}
+
+func TestParserFactory_LangGraphJS(t *testing.T) {
+	// Creating the langgraph-js parser spawns a Node subprocess; skip when
+	// node is unavailable (CI without node). The shim is AST-only so node
+	// alone is sufficient — no @langchain/langgraph install required.
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skipf("node not found in PATH: %v", err)
+	}
+	f := factory.NewParserFactory()
+	p, err := f.Create("langgraph-js")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if lp, ok := p.(*parser.LangGraphJSParser); ok {
+		t.Cleanup(func() { _ = lp.Close() })
+	} else {
+		t.Errorf("expected *parser.LangGraphJSParser, got %T", p)
+	}
+	if got := p.SupportedFormat(); got != "langgraph-js" {
+		t.Errorf("SupportedFormat() = %q, want \"langgraph-js\"", got)
 	}
 }
 

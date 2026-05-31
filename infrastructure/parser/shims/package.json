@@ -1,0 +1,10 @@
+{
+  "name": "shingan-langgraphjs-shim",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Runtime dependency for the LangGraph.js (TypeScript) shim of the shingan static analyzer (ADR-015). The runnable shim is export_langgraphjs_server.mjs; it imports the TypeScript Compiler API to parse .ts/.js StateGraph definitions. `npm install` (or shingan's runtime bootstrap) provides typescript.",
+  "type": "module",
+  "dependencies": {
+    "typescript": "^6.0.0"
+  }
+}
