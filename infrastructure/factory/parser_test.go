@@ -150,6 +150,28 @@ func TestParserFactory_PydanticGraph(t *testing.T) {
 	}
 }
 
+func TestParserFactory_LlamaIndex(t *testing.T) {
+	// Creating the llamaindex parser spawns a Python subprocess; skip when
+	// python3 is unavailable (CI without python). The shim is AST-only so
+	// python3 alone is sufficient — no `pip install llama-index` required.
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skipf("python3 not found in PATH: %v", err)
+	}
+	f := factory.NewParserFactory()
+	p, err := f.Create("llamaindex")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if lp, ok := p.(*parser.LlamaIndexParser); ok {
+		t.Cleanup(func() { _ = lp.Close() })
+	} else {
+		t.Errorf("expected *parser.LlamaIndexParser, got %T", p)
+	}
+	if got := p.SupportedFormat(); got != "llamaindex" {
+		t.Errorf("SupportedFormat() = %q, want %q", got, "llamaindex")
+	}
+}
+
 func TestParserFactory_UnknownFormat(t *testing.T) {
 	f := factory.NewParserFactory()
 	p, err := f.Create("yaml")
