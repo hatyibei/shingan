@@ -128,6 +128,28 @@ func TestParserFactory_LangGraphJS(t *testing.T) {
 	}
 }
 
+func TestParserFactory_PydanticGraph(t *testing.T) {
+	// Creating the pydantic-graph parser spawns a Python subprocess; skip when
+	// python3 is unavailable (CI without python). The shim is AST-only so
+	// python3 alone is sufficient — no `pip install pydantic-graph` required.
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skipf("python3 not found in PATH: %v", err)
+	}
+	f := factory.NewParserFactory()
+	p, err := f.Create("pydantic-graph")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pp, ok := p.(*parser.PydanticGraphParser); ok {
+		t.Cleanup(func() { _ = pp.Close() })
+	} else {
+		t.Errorf("expected *parser.PydanticGraphParser, got %T", p)
+	}
+	if got := p.SupportedFormat(); got != "pydantic-graph" {
+		t.Errorf("SupportedFormat() = %q, want \"pydantic-graph\"", got)
+	}
+}
+
 func TestParserFactory_UnknownFormat(t *testing.T) {
 	f := factory.NewParserFactory()
 	p, err := f.Create("yaml")
