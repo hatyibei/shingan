@@ -321,6 +321,25 @@ func TestLangGraphJSParser_CommandGoto(t *testing.T) {
 	}
 }
 
+// TestLangGraphJSParser_CommandGotoNotReturned locks the codex-review P2 fix:
+// a Command that is constructed but never returned (a local, a nested helper)
+// must NOT synthesise a control-flow edge. Only returned Commands route.
+func TestLangGraphJSParser_CommandGotoNotReturned(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "command_goto_unused.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	if hasEdgeJS(graph, "a", "b") {
+		t.Errorf("a constructs but never returns Command(goto: \"b\") — no a->b edge should be synthesised (edges=%v)", graph.Edges)
+	}
+	if graph.Nodes["a"] != nil && graph.Nodes["a"].HasExitBranch {
+		t.Errorf("node a has no returned Command(goto: END) — HasExitBranch must stay false")
+	}
+}
+
 // TestLangGraphJSParser_AnnotatedRouterEnd covers gap 3a: a react loop whose
 // router is a separately-declared function whose END exit is visible ONLY via
 // its return-type annotation (`function route(s): "tools" | typeof END`) — no

@@ -658,31 +658,63 @@ function extract(content, filePath) {
         for (const el of v.elements) harvestGotoValue(el);
       }
     };
-    const visit = (n) => {
-      // Match `new Command({...})` and the (rarer) call form `Command({...})`.
+    // Harvest goto destinations from an expression that is actually RETURNED
+    // by the handler (codex review 2026-05-31, P2): only a returned Command
+    // routes the workflow. A `Command` merely constructed for logging, stored
+    // in a local, or built inside a nested helper does NOT — harvesting those
+    // would synthesise phantom edges / exits and corrupt cycle analysis.
+    // Unwrap parentheses and recurse ternary branches (both arms can return a
+    // distinct Command), mirroring the Python shim's return-only extraction.
+    const harvestReturnedExpr = (expr) => {
+      if (!expr) return;
+      if (ts.isParenthesizedExpression(expr)) {
+        harvestReturnedExpr(expr.expression);
+        return;
+      }
+      if (ts.isConditionalExpression(expr)) {
+        harvestReturnedExpr(expr.whenTrue);
+        harvestReturnedExpr(expr.whenFalse);
+        return;
+      }
       let callee = null;
       let argList = null;
-      if (ts.isNewExpression(n)) {
-        callee = n.expression;
-        argList = n.arguments;
-      } else if (ts.isCallExpression(n)) {
-        callee = n.expression;
-        argList = n.arguments;
+      if (ts.isNewExpression(expr)) {
+        callee = expr.expression;
+        argList = expr.arguments;
+      } else if (ts.isCallExpression(expr)) {
+        callee = expr.expression;
+        argList = expr.arguments;
       }
-      if (callee && argList && argList.length) {
-        let cn = "";
-        if (ts.isIdentifier(callee)) cn = callee.text;
-        else if (ts.isPropertyAccessExpression(callee)) cn = callee.name.text;
-        if (cn === "Command" && ts.isObjectLiteralExpression(argList[0])) {
-          for (const prop of argList[0].properties) {
-            if (!ts.isPropertyAssignment(prop)) continue;
-            let key = "";
-            if (ts.isIdentifier(prop.name)) key = prop.name.text;
-            else if (ts.isStringLiteralLike(prop.name)) key = prop.name.text;
-            if (key === "goto") harvestGotoValue(prop.initializer);
-          }
+      if (!callee || !argList || !argList.length) return;
+      let cn = "";
+      if (ts.isIdentifier(callee)) cn = callee.text;
+      else if (ts.isPropertyAccessExpression(callee)) cn = callee.name.text;
+      if (cn === "Command" && ts.isObjectLiteralExpression(argList[0])) {
+        for (const prop of argList[0].properties) {
+          if (!ts.isPropertyAssignment(prop)) continue;
+          let key = "";
+          if (ts.isIdentifier(prop.name)) key = prop.name.text;
+          else if (ts.isStringLiteralLike(prop.name)) key = prop.name.text;
+          if (key === "goto") harvestGotoValue(prop.initializer);
         }
       }
+    };
+    // Arrow concise body (`(s) => new Command({goto})`) is itself the returned
+    // expression; a block body is walked for `return` statements, skipping
+    // nested functions (their returns are not the handler's).
+    if (!ts.isBlock(fnNode.body)) {
+      harvestReturnedExpr(fnNode.body);
+      return dests;
+    }
+    const visit = (n) => {
+      if (
+        ts.isFunctionDeclaration(n) ||
+        ts.isFunctionExpression(n) ||
+        ts.isArrowFunction(n)
+      ) {
+        return; // nested function — its returns aren't this handler's
+      }
+      if (ts.isReturnStatement(n)) harvestReturnedExpr(n.expression);
       ts.forEachChild(n, visit);
     };
     visit(fnNode.body);
