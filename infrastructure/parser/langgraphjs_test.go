@@ -340,6 +340,32 @@ func TestLangGraphJSParser_CommandGotoNotReturned(t *testing.T) {
 	}
 }
 
+// TestLangGraphJSParser_RouterUndeclaredDest locks the node-gate on no-pathMap
+// router materialization: a router naming an undeclared destination must not
+// synthesise a phantom edge to a non-existent node (only the END exit lands as
+// has_exit_branch).
+func TestLangGraphJSParser_RouterUndeclaredDest(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "router_undeclared_dest.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, ghost := range []string{"ghost_a", "ghost_b"} {
+		if hasEdgeJS(graph, "x", ghost) {
+			t.Errorf("phantom edge x->%s to an undeclared node must not be synthesised (edges=%v)", ghost, graph.Edges)
+		}
+		if _, ok := graph.Nodes[ghost]; ok {
+			t.Errorf("undeclared destination %q must not become a node", ghost)
+		}
+	}
+	// The END exit (via the return-type annotation) still lands on x.
+	if graph.Nodes["x"] == nil || !graph.Nodes["x"].HasExitBranch {
+		t.Errorf("node x should have HasExitBranch from the `typeof END` router annotation")
+	}
+}
+
 // TestLangGraphJSParser_AnnotatedRouterEnd covers gap 3a: a react loop whose
 // router is a separately-declared function whose END exit is visible ONLY via
 // its return-type annotation (`function route(s): "tools" | typeof END`) — no
@@ -381,11 +407,12 @@ func TestLangGraphJSParser_AnnotatedRouterEnd(t *testing.T) {
 // TestLangGraphJSParser_NodeTypes covers gap 4: handler-aware node typing. Node
 // names are chosen to NOT match the tool name regex, so each "tool" result here
 // is decided purely by construct/body inspection (the new logic), not the name:
-//   * "step"   inline `new ToolNode(...)`              -> tool (construct)
-//   * "exec"   var bound to `new ToolNode(...)`        -> tool (varInits)
-//   * "agent"  ChatOpenAI + bindTools/invoke + tools   -> llm  (model wins tie)
-//   * "runner" body references the tools array only    -> tool (body signal)
-//   * "plain"  opaque passthrough                      -> llm  (default)
+//   - "step"   inline `new ToolNode(...)`              -> tool (construct)
+//   - "exec"   var bound to `new ToolNode(...)`        -> tool (varInits)
+//   - "agent"  ChatOpenAI + bindTools/invoke + tools   -> llm  (model wins tie)
+//   - "runner" body references the tools array only    -> tool (body signal)
+//   - "plain"  opaque passthrough                      -> llm  (default)
+//
 // Under the pre-change name-only heuristic step/exec/runner would all be llm,
 // so these assertions are load-bearing.
 func TestLangGraphJSParser_NodeTypes(t *testing.T) {

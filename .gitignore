@@ -62,3 +62,8 @@ scripts/screenshots/shingan-web-log-tail.txt
 /logs/
 *.log
 .hn-launch-kit.md
+
+# wild-repo runtime-introspection byproducts (never commit)
+fast_api/
+data/
+database.sqlite

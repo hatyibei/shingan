@@ -868,7 +868,13 @@ function extract(content, filePath) {
             sawEnd = true;
           } else if (d === LG_START) {
             // skip
-          } else {
+          } else if (b.nodes.has(nodeId(d))) {
+            // Only materialise an edge to a DECLARED node. A router (or its
+            // return-type annotation) naming a destination with no matching
+            // addNode — or an opaque/imported name — must NOT synthesise a
+            // phantom edge to a non-existent node, which would corrupt cycle
+            // / reachability analysis. Parity with the Command-goto
+            // dest-must-be-declared gate (codex review 2026-05-31).
             b.pushEdge(srcId, nodeId(d), d);
           }
         }
