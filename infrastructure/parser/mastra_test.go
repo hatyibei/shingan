@@ -285,6 +285,44 @@ func TestMastraParser_NonMastraFile(t *testing.T) {
 	}
 }
 
+// TestMastraParser_AliasedImports locks the codex-review P2 fix: aliased Mastra
+// imports (createStep as makeStep, createWorkflow as makeWorkflow) must still be
+// recognised — they previously yielded an empty graph.
+func TestMastraParser_AliasedImports(t *testing.T) {
+	p := newMastraParser(t)
+	dir := findMastraTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "aliased_imports.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, id := range []string{"a", "b"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Fatalf("expected node %q from aliased imports (nodes=%v)", id, mastraNodeIDs(graph))
+		}
+	}
+	if !mastraHasEdge(graph, "a", "b") {
+		t.Errorf("expected edge a->b from the aliased createWorkflow chain (edges=%v)", graph.Edges)
+	}
+}
+
+// TestMastraParser_LocalCreateStepNotMastra locks the codex-review P2 fix
+// (false-positive half): local helpers named createStep/createWorkflow that are
+// NOT imported from @mastra/* must NOT be parsed as a Mastra workflow.
+func TestMastraParser_LocalCreateStepNotMastra(t *testing.T) {
+	p := newMastraParser(t)
+	dir := findMastraTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "local_create_step.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	if len(graph.Nodes) != 0 || len(graph.Edges) != 0 {
+		t.Errorf("non-@mastra createStep/createWorkflow must yield an empty graph, got %d nodes / %d edges: %v",
+			len(graph.Nodes), len(graph.Edges), mastraNodeIDs(graph))
+	}
+}
+
 // --- small assertion helpers ------------------------------------------------
 
 func mastraNodeIDs(g *domain.WorkflowGraph) []string {
