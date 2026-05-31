@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hatyibei/shingan/domain"
 	"github.com/hatyibei/shingan/infrastructure/parser"
 )
 
@@ -244,5 +245,97 @@ class CustomAgents:
 	}
 	if len(graph.Edges) != 0 {
 		t.Errorf("expected 0 edges for agents-only module, got %d", len(graph.Edges))
+	}
+}
+
+// TestCrewAIParser_TaskNodesAreTaskType locks in the wild-sweep 2026-05-31
+// FP-1 fix: CrewAI Task nodes must be emitted as NodeTypeTask (not
+// NodeTypeTool), so the tool-oriented rules (error_handler_checker et al.)
+// do not false-positive on them. Real CrewAI tools (agent tools) stay
+// NodeTypeTool — only Tasks change.
+func TestCrewAIParser_TaskNodesAreTaskType(t *testing.T) {
+	requirePythonCrewAI(t)
+	p, err := parser.NewCrewAIParser(parser.WithCrewAIScriptPath(findCrewAIShim(t)))
+	if err != nil {
+		t.Fatalf("NewCrewAIParser: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	src := `
+from crewai import Agent, Task, Crew, Process
+
+researcher = Agent(role="researcher", goal="g", backstory="b", allow_delegation=False)
+writer     = Agent(role="writer",     goal="g", backstory="b", allow_delegation=False)
+
+t1 = Task(description="find sources", expected_output="list", agent=researcher)
+t2 = Task(description="write report", expected_output="md",   agent=writer)
+
+crew = Crew(agents=[researcher, writer], tasks=[t1, t2], process=Process.sequential)
+`
+	graph, err := p.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	taskNodes := 0
+	for _, n := range graph.Nodes {
+		if strings.Contains(n.ID, "::task::") {
+			taskNodes++
+			if n.Type != domain.NodeTypeTask {
+				t.Errorf("task node %q has type %v, want NodeTypeTask", n.ID, n.Type)
+			}
+		}
+	}
+	if taskNodes == 0 {
+		t.Error("expected at least one ::task:: node")
+	}
+}
+
+// TestCrewAIParser_ASTFallbackWiresAgentEdges locks in the wild-sweep
+// 2026-05-31 FP-2 fix: when the runtime path can't run (here forced via an
+// unresolvable import) the AST fallback must still wire Task→Agent edges,
+// resolving the CrewBase indirection chain
+// `agent=self.x` → `self.x = self._make_x()` → `def _make_x(): Agent(...)`.
+// Without this the agents are orphaned → 42 unreachable_node FPs.
+func TestCrewAIParser_ASTFallbackWiresAgentEdges(t *testing.T) {
+	requirePythonCrewAI(t)
+	p, err := parser.NewCrewAIParser(parser.WithCrewAIScriptPath(findCrewAIShim(t)))
+	if err != nil {
+		t.Fatalf("NewCrewAIParser: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	// The bad import raises ModuleNotFoundError at exec time, forcing the
+	// AST fallback. Agents are built in factory methods and bound to
+	// instance attributes — the dominant real-world CrewBase pattern.
+	src := `
+from crewai import Agent, Task, Crew, Process
+import this_module_does_not_exist_zzz_42  # forces AST fallback
+
+class IncidentCrew:
+    def __init__(self):
+        self.analyst = self._create_analyst()
+
+    def _create_analyst(self):
+        return Agent(role="Security Analyst", goal="g", backstory="b")
+
+    def analysis_task(self):
+        return Task(description="analyze the incident", expected_output="report",
+                    agent=self.analyst)
+
+crew = Crew(agents=[], tasks=[])
+`
+	graph, err := p.Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	taskAgentEdge := false
+	for _, e := range graph.Edges {
+		if strings.Contains(e.From, "::task::") && strings.Contains(e.To, "::agent::") {
+			taskAgentEdge = true
+		}
+	}
+	if !taskAgentEdge {
+		t.Errorf("expected a Task→Agent edge from AST-fallback chain resolution; nodes=%d edges=%+v",
+			len(graph.Nodes), graph.Edges)
 	}
 }

@@ -165,6 +165,8 @@ func nodeTypeName(t domain.NodeType) string {
 		return "Human"
 	case domain.NodeTypeOutput:
 		return "Output"
+	case domain.NodeTypeTask:
+		return "Task"
 	default:
 		return fmt.Sprintf("NodeType(%d)", int(t))
 	}

@@ -39,6 +39,19 @@ const (
 	// from NodeTypeLoop for the same reason as Sequence; cost +
 	// fan-out rules consume this directly.
 	NodeTypeParallel
+	// NodeTypeTask represents a single leaf unit of agent work — a node
+	// where an assigned agent performs a described task (CrewAI Task,
+	// and analogous "step" units in other agent frameworks). Distinct
+	// from NodeTypeTool: a Task is NOT an external API/code tool, so the
+	// tool-oriented rules (error_handler_checker, eval_missing,
+	// pii_leak_scanner, unbounded_tool_arg, retry_storm, …) must not
+	// fire on it. Error handling for a Task is the framework's concern
+	// (CrewAI task-level retries / guardrails), not a graph-level
+	// conditional edge. Unlike NodeTypeSequence, a Task is a leaf, not a
+	// container of sub-agents. Dogfood: wild-sweep 2026-05-31 — CrewAI
+	// tasks emitted as NodeTypeTool produced 65 error_handler_checker
+	// false positives across 15 repos.
+	NodeTypeTask
 )
 
 // nodeTypeStrings maps the canonical string names to NodeType values.
@@ -53,6 +66,7 @@ var nodeTypeStrings = map[string]NodeType{
 	"condition": NodeTypeCondition,
 	"sequence":  NodeTypeSequence,
 	"parallel":  NodeTypeParallel,
+	"task":      NodeTypeTask,
 }
 
 // String returns the lowercase string representation of a NodeType.
@@ -76,6 +90,8 @@ func (t NodeType) String() string {
 		return "sequence"
 	case NodeTypeParallel:
 		return "parallel"
+	case NodeTypeTask:
+		return "task"
 	default:
 		return fmt.Sprintf("NodeType(%d)", int(t))
 	}
@@ -94,7 +110,7 @@ func (t *NodeType) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &s); err == nil {
 		nt, ok := nodeTypeStrings[s]
 		if !ok {
-			return fmt.Errorf("unknown node type string %q: expected one of llm, tool, control, human, output, loop, condition, sequence, parallel", s)
+			return fmt.Errorf("unknown node type string %q: expected one of llm, tool, control, human, output, loop, condition, sequence, parallel, task", s)
 		}
 		*t = nt
 		return nil

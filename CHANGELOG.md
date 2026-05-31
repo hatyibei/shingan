@@ -6,6 +6,13 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ### Added
 
+- **`NodeTypeTask` IR node type** — a leaf unit of agent work (CrewAI
+  `Task`, and analogous "step" units in other frameworks), distinct
+  from `NodeTypeTool`. The tool-oriented rules (`error_handler_checker`,
+  `eval_missing`, `pii_leak_scanner`, `unbounded_tool_arg`,
+  `retry_storm`, …) do not fire on it; error handling for a Task is the
+  framework's concern (task-level retries / guardrails), not a
+  graph-level conditional edge.
 - **`shingan demo` subcommand** — runs a small embedded workflow
   through the full analyzer pipeline and prints a real markdown
   findings report. No input file needed; exits with the standard
@@ -25,6 +32,21 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ### Fixed
 
+- **CrewAI false positives eliminated (wild-repo dogfood sweep, 28
+  langgraph/crewai repos, 2026-05-31).** Two systematic FPs that
+  together accounted for 126 of the CrewAI warnings in the sweep, now
+  both at zero:
+  - `error_handler_checker` fired on every CrewAI Task (65 findings
+    across 15 repos) because Tasks were emitted as `NodeTypeTool`.
+    Tasks are now `NodeTypeTask`, so the tool-oriented rules no longer
+    match them. (Real agent *tools* stay `NodeTypeTool`.)
+  - `unreachable_node` flagged every agent (52 findings across 8 repos)
+    in crews that hit the AST fallback (real projects fail to import
+    `crewai_tools` → chromadb → opentelemetry, forcing the degraded
+    path). The AST visitor now wires Task→Agent edges, resolving the
+    CrewBase indirection chain `agent=self.x` → `self.x =
+    self._make_x()` → `def _make_x(): … Agent(role=…)`. Agents never
+    referenced by a task are still correctly reported unreachable.
 - **README install/quick-start commands were all broken.** All three
   examples under `## Install` in both `README.md` and `README.ja.md`
   either failed with `required flag(s) "input" not set`

@@ -68,6 +68,29 @@ func TestErrorHandlerChecker_BrowserWithHandler(t *testing.T) {
 	}
 }
 
+// TestErrorHandlerChecker_TaskNodeNotSource locks in the wild-sweep
+// 2026-05-31 fix: a CrewAI Task (NodeTypeTask) is a leaf unit of agent
+// work — not an external tool — so error_handler_checker must NOT fire on
+// it, even with unconditional outgoing edges. Emitting tasks as
+// NodeTypeTool produced 65 error_handler false positives across 15 repos.
+func TestErrorHandlerChecker_TaskNodeNotSource(t *testing.T) {
+	g := mustBuild(t, testutil.NewBuilder().
+		AddNodeWithConfig("task1", domain.NodeTypeTask, map[string]any{"assigned_agent": "agent1"}).
+		AddNode("task2", domain.NodeTypeTask).
+		AddNode("agent1", domain.NodeTypeLLM).
+		AddEdge("task1", "task2").
+		AddEdge("task1", "agent1").
+		Entry("task1"),
+	)
+
+	checker := NewErrorHandlerChecker()
+	findings := checker.Analyze(g)
+
+	if len(findings) != 0 {
+		t.Errorf("expected 0 findings on NodeTypeTask nodes, got %d: %+v", len(findings), findings)
+	}
+}
+
 // TestErrorHandlerChecker_APINoHandler checks that an api Tool node (default category)
 // without conditional edges produces a Warning finding.
 func TestErrorHandlerChecker_APINoHandler(t *testing.T) {
