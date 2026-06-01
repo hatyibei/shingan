@@ -192,6 +192,28 @@ func TestParserFactory_AutoGen(t *testing.T) {
 	}
 }
 
+func TestParserFactory_Mastra(t *testing.T) {
+	// Creating the mastra parser spawns a Node subprocess; skip when node is
+	// unavailable (CI without node). The shim is AST-only so node alone is
+	// sufficient — no @mastra/core install required.
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skipf("node not found in PATH: %v", err)
+	}
+	f := factory.NewParserFactory()
+	p, err := f.Create("mastra")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mp, ok := p.(*parser.MastraParser); ok {
+		t.Cleanup(func() { _ = mp.Close() })
+	} else {
+		t.Errorf("expected *parser.MastraParser, got %T", p)
+	}
+	if got := p.SupportedFormat(); got != "mastra" {
+		t.Errorf("SupportedFormat() = %q, want \"mastra\"", got)
+	}
+}
+
 func TestParserFactory_UnknownFormat(t *testing.T) {
 	f := factory.NewParserFactory()
 	p, err := f.Create("yaml")
