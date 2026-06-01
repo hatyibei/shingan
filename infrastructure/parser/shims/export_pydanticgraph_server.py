@@ -193,10 +193,54 @@ def _find_run_method(cls: _ast.ClassDef) -> Optional[_ast.expr]:
     """Return the return-annotation expr of the class's ``run`` method
     (sync or async), or None if there is no ``run`` / no annotation.
     """
+    fn = _find_run_funcdef(cls)
+    return fn.returns if fn is not None else None
+
+
+def _find_run_funcdef(cls: _ast.ClassDef):
+    """Return the class's ``run`` FunctionDef/AsyncFunctionDef, or None."""
     for item in cls.body:
         if isinstance(item, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and item.name == "run":
-            return item.returns
+            return item
     return None
+
+
+def _returned_node_name(expr: _ast.expr) -> Optional[str]:
+    """Leaf name of a value RETURNED by run(): ``ProNode()`` → "ProNode",
+    ``End(x)`` → "End", a bare ``ProNode`` → "ProNode"."""
+    if isinstance(expr, _ast.Call):
+        return _leaf_name(expr.func)
+    return _leaf_name(expr)
+
+
+def _run_body_return_names(run_fn) -> List[str]:
+    """Node/``End`` names from the ``return ...`` statements in run()'s body.
+
+    The return-type ANNOTATION is pydantic-graph's documented contract, but
+    real code frequently annotates only one of several returned node types
+    (dogfood 2026-06-01: aidev9/tuts ``ModeratorNode`` is annotated
+    ``-> ProNode`` yet returns ``ProNode``/``ConNode``/``DecisionNode``).
+    Reading the body recovers the missing edges so we don't emit a false
+    no-exit cycle + false unreachable. Nested functions are skipped (their
+    returns are not this run()'s).
+    """
+    names: List[str] = []
+    if run_fn is None:
+        return names
+
+    def visit(n: _ast.AST) -> None:
+        if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef, _ast.Lambda)):
+            return
+        if isinstance(n, _ast.Return) and n.value is not None:
+            nm = _returned_node_name(n.value)
+            if nm:
+                names.append(nm)
+        for child in _ast.iter_child_nodes(n):
+            visit(child)
+
+    for stmt in run_fn.body:
+        visit(stmt)
+    return names
 
 
 # ----- graph builder ---------------------------------------------------------
@@ -311,13 +355,24 @@ class _PydanticGraphASTVisitor:
         node_set = set(node_names)
         for name in node_names:
             cls = self._classes[name]
-            returns = _find_run_method(cls)
+            run_fn = _find_run_funcdef(cls)
+            ann = run_fn.returns if run_fn is not None else None
+            # Union the return-type ANNOTATION with the BODY `return XNode()`
+            # statements — the annotation is often incomplete in real code
+            # (dogfood 2026-06-01), and missing those edges produced false
+            # no-exit cycles + false unreachable findings.
+            target_names: List[str] = []
+            for leaf in _flatten_union(ann):
+                lname = _leaf_name(leaf)
+                if lname and lname not in target_names:
+                    target_names.append(lname)
+            for lname in _run_body_return_names(run_fn):
+                if lname not in target_names:
+                    target_names.append(lname)
+
             has_exit = False
             seen_targets: Set[str] = set()
-            for leaf in _flatten_union(returns):
-                lname = _leaf_name(leaf)
-                if lname is None:
-                    continue
+            for lname in target_names:
                 if lname in _END_NAMES:
                     has_exit = True
                     continue

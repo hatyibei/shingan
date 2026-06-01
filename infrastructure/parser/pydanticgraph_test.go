@@ -305,3 +305,37 @@ func TestPydanticGraphParser_MultiRootAmbiguous(t *testing.T) {
 		}
 	}
 }
+
+// TestPydanticGraphParser_IncompleteAnnotation locks the dogfood 2026-06-01
+// fix: a run() annotated with one node type whose BODY returns several must
+// yield ALL the body edges — so the cycle exits via DecisionNode->End (a
+// bounded-cycle Warning, not a false no-exit Critical) and the body-only
+// targets are reachable. Real pydantic-graph code (aidev9/tuts) annotates
+// only one of several returned node types.
+func TestPydanticGraphParser_IncompleteAnnotation(t *testing.T) {
+	p := newPGParser(t)
+	dir := findPydanticGraphTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "incomplete_annotation.py"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	// Edges recovered from the body (the annotation only names ProNode):
+	for _, to := range []string{"ConNode", "DecisionNode"} {
+		if !pgHasEdge(graph, "ModeratorNode", to) {
+			t.Errorf("expected body-derived edge ModeratorNode->%s (edges=%v)", to, graph.Edges)
+		}
+	}
+	// DecisionNode -> End gives the cycle a structural exit → Warning, not Critical.
+	for _, f := range rules.NewCycleDetector().Analyze(graph) {
+		if f.RuleName == "cycle_detection" && f.Severity == domain.Critical {
+			t.Errorf("cycle must be a bounded Warning (exits via DecisionNode->End), got Critical: %+v", f)
+		}
+	}
+	// And no node should be unreachable once body returns are read.
+	for _, f := range rules.NewReachabilityChecker().Analyze(graph) {
+		if f.RuleName == "unreachable_node" {
+			t.Errorf("no node should be unreachable once body returns are read: %+v", f)
+		}
+	}
+}
