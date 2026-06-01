@@ -4,7 +4,27 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-01
+
 ### Added
+
+- **Six new framework parsers — TypeScript joins shingan's language scope.**
+  `--format` gained:
+  - **`langgraph-js`** — LangGraph.js (`@langchain/langgraph`), TypeScript /
+    JavaScript, parsed via the TypeScript Compiler API in a Node shim.
+  - **`mastra`** — Mastra (mastra.ai) TS workflows (`createWorkflow().then()…`).
+  - **`pydantic-graph`** — pydantic-ai's `pydantic_graph` (`BaseNode.run()`).
+  - **`llamaindex`** — LlamaIndex Workflows (event-driven `@step` methods).
+  - **`autogen`** — Microsoft AutoGen GraphFlow (`DiGraphBuilder`).
+
+  Each maps its framework onto the framework-agnostic `WorkflowGraph` IR, so
+  the existing 22 rules run unchanged. The TypeScript shims require `node` and
+  install their `typescript` dependency on first use ("runtime npm install" —
+  keeps the binary ~8.6 MB rather than embedding a ~10 MB compiler); the Python
+  shims are AST-only and need no framework install. **PoC-level**: each parses
+  idiomatic workflows; see per-format limits (dynamic graphs, closure branch
+  conditions, split-builder chains). Validated by a cross-framework wild-repo
+  dogfood sweep before release.
 
 - **`NodeTypeTask` IR node type** — a leaf unit of agent work (CrewAI
   `Task`, and analogous "step" units in other frameworks), distinct
@@ -32,6 +52,12 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ### Fixed
 
+- **pydantic-graph: read `run()` body returns, not just the type annotation.**
+  Pre-0.9.0 dogfood on real OSS (aidev9/tuts) hit a false Critical — a node
+  annotated `-> ProNode` whose body returns three node types lost the
+  un-annotated edges, producing a false no-exit cycle + false unreachable. The
+  parser now unions the return-type annotation with the `return XNode()`
+  statements in the body.
 - **CrewAI false positives eliminated (wild-repo dogfood sweep, 28
   langgraph/crewai repos, 2026-05-31).** Two systematic FPs that
   together accounted for 126 of the CrewAI warnings in the sweep, now

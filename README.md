@@ -306,6 +306,15 @@ go test -tags=demo -v -run TestDemo_ .
 | samurai | Alpha | Generic JSON-schema adapter for GUI workflow editors (extension example) |
 | n8n | **Beta** | n8n workflow JSON export, pure Go (no Python / Node bridge) ([details](./docs/n8n.md)) |
 | crewai | **Beta** | CrewAI Crew/Agent/Task definitions via Python long-lived subprocess + JSON-RPC. Requires `pip install "crewai>=0.50.0"` ([details](./docs/crewai.md)) |
+| langgraph-js | **Experimental (PoC, v0.9)** | LangGraph.js (`@langchain/langgraph`), TypeScript/JS, via the TypeScript Compiler API in a Node shim. Needs `node`; installs `typescript` on first use |
+| pydantic-graph | **Experimental (PoC, v0.9)** | pydantic-ai `pydantic_graph` (`BaseNode.run()` return types), AST-only Python shim |
+| llamaindex | **Experimental (PoC, v0.9)** | LlamaIndex Workflows (event-driven `@step` methods), AST-only Python shim |
+| autogen | **Experimental (PoC, v0.9)** | Microsoft AutoGen GraphFlow (`DiGraphBuilder`), AST-only Python shim |
+| mastra | **Experimental (PoC, v0.9)** | Mastra (mastra.ai) TS workflows (`createWorkflow().then()…`), TypeScript Compiler API in a Node shim. Needs `node` |
+
+> The five v0.9 parsers are **PoC-level**: each handles idiomatic workflows of
+> its framework. Coverage limits (dynamic graphs, closure branch conditions,
+> split-builder chains, annotation-only return types) are documented per format.
 
 ### IDE / editor integrations
 
