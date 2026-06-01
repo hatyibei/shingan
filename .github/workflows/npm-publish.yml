@@ -17,6 +17,18 @@ on:
         description: "Release tag to publish (e.g. v0.6.1)"
         required: true
         type: string
+  # Called by release.yml after goreleaser publishes the GitHub Release.
+  # A `release: published` event raised by goreleaser's GITHUB_TOKEN does NOT
+  # cascade to other workflows (GitHub's anti-recursion rule), so the auto npm
+  # publish runs as a dependent job in release.yml via this reusable entry.
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+    secrets:
+      NPM_TOKEN:
+        required: true
 
 permissions:
   contents: read
