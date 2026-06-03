@@ -1,0 +1,586 @@
+# Instincts generated from https://github.com/hatyibei/shingan
+# Generated: 2026-06-03T07:35:29.460Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: shingan-commit-conventional
+trigger: "when writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Commit Conventional
+
+## Action
+
+Use conventional commit format with prefixes: fix, feat, refactor, docs, test
+
+## Evidence
+
+- 12 commits analyzed
+- Detected conventional commit pattern
+- Examples: fix(policy): replace ** glob with doublestar matcher, feat(baseline): stable message-digest fingerprint + v2 schema (ADR-016)
+
+---
+id: shingan-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Commit Length
+
+## Action
+
+Write moderate-length commit messages (~64 characters)
+
+## Evidence
+
+- Average commit message length: 64 chars
+- Based on 12 commits
+
+---
+id: shingan-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Naming Files
+
+## Action
+
+Use snake_case naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: snake_case
+
+---
+id: shingan-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: shingan-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: shingan-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: shingan-workflow-feature-development
+trigger: "when implementing a new feature"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Workflow Feature Development
+
+## Action
+
+Follow the feature-development workflow:
+1. Add feature implementation
+2. Add tests for feature
+3. Update documentation
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~20x per month
+- Files: **/*.test.*
+
+---
+id: shingan-workflow-regression-test-driven-bugfix
+trigger: "when doing regression test driven bugfix"
+confidence: 0.65
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Workflow Regression Test Driven Bugfix
+
+## Action
+
+Follow the regression-test-driven-bugfix workflow:
+1. Identify and fix the bug in the relevant implementation file(s).
+2. Add or update a regression test in the corresponding *_test.go file to cover the bug scenario.
+3. Update CHANGELOG.md to document the fix.
+4. Update go.mod/go.sum if dependencies are added or changed.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~3x per month
+- Files: CHANGELOG.md, **/*.go, **/*_test.go
+
+---
+id: shingan-workflow-feature-implementation-with-tests-and-docs
+trigger: "when doing feature implementation with tests and docs"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Workflow Feature Implementation With Tests And Docs
+
+## Action
+
+Follow the feature-implementation-with-tests-and-docs workflow:
+1. Implement the new feature in the relevant Go source files.
+2. Add or update tests to cover the new feature.
+3. Update or create documentation files (docs/*.md, README.md, etc.) to describe the new feature.
+4. Update CHANGELOG.md to record the new feature.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: CHANGELOG.md, **/*.go, **/*_test.go
+
+---
+id: shingan-workflow-rule-or-policy-docs-sync
+trigger: "when doing rule or policy docs sync"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Workflow Rule Or Policy Docs Sync
+
+## Action
+
+Follow the rule-or-policy-docs-sync workflow:
+1. Identify undocumented or outdated rules/policies.
+2. Add or update entries in README.md and README.ja.md.
+3. Create or update detailed docs/rules/*.md files for each rule.
+4. Update CHANGELOG.md to note the documentation change.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: CHANGELOG.md, README.md, README.ja.md
+
+---
+id: shingan-workflow-backward-compatible-schema-or-api-evolution
+trigger: "when doing backward compatible schema or api evolution"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Workflow Backward Compatible Schema Or Api Evolution
+
+## Action
+
+Follow the backward-compatible-schema-or-api-evolution workflow:
+1. Update core Go files to support the new schema or API version.
+2. Add migration or fallback logic to handle legacy formats.
+3. Update or add tests to cover both new and legacy behaviors.
+4. Update documentation and CHANGELOG.md.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: CHANGELOG.md, **/*.go, **/*_test.go
+
+---
+id: shingan-instinct-file-naming
+trigger: "When creating or renaming a file in the codebase"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct File Naming
+
+## Action
+
+Use snake_case for file names
+
+## Evidence
+
+- Pattern in codeStyle.namingConventions.files
+- Consistent usage in application/policy.go, application/policy_test.go
+
+---
+id: shingan-instinct-function-naming
+trigger: "When defining a new function"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Function Naming
+
+## Action
+
+Use camelCase for function names
+
+## Evidence
+
+- Pattern in codeStyle.namingConventions.functions
+
+---
+id: shingan-instinct-class-naming
+trigger: "When defining a new class or struct"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Class Naming
+
+## Action
+
+Use PascalCase for class/struct names
+
+## Evidence
+
+- Pattern in codeStyle.namingConventions.classes
+
+---
+id: shingan-instinct-constant-naming
+trigger: "When defining a constant"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Constant Naming
+
+## Action
+
+Use SCREAMING_SNAKE_CASE for constant names
+
+## Evidence
+
+- Pattern in codeStyle.namingConventions.constants
+
+---
+id: shingan-instinct-import-style
+trigger: "When importing modules in Go files"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Import Style
+
+## Action
+
+Use relative import paths
+
+## Evidence
+
+- Pattern in codeStyle.importStyle
+
+---
+id: shingan-instinct-export-style
+trigger: "When exporting functions or types"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Export Style
+
+## Action
+
+Use named exports
+
+## Evidence
+
+- Pattern in codeStyle.exportStyle
+
+---
+id: shingan-instinct-test-location
+trigger: "When adding tests for a Go file"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Test Location
+
+## Action
+
+Place tests in separate *_test.go files
+
+## Evidence
+
+- Pattern in architecture.folderStructure.testLocation
+- Examples: application/policy_test.go
+
+---
+id: shingan-instinct-test-naming
+trigger: "When naming a test file"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Test Naming
+
+## Action
+
+Name the file with the *_test.go suffix
+
+## Evidence
+
+- Pattern in filesInvolved: **/*_test.go
+- application/policy_test.go
+
+---
+id: shingan-instinct-test-after-feature
+trigger: "When implementing a new feature"
+confidence: 0.92
+domain: testing
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Test After Feature
+
+## Action
+
+Add or update tests to cover the new feature
+
+## Evidence
+
+- feature-implementation-with-tests-and-docs workflow
+- feature-development workflow commitSequence
+
+---
+id: shingan-instinct-regression-test-after-bugfix
+trigger: "When fixing a bug"
+confidence: 0.95
+domain: testing
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Regression Test After Bugfix
+
+## Action
+
+Add or update a regression test in the corresponding *_test.go file
+
+## Evidence
+
+- regression-test-driven-bugfix workflow
+- commitSequence: Add or update a regression test
+
+---
+id: shingan-instinct-conventional-commits
+trigger: "When writing a commit message"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Conventional Commits
+
+## Action
+
+Use the conventional commit format: <type>(<scope>): <description>
+
+## Evidence
+
+- Pattern in commits.type: conventional
+- Examples: fix(policy): replace ** glob with doublestar matcher
+
+---
+id: shingan-instinct-commit-prefixes
+trigger: "When choosing a commit type"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Commit Prefixes
+
+## Action
+
+Use one of the prefixes: fix, feat, refactor, docs, test
+
+## Evidence
+
+- Pattern in commits.prefixes
+- Examples: fix(policy): ..., feat(baseline): ...
+
+---
+id: shingan-instinct-commit-length
+trigger: "When writing a commit message"
+confidence: 0.8
+domain: git
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Commit Length
+
+## Action
+
+Keep the commit message concise, around 64 characters on average
+
+## Evidence
+
+- Pattern in commits.averageLength
+- Examples: fix(orchestrator): add NodeID tiebreaker for deterministic findings order
+
+---
+id: shingan-instinct-regression-bugfix-workflow
+trigger: "When a bug is discovered, especially one with subtle or cross-platform effects"
+confidence: 0.95
+domain: workflow
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Regression Bugfix Workflow
+
+## Action
+
+Fix the bug, add/update regression test, update CHANGELOG.md, and update go.mod/go.sum if needed
+
+## Evidence
+
+- regression-test-driven-bugfix workflow
+- commitSequence: Identify and fix the bug, Add or update a regression test, Update CHANGELOG.md, Update go.mod/go.sum
+
+---
+id: shingan-instinct-feature-implementation-workflow
+trigger: "When a new capability or option is added to the system"
+confidence: 0.92
+domain: workflow
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Feature Implementation Workflow
+
+## Action
+
+Implement the feature, add/update tests, update documentation, and record in CHANGELOG.md
+
+## Evidence
+
+- feature-implementation-with-tests-and-docs workflow
+- commitSequence: Implement the new feature, Add or update tests, Update documentation, Update CHANGELOG.md
+
+---
+id: shingan-instinct-rule-docs-sync-workflow
+trigger: "When a rule or policy exists in code but is missing or outdated in documentation"
+confidence: 0.88
+domain: workflow
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Rule Docs Sync Workflow
+
+## Action
+
+Update README.md, README.ja.md, docs/rules/*.md, and CHANGELOG.md to sync documentation
+
+## Evidence
+
+- rule-or-policy-docs-sync workflow
+- commitSequence: Identify undocumented or outdated rules/policies, Add or update entries in README.md and README.ja.md, Create or update docs/rules/*.md, Update CHANGELOG.md
+
+---
+id: shingan-instinct-schema-evolution-workflow
+trigger: "When schema or API changes are needed but must preserve compatibility with existing data or clients"
+confidence: 0.87
+domain: workflow
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Schema Evolution Workflow
+
+## Action
+
+Update Go files for new schema/API, add migration/fallback logic, update/add tests, update docs and CHANGELOG.md
+
+## Evidence
+
+- backward-compatible-schema-or-api-evolution workflow
+- commitSequence: Update core Go files, Add migration/fallback logic, Update/add tests, Update documentation and CHANGELOG.md
+
