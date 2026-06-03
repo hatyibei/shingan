@@ -1599,6 +1599,89 @@ CrewAI で発火する builtin rule:
 
 ---
 
+# ADR-017: application 層の yaml / plugin 依存 — 実依存グラフの明文化（Onion 例外）
+
+## ステータス
+Accepted (2026-06-03) — #31（外部セキュリティレビュー指摘）への対応
+
+## コンテキスト
+
+ADR-003 と `docs/architecture.md` は「application 層は domain 層のみに依存する」と
+謳ってきた。しかし現状のコードはこれを満たしていない。実際の依存グラフは次の通り:
+
+```
+application/policy.go        → gopkg.in/yaml.v3          (.shingan.yaml パース)
+application/rule_catalog.go  → github.com/hatyibei/shingan/plugin
+                                                          (ルールカタログ描画)
+
+plugin/plugin.go             → github.com/hatyibei/shingan/domain
+                              → github.com/hatyibei/shingan/domain/rules
+                              → github.com/hatyibei/shingan/version
+                              → golang.org/x/mod/semver
+```
+
+つまり `application` は (a) サードパーティの YAML ライブラリと、(b) `plugin`
+パッケージに依存しており、`plugin` 自体はさらに `domain/rules` / `version` /
+`x/mod/semver` を引き込んでいる。「application は domain のみ」という記述は
+**コードの実態と乖離した purity の主張**だった。
+
+レビューでは「忠実なリファクタ」か「ドキュメントを実態に合わせる」かの二択が
+提示された。忠実なリファクタの範囲を見積もった結果:
+
+- **YAML だけ**なら比較的小さい。`Policy` 構造体の yaml タグは単なる文字列で
+  import を要さず、`os.ReadFile`+`yaml.Unmarshal` を行う `LoadPolicy` の呼び出し元は
+  `cli/analyze.go` ただ 1 箇所。これを infrastructure へ移すのは bounded。
+- **しかし `application → plugin` の辺は残る。** さらに `plugin` は公開 SDK
+  パッケージ（外部ルール作者が `import` する ADR-015 の契約面）であり、その依存を
+  反転させることは **SDK 契約の変更**を意味する。`rule_catalog` は「プラグイン
+  登録されたものを含む全ルール」を描画するため、実行時の plugin レジストリを
+  読む必要があり、依存を消すことはできない。
+
+全体を忠実に直すと公開 SDK 面に波及する。これは #31 が明示的に禁じた
+「テストを不安定化させる大規模リファクタ」に該当する。
+
+## 決定
+
+**Option B — 実依存グラフをドキュメント化し、限定的・意図的な例外として
+受け入れる。** application 層を破壊的にリファクタしない。
+
+`docs/architecture.md` / `.ja.md` の依存表に注記を追加し、本 ADR を参照させる。
+
+許容する 2 つの例外と根拠:
+
+1. **`application → gopkg.in/yaml.v3`（policy.go）**
+   `.shingan.yaml` のパースはポリシードメインのロジックそのもの。`Policy`
+   構造体と `ApplyPolicy` / `VerifyRequiredPlugins` / `mergeRuleConfig` は同じ
+   パッケージに同居しており、YAML に触れるのは `LoadPolicy` 1 関数のみ。これを
+   infrastructure へ切り出しても、構造体と振る舞いが分断されるだけで得るものが
+   ない（呼び出し元も 1 箇所）。
+
+2. **`application → plugin`（rule_catalog.go）**
+   `rule_catalog` は plugin レジストリ（`plugin.RegisteredRules()`）を読んで、
+   組込ルールとプラグインルールを一体でカタログ描画する。`plugin` は公開 SDK
+   パッケージのため、この辺を反転させると SDK 契約が変わる。
+
+## 根拠
+
+- 「domain のみ」は理想だが、本プロジェクトの現実的なトレードオフとして、
+  ポリシー設定パースとカタログ描画を application に同居させる方が凝集度が高い。
+- 忠実なリファクタは公開 SDK（`plugin`）面に波及し、リスク／コストが見合わない。
+- コードが持たない purity を主張し続けるより、実態を正直に記録する方が、
+  将来の読者・レビュアーにとって有益。
+
+## 影響
+
+- 本 ADR が application 層の依存の**唯一の正典**となる。`docs/architecture.md`
+  の依存表注記から参照される。
+- 振る舞いの変更なし。コードは一切変更していない（ドキュメントのみ）。
+- **将来リファクタを正当化するトリガー**:
+  (a) YAML を読む 2 つ目の consumer が現れたら、`LoadPolicy` を infrastructure へ
+      移す価値が出る。
+  (b) `application → plugin` の利用がカタログ読み取りを超えて広がったら、
+      依存反転（plugin → application のインターフェースに対する実装）を再検討する。
+
+---
+
 # 変更履歴
 
 | 日付 | 変更内容 | 変更者 |
@@ -1609,3 +1692,4 @@ CrewAI で発火する builtin rule:
 | 2026-05-05 | ADR-012 追加。self-dogfood で `testdata/agents` の `unreachable_node` 偽陽性 7件を発見し、multi-file directory analysis の per-file independent graph 化を確定 (#9 解決案、Phase 2 着手の前提条件) | hatyibei |
 | 2026-05-06 | ADR-013 追加。v0.7.0 出荷後に CrewAI parser を v0.8 主目標と確定。LangGraph で確立した PythonWorker インフラを framework-agnostic 化して再利用、CrewAI 専用シム `scripts/export_crewai_server.py` を新規追加する戦略を明文化 | hatyibei |
 | 2026-05-09 | ADR-014 追加。OSS dogfood (gpt-researcher / crewAI-examples) で実コードの大半が instance method / decorator-driven factory 内構築だと判明 → runtime introspection だけではカバー率 3% 程度。AST-based fallback parser を hybrid 戦略として導入し、LangGraph (StateGraph + add_node/add_edge/add_conditional_edges/set_entry_point) と CrewAI (Agent/Task/Crew constructor + allow_delegation) の両方で AST 抽出を採用。実 OSS hit 率 3% → 37.5% に。 | hatyibei |
+| 2026-06-03 | ADR-017 追加。外部セキュリティレビュー (#31) が「application は domain のみに依存」というドキュメントとコード実態 (`application → yaml.v3` / `application → plugin → domain/rules・version・x/mod/semver`) の乖離を指摘。忠実なリファクタは公開 SDK (`plugin`) 面に波及するため、Option B（実依存グラフの明文化 + 限定例外の受容）を採用。コード変更なし。 | hatyibei |

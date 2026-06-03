@@ -54,9 +54,14 @@ Shingan adopts the Onion Architecture. Dependencies always flow from outer layer
 | Layer | Allowed imports | Forbidden imports |
 |---|---|---|
 | domain/ | standard library only | application/, infrastructure/, cmd/ |
-| application/ | domain/ | infrastructure/, cmd/ |
+| application/ | domain/ (+ two documented exceptions — see §7) | infrastructure/, cmd/ |
 | infrastructure/ | application/, domain/ | cmd/ |
 | cmd/ | infrastructure/, application/, domain/ | — |
+
+> The "application → domain only" row is the *ideal*. The code has two
+> deliberate, bounded exceptions (`gopkg.in/yaml.v3` and the `plugin` package);
+> the real dependency graph and its rationale are documented in §7 and
+> ADR-017.
 
 ---
 
@@ -217,3 +222,33 @@ For details on the design decisions, see `shingan-adr.md`.
 | Appendix A | Glossary |
 | Appendix B | SamuraiAI ↔ ADK-Go node mapping |
 | Appendix C | Detailed analysis rule specifications |
+
+(The table above lists the founding ADRs; later decisions — ADR-006 … ADR-017 —
+live in `shingan-adr.md` directly.)
+
+---
+
+## 7. Documented dependency exceptions (the real graph)
+
+The "application depends only on domain" rule in §1 is the *ideal*. The code
+has two deliberate, bounded exceptions. Rather than claim a purity the code
+doesn't have, the real graph is recorded here and in **ADR-017**:
+
+```
+application/policy.go        → gopkg.in/yaml.v3          (.shingan.yaml parsing)
+application/rule_catalog.go  → plugin                    (rule-catalog rendering)
+
+plugin/plugin.go             → domain, domain/rules, version, golang.org/x/mod/semver
+```
+
+- **`application → gopkg.in/yaml.v3`** — `.shingan.yaml` parsing is
+  policy-domain logic; the `Policy` struct lives alongside `ApplyPolicy` /
+  `VerifyRequiredPlugins`, and only `LoadPolicy` touches YAML (one caller in
+  `cli/analyze.go`). Splitting it into infrastructure buys nothing.
+- **`application → plugin`** — `rule_catalog` must read the live plugin
+  registry to render *all* rules (built-in + plugin-registered). `plugin` is the
+  public SDK package, so inverting this edge is an SDK-contract change.
+
+A faithful refactor would ripple into the public `plugin` SDK surface, so it was
+deliberately **not** done (see ADR-017 for the trigger conditions that would
+justify revisiting it).

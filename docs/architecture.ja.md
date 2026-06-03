@@ -54,9 +54,13 @@ Shinganは Onion Architecture を採用する。依存は常に外側から内�
 | 層 | import 可 | import 不可 |
 |---|---|---|
 | domain/ | 標準ライブラリのみ | application/, infrastructure/, cmd/ |
-| application/ | domain/ | infrastructure/, cmd/ |
+| application/ | domain/（明文化された 2 例外あり — §7 参照） | infrastructure/, cmd/ |
 | infrastructure/ | application/, domain/ | cmd/ |
 | cmd/ | infrastructure/, application/, domain/ | — |
+
+> 「application → domain のみ」の行は*理想*。コードには意図的・限定的な 2 つの
+> 例外（`gopkg.in/yaml.v3` と `plugin` パッケージ）がある。実依存グラフと根拠は
+> §7 および ADR-017 に記載する。
 
 ---
 
@@ -213,3 +217,32 @@ Run(graph *WorkflowGraph, rules []AnalysisRule) []Finding
 | Appendix A | 用語集 |
 | Appendix B | SamuraiAI ↔ ADK-Go ノードマッピング |
 | Appendix C | 解析ルール詳細仕様 |
+
+（上表は初期 ADR の索引。以降の決定 — ADR-006 … ADR-017 — は `shingan-adr.md`
+本体に直接記載されている。）
+
+---
+
+## 7. 明文化された依存例外（実依存グラフ）
+
+§1 の「application は domain のみに依存」は*理想*。コードには意図的・限定的な
+2 つの例外がある。コードが持たない purity を主張するのではなく、実グラフを
+ここと **ADR-017** に正直に記録する:
+
+```
+application/policy.go        → gopkg.in/yaml.v3          (.shingan.yaml パース)
+application/rule_catalog.go  → plugin                    (ルールカタログ描画)
+
+plugin/plugin.go             → domain, domain/rules, version, golang.org/x/mod/semver
+```
+
+- **`application → gopkg.in/yaml.v3`** — `.shingan.yaml` のパースはポリシー
+  ドメインのロジック。`Policy` 構造体は `ApplyPolicy` / `VerifyRequiredPlugins`
+  と同居し、YAML に触れるのは `LoadPolicy` のみ（呼び出し元は `cli/analyze.go`
+  の 1 箇所）。infrastructure へ切り出しても得るものがない。
+- **`application → plugin`** — `rule_catalog` は plugin レジストリを読んで、
+  組込ルールとプラグインルールを一体で描画する。`plugin` は公開 SDK
+  パッケージのため、この辺の反転は SDK 契約の変更となる。
+
+忠実なリファクタは公開 `plugin` SDK 面に波及するため、意図的に**行わなかった**
+（再検討を正当化するトリガー条件は ADR-017 を参照）。

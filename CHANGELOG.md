@@ -6,6 +6,16 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ### Documentation
 
+- **Documented the real `application`-layer dependency graph (ADR-017).**
+  The docs claimed "application depends only on domain", but the code has two
+  deliberate exceptions: `application → gopkg.in/yaml.v3` (policy parsing) and
+  `application → plugin` (rule-catalog rendering), where `plugin` further pulls
+  `domain/rules` / `version` / `x/mod/semver`. A faithful refactor would ripple
+  into the public `plugin` SDK surface, so — per the lower-risk option — the
+  real graph is documented (new ADR-017 + a §7 in `docs/architecture.md` /
+  `.ja.md` and a dependency-table note) rather than claiming a purity the code
+  doesn't have. No code change; behavior unchanged. Closes #31.
+
 - **Synced `docs/architecture.md` / `.ja.md` to the v0.9 implementation.**
   The architecture docs were frozen at v0.1: they referenced a non-existent
   `domain/analyzer` package, "five analysis rules", a hardcoded 5-rule
