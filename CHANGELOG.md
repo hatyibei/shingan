@@ -6,6 +6,20 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ### Security
 
+- **npm postinstall integrity check is now fail-CLOSED.**
+  `npm/scripts/postinstall.js` previously *warned and continued* when the
+  downloaded archive's sha256 didn't match (or when `checksums.txt` was
+  missing/unreachable, or the archive wasn't listed in it) — a fail-OPEN path
+  that would silently install a tampered or unverifiable binary. The install
+  now **aborts with a non-zero exit** on a checksum mismatch, an
+  unreachable/missing `checksums.txt`, OR a missing checksum entry. The only
+  escape hatch is the existing, explicit, opt-in `SHINGAN_SKIP_POSTINSTALL=1`
+  (air-gapped/CI-mirror), which skips the download entirely — there is no
+  "download but skip verification" mode. The verify logic was extracted into a
+  pure `verifyChecksum()` and covered by `npm/test/postinstall.test.js`
+  (`npm test`), including an end-to-end fixture that asserts a tampered download
+  exits non-zero and installs nothing. Closes #29.
+
 - **Bumped `golang.org/x/net` to v0.55.0 and added a govulncheck CI gate.**
   `govulncheck` flagged GO-2026-5026 (Punycode/IDNA label-rejection bug in
   `golang.org/x/net/idna`) as **reachable** in v0.54.0 — the trace runs through
