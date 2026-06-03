@@ -84,13 +84,27 @@ func TestFingerprint_StableAcrossMessageNumericChange(t *testing.T) {
 	}
 }
 
-// TestFingerprint_StableAcrossQuotedLiteralChange verifies quoted literals are
-// normalized away (e.g. differing node names in the message text).
-func TestFingerprint_StableAcrossQuotedLiteralChange(t *testing.T) {
-	f1 := Finding{RuleName: "unbounded_tool_arg", NodeID: "n1", Message: `arg "query" is unbounded`}
-	f2 := Finding{RuleName: "unbounded_tool_arg", NodeID: "n1", Message: `arg "payload" is unbounded`}
-	if Fingerprint(f1) != Fingerprint(f2) {
-		t.Errorf("fingerprint should be stable across quoted-literal changes")
+// TestFingerprint_DistinguishesQuotedDiscriminators guards the codex P2 fix:
+// rules like unbounded_tool_arg emit one finding per offending schema field on
+// the SAME node, distinguished only by the quoted field path. The fingerprint
+// must keep them distinct — otherwise a baseline captured with field "query"
+// silently suppresses a genuinely-new field "payload" finding.
+func TestFingerprint_DistinguishesQuotedDiscriminators(t *testing.T) {
+	query := Finding{RuleName: "unbounded_tool_arg", NodeID: "n1",
+		Message: `Tool node "fetch" schema field "query" (string) has no maxLength`}
+	payload := Finding{RuleName: "unbounded_tool_arg", NodeID: "n1",
+		Message: `Tool node "fetch" schema field "payload" (string) has no maxLength`}
+	if Fingerprint(query) == Fingerprint(payload) {
+		t.Fatalf("per-field findings on the same node must have distinct fingerprints")
+	}
+	// User-visible behavior: a baseline of the "query" finding must NOT suppress
+	// the new "payload" finding, but must still match the identical "query" one.
+	b := NewBaselineFromFindings([]Finding{query})
+	if b.Contains(payload) {
+		t.Errorf(`baseline for field "query" wrongly suppressed a new field "payload" finding`)
+	}
+	if !b.Contains(query) {
+		t.Errorf("baseline must still match the identical query finding")
 	}
 }
 
@@ -112,7 +126,8 @@ func TestNormalizeMessage(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"fan-out: 7 branches", "fan-out: [N] branches"},
 		{"retries=3 over 1.5s", "retries=[N] over [N]s"},
-		{`node "agent_a" cycles`, "node [S] cycles"},
+		{`node "agent_a" cycles`, `node "agent_a" cycles`}, // quoted identity preserved
+		{`tool "fetch_7"`, `tool "fetch_[N]"`},             // number inside a quote still normalized
 		{"no variables here", "no variables here"},
 	}
 	for _, tc := range cases {

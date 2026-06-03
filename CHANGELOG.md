@@ -31,9 +31,13 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 - Baseline fingerprint から `Message` フィールドを除外し、
   `(RuleName, NodeID, SourceFile, MessageDigest)` ベースに変更 (ADR-016)。
   `MessageDigest` は `RuleWithMessageTemplate` 実装ルールではテンプレート ID、
-  未実装ルールではメッセージの数値 (`[N]`)・引用文字列 (`[S]`) を正規化した
-  SHA-256 先頭 16hex。ルール文言の typo 修正や fan-out 数値変動で baseline が
-  無効化される問題を解消。
+  未実装ルールではメッセージの数値リテラルを `[N]` に正規化した SHA-256 先頭
+  16hex。ルール文言の typo 修正や fan-out 数値変動で baseline が無効化される
+  問題を解消。引用リテラルは finding 識別子として**保持**する: `unbounded_tool_arg`
+  等は 1 node に対し offending field ごとに finding を出し、同一 node の
+  `field "query"` と `field "payload"` は引用部分だけで区別されるため、これを
+  `[S]` へ潰すと baseline が新規 finding を誤抑制してしまう (codex review P2)。
+  node 名のメッセージ内ドリフトは別フィールドの `NodeID` で既に吸収済み。
 - Baseline JSON schema が v2 に。旧 v1 ファイル (`message` 全文, `version` 不在)
   は読み込み時に digest へ自動移行 (warning 表示)、save 時は v2 で書き出す。
 

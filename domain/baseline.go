@@ -46,7 +46,8 @@ type Baseline struct {
 // i18n all invalidated otherwise-identical findings. The digest is either the
 // rule's stable MessageTemplateID (when the producing rule implements
 // RuleWithMessageTemplate) or the SHA-256 (first 16 hex) of the message with
-// numbers and quoted literals normalized away.
+// numeric literals normalized away (quoted literals are preserved as finding
+// discriminators — see normalizeMessage).
 //
 // SourceFile is included (Codex iter6 P2) so that per-file analysis
 // (ADR-012) treats two files producing the same (rule, node_id, message)
@@ -133,22 +134,27 @@ func digestFromMessage(msg string) string {
 	return hex.EncodeToString(sum[:8]) // 16 hex chars
 }
 
-var (
-	// reQuoted matches single-, double-, or back-quoted literals. Replaced
-	// first so any numbers inside a quoted literal are absorbed into [S].
-	reQuoted = regexp.MustCompile("'[^']*'|\"[^\"]*\"|`[^`]*`")
-	// reNumber matches integer and decimal literals.
-	reNumber = regexp.MustCompile(`\d+(?:\.\d+)?`)
-)
+// reNumber matches integer and decimal literals, which legitimately vary
+// between runs of the same finding (e.g. a fan-out count) and so are normalized
+// to [N]. Quoted literals are deliberately NOT normalized: they usually carry
+// finding identity (a schema field path, tool name, category), and several
+// rules emit multiple findings on one node distinguished ONLY by that quoted
+// value — e.g. unbounded_tool_arg yields one finding per offending field.
+// Collapsing them to a single token would let a baseline entry for field
+// "query" silently suppress a genuinely-new field "payload" finding. The one
+// case the old collapse was meant to cover — a node name drifting inside the
+// message text — is already handled by the separate NodeID fingerprint field,
+// so normalizing quoted literals bought no stability, only false suppression.
+var reNumber = regexp.MustCompile(`\d+(?:\.\d+)?`)
 
 // normalizeMessage templatizes a message so that values which legitimately vary
-// between runs don't change the fingerprint: quoted literals become [S] and
-// numeric literals become [N]. "fan-out: 7 branches" and "fan-out: 9 branches"
-// both normalize to "fan-out: [N] branches".
+// between runs don't change the fingerprint: numeric literals become [N], so
+// "fan-out: 7 branches" and "fan-out: 9 branches" both normalize to
+// "fan-out: [N] branches". Quoted literals are preserved (they discriminate
+// per-field findings; see reNumber), but a number embedded inside a quoted
+// literal is still normalized, e.g. `field "x_7"` -> `field "x_[N]"`.
 func normalizeMessage(s string) string {
-	s = reQuoted.ReplaceAllString(s, "[S]")
-	s = reNumber.ReplaceAllString(s, "[N]")
-	return s
+	return reNumber.ReplaceAllString(s, "[N]")
 }
 
 // NewBaselineFromFindings builds a Baseline snapshot of the given findings at
