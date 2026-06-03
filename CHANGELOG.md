@@ -16,6 +16,12 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
   diff readability が壊れていた。tiebreaker に `NodeID` を追加し、`Analyze` /
   `AnalyzeMulti` 双方を共通の `findingLess` 比較関数に統一して完全決定論化。
   (audit-driven)
+- 埋め込み Python / Node shim のキャッシュ展開 (`~/.cache/shingan-shims/<ver>/`)
+  で atomic 書き込み (temp file + rename) と flock (`gofrs/flock`) を導入。
+  `-ldflags -X ...embeddedShimVersion=...` を忘れた dev ビルドが同一ディレクトリ
+  を共有してもファイル競合で `SyntaxError` を出さなくなった。dev ビルドの cache
+  key を `vdev` から `dev-<goos>-<goarch>-<binary-sha256[:8]>` に変更し、
+  ローカルビルド間の衝突を防止。(audit-driven)
 
 ## [0.9.0] - 2026-06-01
 
