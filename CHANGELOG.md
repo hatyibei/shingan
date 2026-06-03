@@ -11,6 +11,11 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
   ベースに置換し、中間 `**` (`src/**/test.py`) も正しく動作するようになった。
   パスは forward-slash に正規化してから照合するため Windows パスでも一貫した
   挙動になる。policy override が意図通り適用されない警告ミスを修正。(audit-driven)
+- Findings の最終 sort で同一 `(severity, confidence, rule, source_file)` の場合に
+  Go map 反復順がそのまま結果順になり、実行ごとに markdown / SARIF レポートの
+  diff readability が壊れていた。tiebreaker に `NodeID` を追加し、`Analyze` /
+  `AnalyzeMulti` 双方を共通の `findingLess` 比較関数に統一して完全決定論化。
+  (audit-driven)
 
 ## [0.9.0] - 2026-06-01
 

@@ -264,3 +264,46 @@ func TestAnalyzeMulti_NilGraphSkipped(t *testing.T) {
 		t.Errorf("expected only good.go's finding, got %+v", got)
 	}
 }
+
+// TestAnalyze_DeterministicOrder verifies that findings sharing the same
+// (severity, confidence, rule, source_file) are ordered deterministically by
+// NodeID, and that repeated runs produce byte-identical ordering. Without the
+// NodeID tiebreaker the result order leaked the rule's emission order (often
+// Go map iteration), breaking markdown / SARIF diff readability.
+func TestAnalyze_DeterministicOrder(t *testing.T) {
+	// Same severity/confidence/rule/file, NodeIDs deliberately scrambled.
+	scrambled := []domain.Finding{
+		{RuleName: "fan_out", NodeID: "n3", Severity: domain.Warning, Confidence: 0.8, SourceFile: "wf.py"},
+		{RuleName: "fan_out", NodeID: "n1", Severity: domain.Warning, Confidence: 0.8, SourceFile: "wf.py"},
+		{RuleName: "fan_out", NodeID: "n2", Severity: domain.Warning, Confidence: 0.8, SourceFile: "wf.py"},
+	}
+	rules := []domain.AnalysisRule{&fakeRule{name: "fan_out", findings: scrambled}}
+
+	o := application.NewAnalysisOrchestrator()
+	var prev []domain.Finding
+	for i := 0; i < 20; i++ {
+		got := o.Analyze(minimalGraph(), rules)
+		wantOrder := []string{"n1", "n2", "n3"}
+		for j, w := range wantOrder {
+			if got[j].NodeID != w {
+				t.Fatalf("iteration %d: got NodeID order %v, want %v", i, nodeIDs(got), wantOrder)
+			}
+		}
+		if i > 0 {
+			for j := range got {
+				if got[j].NodeID != prev[j].NodeID {
+					t.Fatalf("non-deterministic order on iteration %d: %v vs %v", i, nodeIDs(prev), nodeIDs(got))
+				}
+			}
+		}
+		prev = got
+	}
+}
+
+func nodeIDs(fs []domain.Finding) []string {
+	ids := make([]string, len(fs))
+	for i, f := range fs {
+		ids[i] = f.NodeID
+	}
+	return ids
+}
