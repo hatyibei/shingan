@@ -170,3 +170,62 @@ func TestUnknownSample(t *testing.T) {
 		t.Error("expected error for unknown sample, got nil")
 	}
 }
+
+// TestResolveVertexProject verifies the GCP project resolution precedence
+// (#32): --project flag > $VERTEX_PROJECT > $GOOGLE_CLOUD_PROJECT > placeholder.
+// Cannot run in parallel because it manipulates env vars and projectFlag.
+func TestResolveVertexProject(t *testing.T) {
+	// Ensure a clean slate; t.Setenv restores after the test.
+	t.Setenv("VERTEX_PROJECT", "")
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "")
+	os.Unsetenv("VERTEX_PROJECT")
+	os.Unsetenv("GOOGLE_CLOUD_PROJECT")
+	saved := projectFlag
+	t.Cleanup(func() { projectFlag = saved })
+
+	t.Run("unset falls back to placeholder, ok=false", func(t *testing.T) {
+		projectFlag = ""
+		os.Unsetenv("VERTEX_PROJECT")
+		os.Unsetenv("GOOGLE_CLOUD_PROJECT")
+		got, ok := resolveVertexProject()
+		if ok {
+			t.Errorf("expected ok=false when nothing set, got ok=true (%q)", got)
+		}
+		if got != placeholderProject {
+			t.Errorf("expected placeholder %q, got %q", placeholderProject, got)
+		}
+		if got == "axial-mercury-486503-j5" {
+			t.Errorf("placeholder must not be the old real-looking project ID")
+		}
+	})
+
+	t.Run("GOOGLE_CLOUD_PROJECT wins over placeholder", func(t *testing.T) {
+		projectFlag = ""
+		os.Unsetenv("VERTEX_PROJECT")
+		t.Setenv("GOOGLE_CLOUD_PROJECT", "gcp-from-env")
+		got, ok := resolveVertexProject()
+		if !ok || got != "gcp-from-env" {
+			t.Errorf("expected (gcp-from-env, true), got (%q, %v)", got, ok)
+		}
+	})
+
+	t.Run("VERTEX_PROJECT wins over GOOGLE_CLOUD_PROJECT", func(t *testing.T) {
+		projectFlag = ""
+		t.Setenv("GOOGLE_CLOUD_PROJECT", "gcp-from-env")
+		t.Setenv("VERTEX_PROJECT", "vertex-from-env")
+		got, ok := resolveVertexProject()
+		if !ok || got != "vertex-from-env" {
+			t.Errorf("expected (vertex-from-env, true), got (%q, %v)", got, ok)
+		}
+	})
+
+	t.Run("--project flag wins over env", func(t *testing.T) {
+		t.Setenv("GOOGLE_CLOUD_PROJECT", "gcp-from-env")
+		t.Setenv("VERTEX_PROJECT", "vertex-from-env")
+		projectFlag = "flag-project"
+		got, ok := resolveVertexProject()
+		if !ok || got != "flag-project" {
+			t.Errorf("expected (flag-project, true), got (%q, %v)", got, ok)
+		}
+	})
+}

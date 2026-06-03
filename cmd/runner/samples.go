@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
@@ -15,14 +16,39 @@ import (
 )
 
 const (
-	// vertexProject is the GCP project for Vertex AI.
-	vertexProject = "axial-mercury-486503-j5"
 	// vertexLocation is the GCP region.
 	vertexLocation = "us-central1"
 	// geminiModel is the Gemini model used for all demo agents.
 	// gemini-2.0-flash-001 is available on Vertex AI us-central1 and suitable for PoC.
 	geminiModel = "gemini-2.0-flash-001"
+	// placeholderProject is the obviously-fake fallback used when no real GCP
+	// project is configured. It is intentionally NOT a real-looking project ID
+	// — Vertex AI will reject it, surfacing the clear message below rather than
+	// silently billing some unrelated project.
+	placeholderProject = "your-gcp-project-id"
 )
+
+// projectFlag is set from the runner's `--project` flag (empty if unset).
+// It takes precedence over the environment when non-empty.
+var projectFlag string
+
+// resolveVertexProject determines the GCP project ID for Vertex AI, in
+// precedence order: the `--project` flag, then $VERTEX_PROJECT, then
+// $GOOGLE_CLOUD_PROJECT. When none is set it returns the obvious placeholder
+// and ok=false so the caller can print an actionable hint. Pure except for the
+// env reads, so it is unit-testable.
+func resolveVertexProject() (project string, ok bool) {
+	if projectFlag != "" {
+		return projectFlag, true
+	}
+	if v := os.Getenv("VERTEX_PROJECT"); v != "" {
+		return v, true
+	}
+	if v := os.Getenv("GOOGLE_CLOUD_PROJECT"); v != "" {
+		return v, true
+	}
+	return placeholderProject, false
+}
 
 // buildSimpleAgent creates a minimal LlmAgent backed by Vertex AI Gemini.
 // Corresponds to examples/runtime/simple_agent.go.
@@ -71,9 +97,16 @@ in your response. Keep your response short (one line).`,
 
 // newGeminiModel creates a Gemini model using Vertex AI backend with ADC.
 func newGeminiModel(ctx context.Context) (model.LLM, error) {
+	project, ok := resolveVertexProject()
+	if !ok {
+		fmt.Fprintf(os.Stderr,
+			"shingan-runner: no GCP project configured — using placeholder %q.\n"+
+				"  Set one via --project <id>, $VERTEX_PROJECT, or $GOOGLE_CLOUD_PROJECT.\n",
+			project)
+	}
 	return adkgemini.NewModel(ctx, geminiModel, &genai.ClientConfig{
 		Backend:  genai.BackendVertexAI,
-		Project:  vertexProject,
+		Project:  project,
 		Location: vertexLocation,
 	})
 }

@@ -15,7 +15,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-export GOOGLE_CLOUD_PROJECT="${GOOGLE_CLOUD_PROJECT:-axial-mercury-486503-j5}"
+# GCP プロジェクトは環境変数で指定する（実在のプロジェクトIDはハードコードしない）。
+# VERTEX_PROJECT が優先、無ければ GOOGLE_CLOUD_PROJECT を使う。
+export GOOGLE_CLOUD_PROJECT="${VERTEX_PROJECT:-${GOOGLE_CLOUD_PROJECT:-}}"
+if [ -z "$GOOGLE_CLOUD_PROJECT" ]; then
+  echo "エラー: GCP プロジェクトが未設定です。" >&2
+  echo "  VERTEX_PROJECT または GOOGLE_CLOUD_PROJECT を設定してください。例:" >&2
+  echo "  GOOGLE_CLOUD_PROJECT=my-gcp-project bash scripts/web-demo.sh" >&2
+  exit 1
+fi
 export GOOGLE_CLOUD_LOCATION="${GOOGLE_CLOUD_LOCATION:-us-central1}"
 export GOOGLE_GENAI_USE_VERTEXAI="${GOOGLE_GENAI_USE_VERTEXAI:-true}"
 

@@ -6,6 +6,17 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ### Changed
 
+- **Vertex demo GCP project is read from the environment / a flag — no more
+  hardcoded real project ID.** The demo binaries (`cmd/runner`, `cmd/shingan-web`)
+  and helper scripts hardcoded a real-looking project ID (`axial-mercury-…`).
+  They now resolve the project from `--project` (runner only) > `$VERTEX_PROJECT`
+  > `$GOOGLE_CLOUD_PROJECT`, falling back to the obvious placeholder
+  `your-gcp-project-id` with a stderr hint when unset (Vertex AI rejects the
+  placeholder rather than touching a real project). The real ID is removed from
+  the Go sources, `scripts/demo.sh`, `scripts/web-demo.sh`
+  (now errors if no project is set), and `cmd/shingan-web/README.md`. Unit tests
+  cover the resolution precedence. Closes #32.
+
 - **GitHub Action pins the CLI to the action ref instead of `@latest`.**
   `action.yml` ran `go install …/cmd/shingan@latest`, so even a workflow that
   pinned `uses: hatyibei/shingan@v0.9.0` silently ran the *newest* CLI —
