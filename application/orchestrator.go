@@ -189,10 +189,22 @@ func (o *AnalysisOrchestrator) Analyze(graph *domain.WorkflowGraph, rules []doma
 
 	wg.Wait()
 
-	// Normalise zero-Confidence findings produced by un-migrated rules.
+	// Build the message-template map once (ADR-016): rules implementing
+	// RuleWithMessageTemplate provide a stable ID stamped onto their findings
+	// so baseline digests survive message-wording changes.
+	templates := messageTemplateIDs(rules)
+
 	for i := range combined {
+		// Normalise zero-Confidence findings produced by un-migrated rules.
 		if combined[i].Confidence == 0.0 {
 			combined[i].Confidence = 1.0
+		}
+		// Stamp the message-template ID when the producing rule supplies one
+		// and the rule itself didn't already set it.
+		if combined[i].MessageTemplateID == "" {
+			if id, ok := templates[combined[i].RuleName]; ok {
+				combined[i].MessageTemplateID = id
+			}
 		}
 	}
 
@@ -209,6 +221,29 @@ func (o *AnalysisOrchestrator) Analyze(graph *domain.WorkflowGraph, rules []doma
 // the same file trip the same rule at the same severity/confidence: without
 // it the result order leaks Go map iteration order, making markdown / SARIF
 // diffs non-deterministic between runs.
+// messageTemplateIDs returns a map from rule name to its stable message
+// template ID for every rule that implements domain.RuleWithMessageTemplate
+// and returns a non-empty ID. Used to stamp findings for stable baseline
+// digests (ADR-016).
+func messageTemplateIDs(rules []domain.AnalysisRule) map[string]string {
+	var m map[string]string
+	for _, r := range rules {
+		tr, ok := r.(domain.RuleWithMessageTemplate)
+		if !ok {
+			continue
+		}
+		id := tr.MessageTemplateID()
+		if id == "" {
+			continue
+		}
+		if m == nil {
+			m = make(map[string]string)
+		}
+		m[r.Name()] = id
+	}
+	return m
+}
+
 func findingLess(a, b domain.Finding) bool {
 	if a.Severity != b.Severity {
 		return a.Severity > b.Severity

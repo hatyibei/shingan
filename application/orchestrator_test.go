@@ -307,3 +307,42 @@ func nodeIDs(fs []domain.Finding) []string {
 	}
 	return ids
 }
+
+// templateRule is a fakeRule that also implements
+// domain.RuleWithMessageTemplate, used to verify the orchestrator stamps
+// MessageTemplateID onto findings for stable baseline digests (ADR-016).
+type templateRule struct {
+	fakeRule
+	templateID string
+}
+
+func (r *templateRule) MessageTemplateID() string { return r.templateID }
+
+// TestAnalyze_StampsMessageTemplateID verifies findings from a rule
+// implementing RuleWithMessageTemplate are stamped, and findings from a plain
+// rule are left empty.
+func TestAnalyze_StampsMessageTemplateID(t *testing.T) {
+	tmpl := &templateRule{
+		fakeRule: fakeRule{name: "loop_guard", findings: []domain.Finding{
+			{RuleName: "loop_guard", NodeID: "n1", Severity: domain.Warning, Message: "max_iterations not set"},
+		}},
+		templateID: "loop_guard.max_iterations_missing",
+	}
+	plain := &fakeRule{name: "plain_rule", findings: []domain.Finding{
+		{RuleName: "plain_rule", NodeID: "n2", Severity: domain.Info, Message: "something"},
+	}}
+
+	o := application.NewAnalysisOrchestrator()
+	got := o.Analyze(minimalGraph(), []domain.AnalysisRule{tmpl, plain})
+
+	byRule := map[string]domain.Finding{}
+	for _, f := range got {
+		byRule[f.RuleName] = f
+	}
+	if id := byRule["loop_guard"].MessageTemplateID; id != "loop_guard.max_iterations_missing" {
+		t.Errorf("templated rule finding not stamped: got %q", id)
+	}
+	if id := byRule["plain_rule"].MessageTemplateID; id != "" {
+		t.Errorf("plain rule finding should not be stamped: got %q", id)
+	}
+}

@@ -4,6 +4,24 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Changed (potentially breaking for baseline files)
+
+- Baseline fingerprint から `Message` フィールドを除外し、
+  `(RuleName, NodeID, SourceFile, MessageDigest)` ベースに変更 (ADR-016)。
+  `MessageDigest` は `RuleWithMessageTemplate` 実装ルールではテンプレート ID、
+  未実装ルールではメッセージの数値 (`[N]`)・引用文字列 (`[S]`) を正規化した
+  SHA-256 先頭 16hex。ルール文言の typo 修正や fan-out 数値変動で baseline が
+  無効化される問題を解消。
+- Baseline JSON schema が v2 に。旧 v1 ファイル (`message` 全文, `version` 不在)
+  は読み込み時に digest へ自動移行 (warning 表示)、save 時は v2 で書き出す。
+
+### Added
+
+- `domain.RuleWithMessageTemplate` interface — ルール作者が安定した
+  `MessageTemplateID()` を提供できる optional API。orchestrator が該当ルールの
+  finding に `Finding.MessageTemplateID` を stamp し、baseline digest が文言変更
+  に影響されなくなる。
+
 ### Fixed
 
 - `.shingan.yaml` `overrides[].paths` の `**` glob が区切り文字を検査せず

@@ -225,7 +225,7 @@ func TestSince_InvalidRef(t *testing.T) {
 func TestFilterNew(t *testing.T) {
 	existing := &domain.Baseline{
 		Findings: []domain.FindingFingerprint{
-			{RuleName: "cycle_detection", NodeID: "loop_body", Message: "cycle detected"},
+			domain.Fingerprint(domain.Finding{RuleName: "cycle_detection", NodeID: "loop_body", Message: "cycle detected"}),
 		},
 	}
 	findings := []domain.Finding{

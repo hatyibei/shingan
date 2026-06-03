@@ -1599,6 +1599,58 @@ CrewAI で発火する builtin rule:
 
 ---
 
+# ADR-016: Baseline Fingerprint Stability
+
+## ステータス
+
+採用 (v0.9.x)
+
+## コンテキスト
+
+v0.9.0 までの baseline fingerprint は `(rule, node_id, message, source_file)`
+の組であった。message **全文** を含めることで以下の問題が顕在化した:
+
+- ルール文言の typo 修正で全プロジェクトの baseline が壊れる
+- メッセージ中の数値 (fan-out 数等) が graph 微変更でずれ、同一 finding が
+  新規扱いになる
+- i18n 導入時に baseline が言語間で互換性を失う
+
+業界標準 (SARIF partialFingerprints, golangci-lint) は **rule + location +
+安定 hash** を使う。
+
+## 決定
+
+Fingerprint を `(RuleName, NodeID, SourceFile, MessageDigest)` に変更する。
+`MessageDigest` は:
+
+- `RuleWithMessageTemplate` を実装するルールでは、orchestrator が finding に
+  stamp した `MessageTemplateID()` の戻り値 (例: `loop_guard.max_iterations_missing`)
+- 未実装ルールでは `normalizeMessage(Message)` の SHA-256 先頭 16 hex
+
+`normalizeMessage` は数値リテラル → `[N]`、引用文字列 → `[S]` に置換する。
+
+Baseline JSON は `{"version": 2, ...}` 形式。`version` 不在 or `1` は legacy
+として読み、`FindingFingerprint.UnmarshalJSON` が旧 `message` から digest を
+再計算する。save 時は常に v2 で書き出す。
+
+## 結果
+
+- 既存 v1 baseline ファイルは初回 load で warning (stderr)、`--save-baseline`
+  で v2 化される
+- ルール文言の typo 修正・fan-out 数値変動で baseline が無効化されなくなった
+- ルール作者は `MessageTemplateID()` を実装することで言語非依存の安定 ID を
+  提供できる (任意; ConfidenceReason と同様 opt-in)
+
+## トレードオフ
+
+- digest は人間可読でない (template ID 実装ルールを除く) → デバッグ時は
+  finding 本文を別途参照する必要がある
+- `message_digest` は normalize 後の hash なので、normalize 規則を将来変える
+  と digest が変わる (= baseline 再生成が必要)。normalize 規則は安定 contract
+  として扱う
+
+---
+
 # 変更履歴
 
 | 日付 | 変更内容 | 変更者 |
@@ -1609,3 +1661,4 @@ CrewAI で発火する builtin rule:
 | 2026-05-05 | ADR-012 追加。self-dogfood で `testdata/agents` の `unreachable_node` 偽陽性 7件を発見し、multi-file directory analysis の per-file independent graph 化を確定 (#9 解決案、Phase 2 着手の前提条件) | hatyibei |
 | 2026-05-06 | ADR-013 追加。v0.7.0 出荷後に CrewAI parser を v0.8 主目標と確定。LangGraph で確立した PythonWorker インフラを framework-agnostic 化して再利用、CrewAI 専用シム `scripts/export_crewai_server.py` を新規追加する戦略を明文化 | hatyibei |
 | 2026-05-09 | ADR-014 追加。OSS dogfood (gpt-researcher / crewAI-examples) で実コードの大半が instance method / decorator-driven factory 内構築だと判明 → runtime introspection だけではカバー率 3% 程度。AST-based fallback parser を hybrid 戦略として導入し、LangGraph (StateGraph + add_node/add_edge/add_conditional_edges/set_entry_point) と CrewAI (Agent/Task/Crew constructor + allow_delegation) の両方で AST 抽出を採用。実 OSS hit 率 3% → 37.5% に。 | hatyibei |
+| 2026-06-03 | ADR-016 追加。baseline fingerprint から message 全文を除外し `(rule, node_id, source_file, message_digest)` に変更。message のルール文言 typo 修正・数値変動・i18n で baseline が無効化される問題を解消。JSON schema v2 化 (v1 後方互換 load)、`RuleWithMessageTemplate` で安定 ID を提供可能に。 | hatyibei |
