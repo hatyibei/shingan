@@ -4,6 +4,19 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Documentation
+
+- **Synced `docs/architecture.md` / `.ja.md` to the v0.9 implementation.**
+  The architecture docs were frozen at v0.1: they referenced a non-existent
+  `domain/analyzer` package, "five analysis rules", a hardcoded 5-rule
+  `AnalyzerFactory` map, and `model/` / `rule/` sub-packages that don't exist.
+  Corrected to reality — the `domain` package + `domain/rules` (22 built-in
+  rules self-registered via `init()` → `rules.AllBuiltins()`), the registry-based
+  factory, 11 framework parsers total (5 added in v0.9), the `LocalRule`/`PathRule`/
+  `GlobalRule` tier interfaces, and Markdown/JSON/SARIF reporters. Genuine
+  historical narrative (README roadmap, the v0.1-false-positives use-case note,
+  ADR-003's as-decided design) is left intact. Closes #33.
+
 ### Changed
 
 - **Vertex demo GCP project is read from the environment / a flag — no more

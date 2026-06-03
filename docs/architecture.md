@@ -4,7 +4,8 @@
 
 ```
 Created:        2026-04-14
-Target version: v0.1
+Updated:        2026-06-03
+Current version: v0.9
 ```
 
 ---
@@ -16,29 +17,37 @@ Shingan adopts the Onion Architecture. Dependencies always flow from outer layer
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │  cmd/                                                            │
-│    shingan/main.go  — cobra command definitions, Factory calls,  │
-│                       DI wiring                                  │
+│    shingan/ api/ runner/ shingan-web/ shingan-lsp/ shingan-mcp/  │
+│    shingan-gen/  — cobra commands, Factory calls, DI wiring      │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │  infrastructure/                                           │  │
-│  │    parser/      — JSON / ADK-Go parser implementations     │  │
-│  │    reporter/    — Text / Markdown / JSON reporter impls    │  │
-│  │    factory/     — AnalyzerFactory / ParserFactory impls    │  │
+│  │    parser/      — 11 framework parsers (JSON / ADK-Go /     │  │
+│  │                   LangGraph / CrewAI / n8n / … )            │  │
+│  │    reporter/    — Markdown / JSON / SARIF reporter impls    │  │
+│  │    factory/     — AnalyzerFactory / ParserFactory impls     │  │
+│  │    api/ baseline/ cache/  — service, baseline, cache impls  │  │
 │  │  ┌──────────────────────────────────────────────────────┐  │  │
 │  │  │  application/                                        │  │  │
 │  │  │    orchestrator.go  — AnalysisOrchestrator           │  │  │
-│  │  │    interfaces.go    — WorkflowParser/ReportFormatter │  │  │
-│  │  │  ┌────────────────────────────────────────────────┐  │  │  │
-│  │  │  │  domain/                                       │  │  │  │
-│  │  │  │    model/    — WorkflowGraph / Node / Edge     │  │  │  │
-│  │  │  │    rule/     — AnalysisRule interface, Finding │  │  │  │
-│  │  │  │    analyzer/ — cycle / unreachable / error     │  │  │  │
-│  │  │  │              — cost / redundant rule impls     │  │  │  │
-│  │  │  │    testutil/ — builder.go (test graph builder) │  │  │  │
-│  │  │  └────────────────────────────────────────────────┘  │  │  │
+│  │  │    parser.go / reporter.go — consumer-side interfaces│  │  │
+│  │  │    policy.go / rule_catalog.go — .shingan.yaml + catalog │
+│  │  ┌────────────────────────────────────────────────┐  │  │  │
+│  │  │  domain/                                       │  │  │  │
+│  │  │    graph.go    — WorkflowGraph / Node / Edge   │  │  │  │
+│  │  │    rule.go     — AnalysisRule + tier ifaces    │  │  │  │
+│  │  │    finding.go  — Finding / Severity            │  │  │  │
+│  │  │    rules/      — 22 built-in rule impls        │  │  │  │
+│  │  │              (registry.go AllBuiltins())       │  │  │  │
+│  │  │    testutil/ — builder.go (test graph builder) │  │  │  │
+│  │  └────────────────────────────────────────────────┘  │  │  │
 │  │  └──────────────────────────────────────────────────────┘  │  │
 │  └────────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────┘
 ```
+
+> The `domain` package itself holds the core types (`graph.go`, `rule.go`,
+> `finding.go`, `visitor.go`, `baseline.go`); the rule **implementations** live
+> in the `domain/rules` sub-package (there is no `domain/analyzer` package).
 
 ### Dependency rules (strict)
 
@@ -55,15 +64,19 @@ Shingan adopts the Onion Architecture. Dependencies always flow from outer layer
 
 ### domain/
 
-- `model.WorkflowGraph` — graph representation of nodes and edges
-- `model.Node` — node type (LLM / Tool / Loop / Branch, etc.) and metadata
-- `model.Edge` — directed edge with conditional label
-- `rule.AnalysisRule` — analysis rule interface (`Analyze(graph) []Finding`)
-- `rule.Finding` — detection result (RuleID, Severity, Message, NodeID)
-- `rule.Severity` — enum of Info / Warning / Critical
-- `analyzer/` — five analysis rule implementations (no external dependencies, purely functional)
+- `WorkflowGraph` — graph representation of nodes and edges (`graph.go`)
+- `Node` — node type (LLM / Tool / Task / Loop / Branch, etc.) and metadata
+- `Edge` — directed edge with conditional label
+- `AnalysisRule` — legacy analysis rule interface (`Analyze(graph) []Finding`);
+  new rules implement the `LocalRule` / `PathRule` / `GlobalRule` tier
+  interfaces (ADR-006/007) so the single-walk `GraphWalker` can dispatch them
+- `Finding` — detection result (RuleName, Severity, Message, NodeID, Confidence)
+- `Severity` — enum of Info / Warning / Critical
+- `rules/` — **22 built-in rule implementations**, each self-registered via its
+  own `init()` into the registry; `rules.AllBuiltins()` returns the full set
 
-The domain layer pulls in zero external libraries. This means unit tests can be written without mocks.
+The domain layer pulls in zero external libraries (standard library only).
+This means unit tests can be written without mocks.
 
 ### application/
 
@@ -75,10 +88,16 @@ Interfaces are defined on the **consumer side** (application/), not the implemen
 
 ### infrastructure/
 
-- `parser/json` — deserializer for Shingan's own JSON schema
-- `parser/adkgo` — Go AST analysis (`go/parser` / `go/ast`) to extract agent definitions
-- `reporter/text` / `reporter/markdown` / `reporter/json` — output format implementations
+- `parser/` — **11 framework parsers** mapping each framework onto the shared
+  `WorkflowGraph` IR: `json` (native schema), `adkgo` (Go AST via `go/parser`),
+  `samurai`, `langgraph`, `n8n`, `crewai`, plus the five added in v0.9
+  (`langgraph-js`, `mastra`, `pydantic-graph`, `llamaindex`, `autogen`). The
+  Python/TS-backed parsers run their shim in a long-lived subprocess over
+  JSON-RPC; n8n is pure Go.
+- `reporter/markdown` / `reporter/json` / `reporter/sarif` — output formats
 - `factory/` — concrete implementations of AnalyzerFactory / ParserFactory / ReporterFactory
+- `api/`, `baseline/`, `cache/` — HTTP service, `--save-baseline` support, and
+  the parse/analysis cache
 
 ### cmd/
 
@@ -92,25 +111,29 @@ Interfaces are defined on the **consumer side** (application/), not the implemen
 
 ### AnalyzerFactory
 
+The factory no longer holds a hardcoded rule map. It delegates to
+`rules.AllBuiltins()`, which returns every rule that self-registered via its
+own `init()` block — so adding a rule never touches the factory (ADR-010,
+internal-first Plugin SDK).
+
 ```
 AnalyzerFactory
-  └── Build(rules []string) []domain.AnalysisRule
-        ├── "cycle_detection"      → CycleDetector{}
-        ├── "unreachable_node"     → UnreachableNodeDetector{}
-        ├── "error_handler_checker"→ ErrorHandlerChecker{}
-        ├── "cost_estimation"      → CostEstimator{}
-        └── "redundant_llm_call"   → RedundantLLMDetector{}
+  ├── Create(ruleType string) (domain.AnalysisRule, error)
+  │     └── walks rules.AllBuiltins(), matches by Name()
+  └── CreateAll() []domain.AnalysisRule
+        └── rules.AllBuiltins()   // all 22 built-ins
 ```
 
-To add a new rule, simply add a file to `domain/analyzer/` and register a single line in the AnalyzerFactory map.
+To add a new rule, drop a file under `domain/rules/` whose `init()` registers
+it — the factory and CLI pick it up automatically.
 
 ### ParserFactory
 
 ```
 ParserFactory
   └── Build(format string) application.WorkflowParser
-        ├── "json"   → JSONParser{}
-        └── "adk-go" → ADKGoParser{}
+        ├── "json" "adk-go" "samurai" "langgraph" "n8n" "crewai"
+        └── "langgraph-js" "pydantic-graph" "llamaindex" "autogen" "mastra"
 ```
 
 To add a new format, add an implementation under `infrastructure/parser/` and register it in ParserFactory.
@@ -120,9 +143,9 @@ To add a new format, add an implementation under `infrastructure/parser/` and re
 ```
 ReporterFactory
   └── Build(output string) application.ReportFormatter
-        ├── "text"     → TextReporter{}
         ├── "markdown" → MarkdownReporter{}
-        └── "json"     → JSONReporter{}
+        ├── "json"     → JSONReporter{}
+        └── "sarif"    → SARIFReporter{}
 ```
 
 ---
@@ -136,14 +159,18 @@ Run(graph *WorkflowGraph, rules []AnalysisRule) []Finding
   │
   ├── goroutine: rules[0].Analyze(graph) → ch
   ├── goroutine: rules[1].Analyze(graph) → ch
-  ├── goroutine: rules[2].Analyze(graph) → ch
-  ├── goroutine: rules[3].Analyze(graph) → ch
-  └── goroutine: rules[4].Analyze(graph) → ch
+  ├── … one goroutine per rule (all 22 built-ins by default) …
+  └── goroutine: rules[n-1].Analyze(graph) → ch
                   ↓
           wait for completion via sync.WaitGroup
                   ↓
           aggregate and return []Finding
 ```
+
+> Single-node / single-path rules implemented against the tier interfaces
+> (`LocalRule` / `PathRule` / `GlobalRule`) are additionally dispatched by a
+> single shared `GraphWalker` pass (ADR-006/007) rather than each re-walking the
+> graph; the `AnalysisRule.Analyze` shape above is the legacy/compat view.
 
 **Design assumptions:**
 - `graph` is read-only (Analyze does not mutate the graph)
@@ -156,9 +183,11 @@ Run(graph *WorkflowGraph, rules []AnalysisRule) []Finding
 
 ### Adding a new analysis rule
 
-1. Create `<rule_name>.go` under `domain/analyzer/` and implement the `AnalysisRule` interface
-2. Create `domain/analyzer/<rule_name>_test.go` (build graphs with testutil/builder.go)
-3. Add a single line to the map in `infrastructure/factory/analyzer_factory.go`
+1. Create `<rule_name>.go` under `domain/rules/` implementing a tier interface
+   (`LocalRule` / `PathRule` / `GlobalRule`) — or the legacy `AnalysisRule` —
+   and self-register it in an `init()` block
+2. Create `domain/rules/<rule_name>_test.go` (build graphs with testutil/builder.go)
+3. No factory edit needed — `rules.AllBuiltins()` picks it up automatically
 4. Confirm that `go test ./... && go vet ./...` is green
 
 ### Adding a new parser
