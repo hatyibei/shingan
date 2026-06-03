@@ -26,6 +26,12 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ### Added
 
+- Plugin SDK ABI version 互換チェック (`domain.VersionedRule.PluginSDKVersion()`)。
+  既存の `Manifest.MinShinganVersion` (リリース版) に加えて SDK signature 世代も
+  検証する独立した防衛線。起動時に `plugin.VerifySDKCompatibility()` が登録済み
+  ルールを binary のサポート範囲 (`plugin.MinPluginSDK`..`MaxPluginSDK`) と比較し、
+  範囲外プラグインは panic ではなく exit code 3 (config error) で蹴られる。
+  `VersionedRule` 未実装ルールは従来通りスキップ (opt-in)。(audit-driven)
 - `domain.RuleWithMessageTemplate` interface — ルール作者が安定した
   `MessageTemplateID()` を提供できる optional API。orchestrator が該当ルールの
   finding に `Finding.MessageTemplateID` を stamp し、baseline digest が文言変更

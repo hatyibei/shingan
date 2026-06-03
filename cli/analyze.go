@@ -130,6 +130,17 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 		outputFormat = "json"
 	}
 
+	// 0a. Plugin SDK ABI generation check. A wrapper binary that links a
+	//     plugin rule built against an incompatible plugin SDK signature is a
+	//     configuration error — fail fast with exit code 3 rather than running
+	//     a rule whose contract may have shifted. Independent of the
+	//     `experimental:` prefix and the binary-version (MinShinganVersion)
+	//     check; this guards the SDK generation specifically.
+	if sdkErr := plugin.VerifySDKCompatibility(); sdkErr != nil {
+		fmt.Fprintln(os.Stderr, "Error:", sdkErr)
+		return 3, nil
+	}
+
 	// 0. Load + verify policy BEFORE any work — including before the
 	//    --since short-circuit. Without this, codex review (round 2)
 	//    flagged that `.shingan.yaml plugins:` verification was
