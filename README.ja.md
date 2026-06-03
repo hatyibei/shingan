@@ -296,7 +296,7 @@ go test -tags=demo -v -run TestDemo_ .
 go test ./...
 go vet ./...
 go build -o shingan ./cmd/shingan
-make lint        # check_confidence_reason + go vet
+make lint        # check-confidence-reason (go/analysis) + go vet
 ```
 
 新ルール追加時は [docs/rule-authoring.md](./docs/rule-authoring.md) を参照。
@@ -317,7 +317,7 @@ make lint        # check_confidence_reason + go vet
 
 ### Contributing → New rules
 
-新しい builtin rule を実装する contributor は **[docs/rule-authoring.md](./docs/rule-authoring.md)** を参照してください。 Local / Path / Global の 3 層 (ADR-007) のテンプレート、ConfidenceReason 選択ガイド (ADR-008)、`check_confidence_reason.sh` linter、TDD パターン、既存ルールの設計記録を網羅しています。 自分の repo からルールを配布したい外部 author は **[docs/plugin-sdk.md](./docs/plugin-sdk.md)** を参照 — public な `plugin.Register` API は v0.9 で `experimental:` prefix 必須という条件付きで公開済み (ABI 安定保証は v1.0)。 ADR-010 は当初すべての外部公開を v1.0 まで defer する判断でしたが、v0.9 実装が prefix ゲート付き early-access 経路でこれを更新しています。
+新しい builtin rule を実装する contributor は **[docs/rule-authoring.md](./docs/rule-authoring.md)** を参照してください。 Local / Path / Global の 3 層 (ADR-007) のテンプレート、ConfidenceReason 選択ガイド (ADR-008)、`check-confidence-reason` go/analysis linter、TDD パターン、既存ルールの設計記録を網羅しています。 自分の repo からルールを配布したい外部 author は **[docs/plugin-sdk.md](./docs/plugin-sdk.md)** を参照 — public な `plugin.Register` API は v0.9 で `experimental:` prefix 必須という条件付きで公開済み (ABI 安定保証は v1.0)。 ADR-010 は当初すべての外部公開を v1.0 まで defer する判断でしたが、v0.9 実装が prefix ゲート付き early-access 経路でこれを更新しています。
 
 ## ライセンス
 

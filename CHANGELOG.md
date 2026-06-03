@@ -4,6 +4,15 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Changed
+
+- `ConfidenceReason` 必須化チェック (ADR-008) を awk shell script
+  (`scripts/check_confidence_reason.sh`、削除) から `go/analysis` ベースの自前
+  vet analyzer (`tools/cmd/check-confidence-reason`) に置換。inline リテラルに
+  加え、構築後の代入 (`f := domain.Finding{...}; f.ConfidenceReason = ...`) や
+  factory 関数経由の生成も検出できるようになった。`make check-reason` /
+  `make lint` の pass/fail 挙動は同じ。
+
 ### Changed (potentially breaking for baseline files)
 
 - Baseline fingerprint から `Message` フィールドを除外し、

@@ -502,32 +502,26 @@ cycle_test.go の `TestCycleDetector_*` 系で 15+ ケース実装済み、構�
 
 ---
 
-## 9. ConfidenceReason linter (`scripts/check_confidence_reason.sh`)
+## 9. ConfidenceReason linter (`tools/cmd/check-confidence-reason`)
 
 ADR-008 は「Finding には ConfidenceReason を必ず付ける」を要求しますが、**Go では struct field を必須化できない** ので静的解析で代替しています。
 
-[`scripts/check_confidence_reason.sh`](../scripts/check_confidence_reason.sh) は `domain/rules/*.go` を awk state machine で走査し、
+[`tools/cmd/check-confidence-reason`](../tools/cmd/check-confidence-reason) は `go/analysis` ベースの vet ツールで、`domain/rules/...` を走査し、
 
-- `domain.Finding{ ... }` リテラルのうち、フィールド代入 (`Foo: bar`) を含み、かつ `ConfidenceReason:` 行が無いものを検出
-- 空 sentinel `domain.Finding{}` (フィールド代入なし) は除外
+- `domain.Finding{ ... }` リテラルのうち、keyed フィールドを含み、かつ `ConfidenceReason` フィールドが無いものを検出
+- 空 sentinel `domain.Finding{}` (フィールドなし) は除外
+- **構築後の代入** (`f := domain.Finding{...}; f.ConfidenceReason = ...`、factory 関数内も含む) も許容。旧 awk script (`scripts/check_confidence_reason.sh`、削除済み) では検出できなかったパターン
 
 ```bash
-$ make check-reason
-check_confidence_reason: OK (10 files scanned)
+$ make check-reason     # go run ./tools/cmd/check-confidence-reason ./domain/rules/...
 
-$ make lint            # check-reason + go vet
+$ make lint             # check-reason + go vet
 ```
 
 CI (`.github/workflows/ci.yml`) の `lint` ジョブから `make lint` を呼び出しています。違反すると以下のように offending site が出ます:
 
 ```
-domain/rules/foo.go:42: domain.Finding literal missing ConfidenceReason
-    domain.Finding{
-        RuleName: "foo",
-        Severity: domain.Warning,
-        ...
-    }
-check_confidence_reason: 1 file(s) contain offending Finding literals
+domain/rules/foo.go:42:9: domain.Finding literal missing ConfidenceReason (ADR-008): set it inline or via assignment
 ```
 
 **書き始める時** に `make lint` をローカルで走らせる癖をつけてください。
@@ -622,4 +616,4 @@ ADR-007 の Phase 2 増強計画 (合計 20 ルール) で追加予定:
 - [application/path_walker.go](../application/path_walker.go) — Path tier
 - [application/global_walker.go](../application/global_walker.go) — Global tier
 - [application/orchestrator.go](../application/orchestrator.go) — 3-pass pipeline
-- [scripts/check_confidence_reason.sh](../scripts/check_confidence_reason.sh) — ADR-008 linter
+- [tools/cmd/check-confidence-reason](../tools/cmd/check-confidence-reason) — ADR-008 linter (go/analysis)
