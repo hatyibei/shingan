@@ -2,6 +2,12 @@ module github.com/hatyibei/shingan
 
 go 1.25.3
 
+// Build toolchain pinned to a patched Go: 1.25.3's standard library carries
+// reachable crypto/tls + crypto/x509 + net/* vulnerabilities (govulncheck CI
+// gate, #28). 1.25.11 fixes all of them. Keeps `go install …/cmd/shingan`
+// (action.yml) and local builds on the same patched stdlib the release ships.
+toolchain go1.25.11
+
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/gofrs/flock v0.13.0

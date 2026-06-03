@@ -113,14 +113,23 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
   (`npm test`), including an end-to-end fixture that asserts a tampered download
   exits non-zero and installs nothing. Closes #29.
 
-- **Bumped `golang.org/x/net` to v0.55.0 and added a govulncheck CI gate.**
-  `govulncheck` flagged GO-2026-5026 (Punycode/IDNA label-rejection bug in
-  `golang.org/x/net/idna`) as **reachable** in v0.54.0 — the trace runs through
-  `signal.Notify` → `idna.ToASCII` in `cmd/api`. The v0.55.0 bump drops reachable
-  vulnerabilities to **0** (`go test ./...` + `go build ./...` stay green). A new
-  `govulncheck` CI job (pinned to `govulncheck@v1.3.0`, not `@latest`, so the gate
-  is reproducible) now runs `govulncheck ./...` on every push/PR, failing only on
-  *reachable* vulnerabilities. Closes #28.
+- **Bumped `golang.org/x/net` to v0.55.0, the Go toolchain to 1.25.11, and
+  added a govulncheck CI gate.** `govulncheck` flagged GO-2026-5026
+  (Punycode/IDNA label-rejection bug in `golang.org/x/net/idna`) as **reachable**
+  in v0.54.0 — the trace runs through `signal.Notify` → `idna.ToASCII` in
+  `cmd/api`; v0.55.0 fixes it. The new gate then surfaced a second problem the
+  project had been shipping silently: CI/release built on **Go 1.25.3**, whose
+  standard library carries 18 *reachable* vulns (`crypto/tls` session resumption,
+  `crypto/x509` name-constraint / error-string DoS, several `net/*`), fixed
+  across 1.25.6–1.25.11. The Go toolchain is bumped to **1.25.11** across all CI
+  jobs + release, plus a `toolchain go1.25.11` directive in `go.mod` so
+  `go install …/cmd/shingan` (the GitHub Action path) and local builds get the
+  same patched stdlib the release ships. A dedicated `govulncheck` CI job (pinned
+  to `govulncheck@v1.3.0`, not `@latest`, for reproducibility) runs
+  `govulncheck ./...` on every push/PR, failing only on *reachable*
+  vulnerabilities — so it will, by design, go red when a future stdlib/dependency
+  disclosure lands, prompting a toolchain/dependency bump (keep the scanner Go
+  version == the release Go version so it scans exactly what ships). Closes #28.
 
 ### Fixed
 
