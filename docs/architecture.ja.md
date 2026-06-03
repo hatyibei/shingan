@@ -4,7 +4,8 @@
 
 ```
 作成日:   2026-04-14
-対象バージョン: v0.1
+更新日:   2026-06-03
+現行バージョン: v0.9
 ```
 
 ---
@@ -16,37 +17,50 @@ Shinganは Onion Architecture を採用する。依存は常に外側から内�
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │  cmd/                                                            │
-│    shingan/main.go  — cobra コマンド定義、Factory 呼出、DI配線      │
+│    shingan/ api/ runner/ shingan-web/ shingan-lsp/ shingan-mcp/  │
+│    shingan-gen/  — cobra コマンド、Factory 呼出、DI配線            │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │  infrastructure/                                           │  │
-│  │    parser/      — JSON・ADK-Go パーサー実装                  │  │
-│  │    reporter/    — Text・Markdown・JSON レポーター実装          │  │
+│  │    parser/      — 11 フレームワークパーサー（JSON・ADK-Go・   │  │
+│  │                   LangGraph・CrewAI・n8n・… ）              │  │
+│  │    reporter/    — Markdown・JSON・SARIF レポーター実装         │  │
 │  │    factory/     — AnalyzerFactory・ParserFactory 実装        │  │
+│  │    api/ baseline/ cache/  — サービス・ベースライン・キャッシュ   │  │
 │  │  ┌──────────────────────────────────────────────────────┐  │  │
 │  │  │  application/                                        │  │  │
 │  │  │    orchestrator.go  — AnalysisOrchestrator           │  │  │
-│  │  │    interfaces.go    — WorkflowParser・ReportFormatter  │  │  │
-│  │  │  ┌────────────────────────────────────────────────┐  │  │  │
-│  │  │  │  domain/                                       │  │  │  │
-│  │  │  │    model/    — WorkflowGraph・Node・Edge         │  │  │  │
-│  │  │  │    rule/     — AnalysisRule interface・Finding   │  │  │  │
-│  │  │  │    analyzer/ — cycle・unreachable・error handler  │  │  │  │
-│  │  │  │              — cost・redundant 各ルール実装        │  │  │  │
-│  │  │  │    testutil/ — builder.go（テスト用グラフ構築）     │  │  │  │
-│  │  │  └────────────────────────────────────────────────┘  │  │  │
+│  │  │    parser.go・reporter.go — 利用側 interface          │  │  │
+│  │  │    policy.go・rule_catalog.go — .shingan.yaml・カタログ │
+│  │  ┌────────────────────────────────────────────────┐  │  │  │
+│  │  │  domain/                                       │  │  │  │
+│  │  │    graph.go    — WorkflowGraph・Node・Edge       │  │  │  │
+│  │  │    rule.go     — AnalysisRule + tier interface  │  │  │  │
+│  │  │    finding.go  — Finding・Severity              │  │  │  │
+│  │  │    rules/      — 22 個の組込ルール実装            │  │  │  │
+│  │  │              （registry.go AllBuiltins()）       │  │  │  │
+│  │  │    testutil/ — builder.go（テスト用グラフ構築）     │  │  │  │
+│  │  └────────────────────────────────────────────────┘  │  │  │
 │  │  └──────────────────────────────────────────────────────┘  │  │
 │  └────────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────┘
 ```
+
+> `domain` パッケージ本体がコア型（`graph.go`・`rule.go`・`finding.go`・
+> `visitor.go`・`baseline.go`）を持ち、ルール**実装**は `domain/rules` サブ
+> パッケージに置く（`domain/analyzer` というパッケージは存在しない）。
 
 ### 依存ルール（厳守）
 
 | 層 | import 可 | import 不可 |
 |---|---|---|
 | domain/ | 標準ライブラリのみ | application/, infrastructure/, cmd/ |
-| application/ | domain/ | infrastructure/, cmd/ |
+| application/ | domain/（明文化された 2 例外あり — §7 参照） | infrastructure/, cmd/ |
 | infrastructure/ | application/, domain/ | cmd/ |
 | cmd/ | infrastructure/, application/, domain/ | — |
+
+> 「application → domain のみ」の行は*理想*。コードには意図的・限定的な 2 つの
+> 例外（`gopkg.in/yaml.v3` と `plugin` パッケージ）がある。実依存グラフと根拠は
+> §7 および ADR-017 に記載する。
 
 ---
 
@@ -54,15 +68,18 @@ Shinganは Onion Architecture を採用する。依存は常に外側から内�
 
 ### domain/
 
-- `model.WorkflowGraph` — ノード・エッジのグラフ表現
-- `model.Node` — ノード種別（LLM / Tool / Loop / Branch 等）、メタデータ
-- `model.Edge` — 有向エッジ、条件ラベル
-- `rule.AnalysisRule` — 解析ルール interface（`Analyze(graph) []Finding`）
-- `rule.Finding` — 検出結果（RuleID・Severity・Message・NodeID）
-- `rule.Severity` — Info / Warning / Critical の列挙
-- `analyzer/` — 5つの解析ルール実装（外部依存なし、純粋関数的）
+- `WorkflowGraph` — ノード・エッジのグラフ表現（`graph.go`）
+- `Node` — ノード種別（LLM / Tool / Task / Loop / Branch 等）、メタデータ
+- `Edge` — 有向エッジ、条件ラベル
+- `AnalysisRule` — 旧来の解析ルール interface（`Analyze(graph) []Finding`）。
+  新規ルールは `LocalRule` / `PathRule` / `GlobalRule` の tier interface
+  （ADR-006/007）を実装し、単一走査の `GraphWalker` でディスパッチされる
+- `Finding` — 検出結果（RuleName・Severity・Message・NodeID・Confidence）
+- `Severity` — Info / Warning / Critical の列挙
+- `rules/` — **22 個の組込ルール実装**。各ルールが自身の `init()` で
+  レジストリへ自己登録し、`rules.AllBuiltins()` が全件を返す
 
-domain 層は外部ライブラリを一切持ち込まない。これにより単体テストがモックなしで書ける。
+domain 層は外部ライブラリを一切持ち込まない（標準ライブラリのみ）。これにより単体テストがモックなしで書ける。
 
 ### application/
 
@@ -74,10 +91,15 @@ interface は**利用側**（application/）に定義する。実装側（infras
 
 ### infrastructure/
 
-- `parser/json` — Shingan独自 JSON スキーマのデシリアライズ
-- `parser/adkgo` — Go AST 解析（`go/parser`・`go/ast` 使用）でエージェント定義を抽出
-- `reporter/text` / `reporter/markdown` / `reporter/json` — 出力形式実装
+- `parser/` — **11 フレームワークパーサー**。各フレームワークを共通の
+  `WorkflowGraph` IR へマッピングする：`json`（独自スキーマ）、`adkgo`
+  （`go/parser` による Go AST）、`samurai`、`langgraph`、`n8n`、`crewai`、
+  さらに v0.9 で追加した 5 つ（`langgraph-js`・`mastra`・`pydantic-graph`・
+  `llamaindex`・`autogen`）。Python/TS 系パーサーはシムを常駐サブプロセス上で
+  JSON-RPC 経由で動かし、n8n は純 Go。
+- `reporter/markdown` / `reporter/json` / `reporter/sarif` — 出力形式実装
 - `factory/` — AnalyzerFactory・ParserFactory・ReporterFactory の具象実装
+- `api/`・`baseline/`・`cache/` — HTTP サービス、`--save-baseline`、解析キャッシュ
 
 ### cmd/
 
@@ -91,25 +113,27 @@ interface は**利用側**（application/）に定義する。実装側（infras
 
 ### AnalyzerFactory
 
+Factory はルールのマップを持たない。`rules.AllBuiltins()` に委譲し、各ルールが
+自身の `init()` で自己登録した全件を返す。よってルール追加時に factory を触る
+必要はない（ADR-010、internal-first Plugin SDK）。
+
 ```
 AnalyzerFactory
-  └── Build(rules []string) []domain.AnalysisRule
-        ├── "cycle_detection"      → CycleDetector{}
-        ├── "unreachable_node"     → UnreachableNodeDetector{}
-        ├── "error_handler_checker"→ ErrorHandlerChecker{}
-        ├── "cost_estimation"      → CostEstimator{}
-        └── "redundant_llm_call"   → RedundantLLMDetector{}
+  ├── Create(ruleType string) (domain.AnalysisRule, error)
+  │     └── rules.AllBuiltins() を走査し Name() で照合
+  └── CreateAll() []domain.AnalysisRule
+        └── rules.AllBuiltins()   // 組込 22 個すべて
 ```
 
-新ルール追加時は `domain/analyzer/` にファイルを追加し、AnalyzerFactory のマップに1行登録するだけ。
+新ルール追加時は `domain/rules/` にファイルを置き、その `init()` で登録するだけ。
 
 ### ParserFactory
 
 ```
 ParserFactory
   └── Build(format string) application.WorkflowParser
-        ├── "json"   → JSONParser{}
-        └── "adk-go" → ADKGoParser{}
+        ├── "json" "adk-go" "samurai" "langgraph" "n8n" "crewai"
+        └── "langgraph-js" "pydantic-graph" "llamaindex" "autogen" "mastra"
 ```
 
 新フォーマット追加時は `infrastructure/parser/` に実装を追加し、ParserFactory に登録。
@@ -119,9 +143,9 @@ ParserFactory
 ```
 ReporterFactory
   └── Build(output string) application.ReportFormatter
-        ├── "text"     → TextReporter{}
         ├── "markdown" → MarkdownReporter{}
-        └── "json"     → JSONReporter{}
+        ├── "json"     → JSONReporter{}
+        └── "sarif"    → SARIFReporter{}
 ```
 
 ---
@@ -135,14 +159,18 @@ Run(graph *WorkflowGraph, rules []AnalysisRule) []Finding
   │
   ├── goroutine: rules[0].Analyze(graph) → ch
   ├── goroutine: rules[1].Analyze(graph) → ch
-  ├── goroutine: rules[2].Analyze(graph) → ch
-  ├── goroutine: rules[3].Analyze(graph) → ch
-  └── goroutine: rules[4].Analyze(graph) → ch
+  ├── … 1 ルール 1 goroutine（既定で組込 22 個）…
+  └── goroutine: rules[n-1].Analyze(graph) → ch
                   ↓
           sync.WaitGroup で全完了待ち
                   ↓
           []Finding を集約して返却
 ```
+
+> tier interface（`LocalRule` / `PathRule` / `GlobalRule`）で実装された
+> 単一ノード・単一パス系ルールは、各々がグラフを再走査せず、共有の
+> `GraphWalker` の単一走査でディスパッチされる（ADR-006/007）。上記の
+> `AnalysisRule.Analyze` 形は旧来／互換ビュー。
 
 **設計上の前提:**
 - `graph` は読み取り専用（Analyze は graph を変更しない）
@@ -155,9 +183,11 @@ Run(graph *WorkflowGraph, rules []AnalysisRule) []Finding
 
 ### 新しい解析ルールを追加する
 
-1. `domain/analyzer/` に `<rule_name>.go` を作成し `AnalysisRule` interface を実装
-2. `domain/analyzer/<rule_name>_test.go` を作成（testutil/builder.go でグラフを構築）
-3. `infrastructure/factory/analyzer_factory.go` のマップに1行追加
+1. `domain/rules/` に `<rule_name>.go` を作成し、tier interface
+   （`LocalRule` / `PathRule` / `GlobalRule`）— もしくは旧来の `AnalysisRule` —
+   を実装し、`init()` で自己登録する
+2. `domain/rules/<rule_name>_test.go` を作成（testutil/builder.go でグラフを構築）
+3. factory の編集は不要 — `rules.AllBuiltins()` が自動的に拾う
 4. `go test ./... && go vet ./...` がグリーンであることを確認
 
 ### 新しいパーサーを追加する
@@ -187,3 +217,32 @@ Run(graph *WorkflowGraph, rules []AnalysisRule) []Finding
 | Appendix A | 用語集 |
 | Appendix B | SamuraiAI ↔ ADK-Go ノードマッピング |
 | Appendix C | 解析ルール詳細仕様 |
+
+（上表は初期 ADR の索引。以降の決定 — ADR-006 … ADR-017 — は `shingan-adr.md`
+本体に直接記載されている。）
+
+---
+
+## 7. 明文化された依存例外（実依存グラフ）
+
+§1 の「application は domain のみに依存」は*理想*。コードには意図的・限定的な
+2 つの例外がある。コードが持たない purity を主張するのではなく、実グラフを
+ここと **ADR-017** に正直に記録する:
+
+```
+application/policy.go        → gopkg.in/yaml.v3          (.shingan.yaml パース)
+application/rule_catalog.go  → plugin                    (ルールカタログ描画)
+
+plugin/plugin.go             → domain, domain/rules, version, golang.org/x/mod/semver
+```
+
+- **`application → gopkg.in/yaml.v3`** — `.shingan.yaml` のパースはポリシー
+  ドメインのロジック。`Policy` 構造体は `ApplyPolicy` / `VerifyRequiredPlugins`
+  と同居し、YAML に触れるのは `LoadPolicy` のみ（呼び出し元は `cli/analyze.go`
+  の 1 箇所）。infrastructure へ切り出しても得るものがない。
+- **`application → plugin`** — `rule_catalog` は plugin レジストリを読んで、
+  組込ルールとプラグインルールを一体で描画する。`plugin` は公開 SDK
+  パッケージのため、この辺の反転は SDK 契約の変更となる。
+
+忠実なリファクタは公開 `plugin` SDK 面に波及するため、意図的に**行わなかった**
+（再検討を正当化するトリガー条件は ADR-017 を参照）。

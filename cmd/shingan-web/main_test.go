@@ -214,3 +214,41 @@ func TestFilterCritical(t *testing.T) {
 		t.Errorf("expected Critical severity, got %v", got[0].Severity)
 	}
 }
+
+// TestResolveProject verifies GCP project resolution (#32):
+// $VERTEX_PROJECT > $GOOGLE_CLOUD_PROJECT > placeholder, and that the
+// placeholder is not the old real-looking project ID. Not parallel (env vars).
+func TestResolveProject(t *testing.T) {
+	t.Run("unset falls back to placeholder, ok=false", func(t *testing.T) {
+		t.Setenv("VERTEX_PROJECT", "")
+		t.Setenv("GOOGLE_CLOUD_PROJECT", "")
+		got, ok := resolveProject()
+		if ok {
+			t.Errorf("expected ok=false when nothing set, got ok=true (%q)", got)
+		}
+		if got != placeholderProject {
+			t.Errorf("expected placeholder %q, got %q", placeholderProject, got)
+		}
+		if got == "axial-mercury-486503-j5" {
+			t.Errorf("placeholder must not be the old real-looking project ID")
+		}
+	})
+
+	t.Run("GOOGLE_CLOUD_PROJECT used when set", func(t *testing.T) {
+		t.Setenv("VERTEX_PROJECT", "")
+		t.Setenv("GOOGLE_CLOUD_PROJECT", "gcp-env")
+		got, ok := resolveProject()
+		if !ok || got != "gcp-env" {
+			t.Errorf("expected (gcp-env, true), got (%q, %v)", got, ok)
+		}
+	})
+
+	t.Run("VERTEX_PROJECT wins over GOOGLE_CLOUD_PROJECT", func(t *testing.T) {
+		t.Setenv("GOOGLE_CLOUD_PROJECT", "gcp-env")
+		t.Setenv("VERTEX_PROJECT", "vertex-env")
+		got, ok := resolveProject()
+		if !ok || got != "vertex-env" {
+			t.Errorf("expected (vertex-env, true), got (%q, %v)", got, ok)
+		}
+	})
+}

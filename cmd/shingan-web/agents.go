@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
@@ -117,11 +118,29 @@ func buildSimpleHello(ctx context.Context) (agent.Agent, error) {
 	})
 }
 
+// resolveProject determines the GCP project ID for Vertex AI in precedence
+// order: $VERTEX_PROJECT, then $GOOGLE_CLOUD_PROJECT. When neither is set it
+// returns the obvious placeholder and ok=false so the caller can warn. It
+// reads only the environment (via the injectable lookupEnv), so it is
+// unit-testable without constructing a real model.
+func resolveProject() (project string, ok bool) {
+	if v := getEnvOrDefault("VERTEX_PROJECT", ""); v != "" {
+		return v, true
+	}
+	if v := getEnvOrDefault("GOOGLE_CLOUD_PROJECT", ""); v != "" {
+		return v, true
+	}
+	return placeholderProject, false
+}
+
 // newVertexGemini creates a Gemini model backed by Vertex AI using ADC.
 func newVertexGemini(ctx context.Context) (model.LLM, error) {
-	proj := projectID
-	if v := getEnvOrDefault("GOOGLE_CLOUD_PROJECT", ""); v != "" {
-		proj = v
+	proj, ok := resolveProject()
+	if !ok {
+		fmt.Fprintf(os.Stderr,
+			"shingan-web: no GCP project configured — using placeholder %q.\n"+
+				"  Set one via $VERTEX_PROJECT or $GOOGLE_CLOUD_PROJECT.\n",
+			proj)
 	}
 	loc := location
 	if v := getEnvOrDefault("GOOGLE_CLOUD_LOCATION", ""); v != "" {

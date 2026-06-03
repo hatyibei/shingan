@@ -4,9 +4,14 @@
 // checksums.txt sha256 entry, extracts it from the goreleaser tarball,
 // and installs it under ~/.cache/shingan-lint/v<version>/.
 //
-// Skipped silently when SHINGAN_SKIP_POSTINSTALL=1 (CI mirroring use
-// cases like air-gapped builds where the binary is provided
-// externally).
+// Integrity is FAIL-CLOSED (#29): the install aborts (non-zero exit) on a
+// checksum mismatch, a missing/unreachable checksums.txt, OR the archive
+// being absent from checksums.txt. There is no "download but skip
+// verification" path.
+//
+// The one intentional, explicit escape hatch is SHINGAN_SKIP_POSTINSTALL=1
+// — it skips the download entirely (for air-gapped/CI-mirror builds where
+// the binary is provided externally). It is opt-in and never the default.
 
 'use strict';
 
@@ -14,8 +19,10 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const { pipeline } = require('stream/promises');
-const tar = require('tar');
+// NOTE: `tar` is require()d lazily inside extractTar(), not at module load.
+// Extraction only happens AFTER the fail-closed checksum gate passes, so a
+// verification failure never reaches the archive-handling code — and the
+// regression test can require() this module without the `tar` dep present.
 
 const PACKAGE_VERSION = require('../package.json').version;
 
@@ -84,12 +91,41 @@ function findExpectedHash(checksumsText, archiveName) {
   return null;
 }
 
+// verifyChecksum is the fail-CLOSED integrity gate (#29). It throws on
+// *any* condition that prevents proving the downloaded archive is
+// authentic — a sha256 mismatch, or the archive being absent from
+// checksums.txt — so the only way past it is a genuine, matching hash.
+// Earlier this logic warned-and-continued (fail-OPEN): a tampered
+// binary, or a stripped/empty checksums.txt, would silently install.
+// Pure + synchronous so it is unit-testable without any network.
+function verifyChecksum(archiveBuf, archive, checksumsText) {
+  const expected = findExpectedHash(checksumsText, archive);
+  if (!expected) {
+    throw new Error(
+      `${archive} not found in checksums.txt — cannot verify integrity. ` +
+        `Refusing to install an unverifiable binary. ` +
+        `If the release is genuinely missing checksums and you accept the risk, ` +
+        `set SHINGAN_SKIP_POSTINSTALL=1 and install the binary yourself.`
+    );
+  }
+  const actual = sha256(archiveBuf);
+  if (actual !== expected) {
+    throw new Error(
+      `sha256 mismatch for ${archive}: expected ${expected}, got ${actual}. ` +
+        `The downloaded archive does NOT match the published checksum — ` +
+        `aborting install (possible tampering or a corrupted download).`
+    );
+  }
+  return expected;
+}
+
 async function extractTar(buf, dest, tag) {
   // Write to temp file so `tar` can stream it back.
   const tmpFile = path.join(dest, `_archive.${tag.ext}`);
   fs.writeFileSync(tmpFile, buf);
   try {
     if (tag.ext === 'tar.gz') {
+      const tar = require('tar');
       await tar.x({ file: tmpFile, cwd: dest, strict: true });
     } else if (tag.ext === 'zip') {
       // Minimal zip extraction without an extra dependency: shell out.
@@ -145,25 +181,28 @@ async function main() {
     process.exit(1);
   }
 
-  // Verify checksum if checksums.txt is reachable. Soft-fail when the
-  // checksum file is missing (e.g. early-stage release without
-  // goreleaser's checksum step), so users still get a usable binary
-  // — at the cost of trust on first install.
+  // Fail-CLOSED integrity check (#29). The checksums.txt file MUST be
+  // reachable and MUST contain a matching sha256 for this archive, or we
+  // abort the install. A checksum mismatch, a missing/unreachable
+  // checksums.txt, or the archive being absent from it all raise here and
+  // propagate to main().catch → exit(1). The documented escape hatch for
+  // air-gapped/dev environments is SHINGAN_SKIP_POSTINSTALL=1 (handled at
+  // the top of main()), which skips the download entirely — there is no
+  // "download but skip verification" mode by design.
+  let checksumsText;
   try {
-    const checksumsText = await fetchText(checksumURL());
-    const expected = findExpectedHash(checksumsText, archive);
-    if (expected) {
-      const actual = sha256(archiveBuf);
-      if (actual !== expected) {
-        throw new Error(`sha256 mismatch: expected ${expected}, got ${actual}`);
-      }
-      console.log(`shingan-lint: sha256 verified (${expected.slice(0, 12)}…)`);
-    } else {
-      console.warn(`shingan-lint: ${archive} not found in checksums.txt — proceeding without verification`);
-    }
+    checksumsText = await fetchText(checksumURL());
   } catch (e) {
-    console.warn(`shingan-lint: checksum verification skipped: ${e.message}`);
+    throw new Error(
+      `unable to fetch checksums.txt for integrity verification: ${e.message}. ` +
+        `Refusing to install an unverified binary. ` +
+        `If the release was just published, GitHub may need a few seconds to ` +
+        `propagate — retry shortly. For air-gapped installs set ` +
+        `SHINGAN_SKIP_POSTINSTALL=1 and provide the binary yourself.`
+    );
   }
+  const expected = verifyChecksum(archiveBuf, archive, checksumsText);
+  console.log(`shingan-lint: sha256 verified (${expected.slice(0, 12)}…)`);
 
   await extractTar(archiveBuf, dest, tag);
 
@@ -180,7 +219,15 @@ async function main() {
   console.log(`shingan-lint: installed ${tag.exe} → ${binPath}`);
 }
 
-main().catch((err) => {
-  console.error(`shingan-lint: postinstall failed: ${err.stack || err.message}`);
-  process.exit(1);
-});
+// Export the pure helpers so the regression test (test/postinstall.test.js)
+// can exercise the fail-closed checksum gate without any network.
+module.exports = { verifyChecksum, findExpectedHash, sha256, main };
+
+// Only auto-run the installer when invoked directly (`node postinstall.js`,
+// i.e. as npm's postinstall hook). When `require()`d by the test, do nothing.
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(`shingan-lint: postinstall failed: ${err.stack || err.message}`);
+    process.exit(1);
+  });
+}

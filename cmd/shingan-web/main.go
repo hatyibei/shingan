@@ -11,9 +11,14 @@
 //
 // Environment variables (required):
 //
-//	GOOGLE_CLOUD_PROJECT   — GCP project ID for Vertex AI
+//	VERTEX_PROJECT         — GCP project ID for Vertex AI (or GOOGLE_CLOUD_PROJECT)
+//	GOOGLE_CLOUD_PROJECT    — GCP project ID for Vertex AI (fallback)
 //	GOOGLE_CLOUD_LOCATION  — Vertex AI region (e.g. us-central1)
 //	GOOGLE_GENAI_USE_VERTEXAI=true
+//
+// If no project is set, the demo agents fall back to an obvious placeholder
+// and print a hint; Vertex AI will reject the placeholder rather than touch a
+// real project.
 package main
 
 import (
@@ -36,9 +41,13 @@ import (
 
 const (
 	listenPort  = ":8080"
-	projectID   = "axial-mercury-486503-j5"
 	location    = "us-central1"
 	geminiModel = "gemini-2.0-flash-001"
+	// placeholderProject is the obviously-fake fallback shown when no real GCP
+	// project is configured via env. It is intentionally not a real-looking ID
+	// so Vertex AI rejects it with a clear error instead of touching a real
+	// project.
+	placeholderProject = "your-gcp-project-id"
 )
 
 func main() {

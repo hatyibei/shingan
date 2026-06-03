@@ -15,7 +15,8 @@ GUI ワークフローエディタに Shingan の静的解析を **実行前ガ�
 cd /path/to/shingan
 go build -o shingan-web ./cmd/shingan-web
 
-GOOGLE_CLOUD_PROJECT=axial-mercury-486503-j5 \
+# GCP プロジェクトIDは VERTEX_PROJECT または GOOGLE_CLOUD_PROJECT で指定する。
+GOOGLE_CLOUD_PROJECT=your-gcp-project-id \
 GOOGLE_CLOUD_LOCATION=us-central1 \
 GOOGLE_GENAI_USE_VERTEXAI=true \
 ./shingan-web

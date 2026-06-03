@@ -69,8 +69,22 @@ runs:
 
     - name: Install Shingan
       shell: bash
+      # Pin the installed CLI to the action ref the caller selected, NOT
+      # @latest. A workflow that pins `uses: hatyibei/shingan@v0.9.0` must get
+      # the v0.9.0 CLI — otherwise a pinned action tag still silently runs the
+      # newest CLI (non-reproducible CI, and a supply-chain footgun if a bad
+      # release ships). `github.action_ref` is the tag/branch/SHA the caller
+      # referenced; it stays in sync automatically as releases are cut.
+      # It is empty for a local `uses: ./` ref, so fall back to the pinned
+      # current release (kept in lockstep with npm/package.json's version).
+      # The ref is routed through env: (not inline ${{ }}) so it is an opaque
+      # string, matching the injection-hardening used in the analyze step.
+      env:
+        ACTION_REF: ${{ github.action_ref }}
       run: |
-        go install github.com/hatyibei/shingan/cmd/shingan@latest
+        VERSION="${ACTION_REF:-v0.9.0}"
+        echo "shingan: installing CLI @ ${VERSION}"
+        go install "github.com/hatyibei/shingan/cmd/shingan@${VERSION}"
 
     - name: Run Shingan analyze
       id: analyze

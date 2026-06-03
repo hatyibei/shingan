@@ -25,6 +25,23 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
   加え、構築後の代入 (`f := domain.Finding{...}; f.ConfidenceReason = ...`) や
   factory 関数経由の生成も検出できるようになった。`make check-reason` /
   `make lint` の pass/fail 挙動は同じ。
+- **Vertex demo GCP project is read from the environment / a flag — no more
+  hardcoded real project ID.** The demo binaries (`cmd/runner`, `cmd/shingan-web`)
+  and helper scripts hardcoded a real-looking project ID (`axial-mercury-…`).
+  They now resolve the project from `--project` (runner only) > `$VERTEX_PROJECT`
+  > `$GOOGLE_CLOUD_PROJECT`, falling back to the obvious placeholder
+  `your-gcp-project-id` with a stderr hint when unset (Vertex AI rejects the
+  placeholder rather than touching a real project). The real ID is removed from
+  the Go sources, `scripts/demo.sh`, `scripts/web-demo.sh`
+  (now errors if no project is set), and `cmd/shingan-web/README.md`. Unit tests
+  cover the resolution precedence. Closes #32.
+- **GitHub Action pins the CLI to the action ref instead of `@latest`.**
+  `action.yml` ran `go install …/cmd/shingan@latest`, so even a workflow that
+  pinned `uses: hatyibei/shingan@v0.9.0` silently ran the *newest* CLI —
+  non-reproducible CI and a supply-chain footgun. The install step now derives
+  the CLI version from `github.action_ref` (the tag the caller pinned), so the
+  action tag and CLI version stay in sync automatically, falling back to the
+  current pinned release (`v0.9.0`) for local `uses: ./` refs. Closes #30.
 
 ### Changed (potentially breaking for baseline files)
 
@@ -60,6 +77,59 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
   `tool_description_missing` (Info, 0.6) を追記し、severity / confidence を
   公開。`docs/rules/human-gate-missing.md` と
   `docs/rules/tool-description-missing.md` を新規追加。(audit-driven)
+- **Documented the real `application`-layer dependency graph (ADR-017).**
+  The docs claimed "application depends only on domain", but the code has two
+  deliberate exceptions: `application → gopkg.in/yaml.v3` (policy parsing) and
+  `application → plugin` (rule-catalog rendering), where `plugin` further pulls
+  `domain/rules` / `version` / `x/mod/semver`. A faithful refactor would ripple
+  into the public `plugin` SDK surface, so — per the lower-risk option — the
+  real graph is documented (new ADR-017 + a §7 in `docs/architecture.md` /
+  `.ja.md` and a dependency-table note) rather than claiming a purity the code
+  doesn't have. No code change; behavior unchanged. Closes #31.
+- **Synced `docs/architecture.md` / `.ja.md` to the v0.9 implementation.**
+  The architecture docs were frozen at v0.1: they referenced a non-existent
+  `domain/analyzer` package, "five analysis rules", a hardcoded 5-rule
+  `AnalyzerFactory` map, and `model/` / `rule/` sub-packages that don't exist.
+  Corrected to reality — the `domain` package + `domain/rules` (22 built-in
+  rules self-registered via `init()` → `rules.AllBuiltins()`), the registry-based
+  factory, 11 framework parsers total (5 added in v0.9), the `LocalRule`/`PathRule`/
+  `GlobalRule` tier interfaces, and Markdown/JSON/SARIF reporters. Genuine
+  historical narrative (README roadmap, the v0.1-false-positives use-case note,
+  ADR-003's as-decided design) is left intact. Closes #33.
+
+### Security
+
+- **npm postinstall integrity check is now fail-CLOSED.**
+  `npm/scripts/postinstall.js` previously *warned and continued* when the
+  downloaded archive's sha256 didn't match (or when `checksums.txt` was
+  missing/unreachable, or the archive wasn't listed in it) — a fail-OPEN path
+  that would silently install a tampered or unverifiable binary. The install
+  now **aborts with a non-zero exit** on a checksum mismatch, an
+  unreachable/missing `checksums.txt`, OR a missing checksum entry. The only
+  escape hatch is the existing, explicit, opt-in `SHINGAN_SKIP_POSTINSTALL=1`
+  (air-gapped/CI-mirror), which skips the download entirely — there is no
+  "download but skip verification" mode. The verify logic was extracted into a
+  pure `verifyChecksum()` and covered by `npm/test/postinstall.test.js`
+  (`npm test`), including an end-to-end fixture that asserts a tampered download
+  exits non-zero and installs nothing. Closes #29.
+
+- **Bumped `golang.org/x/net` to v0.55.0, the Go toolchain to 1.25.11, and
+  added a govulncheck CI gate.** `govulncheck` flagged GO-2026-5026
+  (Punycode/IDNA label-rejection bug in `golang.org/x/net/idna`) as **reachable**
+  in v0.54.0 — the trace runs through `signal.Notify` → `idna.ToASCII` in
+  `cmd/api`; v0.55.0 fixes it. The new gate then surfaced a second problem the
+  project had been shipping silently: CI/release built on **Go 1.25.3**, whose
+  standard library carries 18 *reachable* vulns (`crypto/tls` session resumption,
+  `crypto/x509` name-constraint / error-string DoS, several `net/*`), fixed
+  across 1.25.6–1.25.11. The Go toolchain is bumped to **1.25.11** across all CI
+  jobs + release, plus a `toolchain go1.25.11` directive in `go.mod` so
+  `go install …/cmd/shingan` (the GitHub Action path) and local builds get the
+  same patched stdlib the release ships. A dedicated `govulncheck` CI job (pinned
+  to `govulncheck@v1.3.0`, not `@latest`, for reproducibility) runs
+  `govulncheck ./...` on every push/PR, failing only on *reachable*
+  vulnerabilities — so it will, by design, go red when a future stdlib/dependency
+  disclosure lands, prompting a toolchain/dependency bump (keep the scanner Go
+  version == the release Go version so it scans exactly what ships). Closes #28.
 
 ### Fixed
 

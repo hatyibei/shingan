@@ -38,6 +38,7 @@ func newRootCmd() *cobra.Command {
 		sampleName string
 		maxIter    uint
 		dryRun     bool
+		project    string
 	)
 
 	cmd := &cobra.Command{
@@ -66,6 +67,9 @@ Examples:
 			if sampleName == "" {
 				return fmt.Errorf("--sample is required; choose from: simple, infinite_loop_bounded, infinite_loop_unbounded")
 			}
+			// --project takes precedence over the environment (see
+			// resolveVertexProject); empty leaves env/placeholder resolution intact.
+			projectFlag = project
 			ctx := context.Background()
 			return runSample(ctx, sampleName, maxIter, dryRun)
 		},
@@ -74,6 +78,7 @@ Examples:
 	cmd.Flags().StringVar(&sampleName, "sample", "", "Sample to run: simple | infinite_loop_bounded | infinite_loop_unbounded (required)")
 	cmd.Flags().UintVar(&maxIter, "max-iter", 0, "Override MaxIterations for LoopAgent (0 = use default)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Run static analysis only, skip Vertex AI execution")
+	cmd.Flags().StringVar(&project, "project", "", "GCP project ID for Vertex AI (overrides $VERTEX_PROJECT / $GOOGLE_CLOUD_PROJECT)")
 
 	_ = cmd.MarkFlagRequired("sample")
 

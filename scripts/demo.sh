@@ -8,7 +8,8 @@
 #   - go build -o shingan ./cmd/shingan
 #   - go build -o shingan-runner ./cmd/runner
 #   - gcloud auth application-default login 済み
-#   - GOOGLE_CLOUD_PROJECT=axial-mercury-486503-j5 (デフォルト設定済み)
+#   - VERTEX_PROJECT または GOOGLE_CLOUD_PROJECT に GCP プロジェクトIDを設定
+#     （未設定なら shingan-runner はプレースホルダにフォールバックし警告を出す）
 
 set -euo pipefail
 
