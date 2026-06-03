@@ -249,6 +249,8 @@ go test -tags=demo -v -run TestDemo_ .
 | prompt_injection_sink | user_input → LLM の system prompt template への到達 (substitution あり=Critical / なし=Warning / non-system template=Info) | Critical | 0.9 (Critical) / 0.7 (Warning) / 0.5 (Info) |
 | eval_missing | LLM ノード → コード実行系 Tool (eval/exec/code_interpreter/python_runner/shell) への到達 (validation gate なし=Critical / Condition のみ=Warning / Human gate=skip) | Critical | 0.9 (Critical) / 0.6 (Warning) |
 | dynamic_node_construction | Node.Config (`body`/`fn`/`handler`/`callback`/`code`/`factory`/`builder`) 内の `eval(`/`exec(`/`Function(`/`compile(`/`__import__(`/`getattr(`/`setattr(` 直書き | Critical | 0.95 (Critical) / 0.85 (Warning) / 0.6 (Info) |
+| human_gate_missing | 本番フラグ付きグラフが外部副作用 (API / code-exec / send / payment …) を持つのに `Human` 承認ノードが存在しない | Warning | 0.6 (ヒューリスティック) |
+| tool_description_missing | `Tool` ノードに有用な description が無い (LLM は description でツールを選択するため誤選択を招く) | Info | 0.6 (ヒューリスティック) |
 
 ## サポートフォーマット
 

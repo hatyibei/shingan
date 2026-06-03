@@ -293,6 +293,8 @@ go test -tags=demo -v -run TestDemo_ .
 | unbounded_tool_arg | Tool argument schema fields without `maxLength` / `maxItems` / `maximum` | Warning | 0.7 / 0.5 / 0.4 |
 | secret_in_prompt_template | Hardcoded credentials inside LLM prompt templates | Critical | 0.95 (exact) / 0.7 (JWT) |
 | missing_eval_dataset | Production-flagged graph without an `eval_dataset` reference | Warning | 0.7 |
+| human_gate_missing | Production-flagged graph that performs sensitive external actions (API / code-exec / send / payment …) with no `Human` approval node anywhere | Warning | 0.6 (heuristic) |
+| tool_description_missing | `Tool` node lacking a usable description (LLM picks tools from description text; missing → wrong-tool selection) | Info | 0.6 (heuristic) |
 
 ## Supported formats
 

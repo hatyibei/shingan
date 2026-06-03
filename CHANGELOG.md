@@ -50,6 +50,13 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
   finding に `Finding.MessageTemplateID` を stamp し、baseline digest が文言変更
   に影響されなくなる。
 
+### Docs
+
+- README / README.ja の Rules 表に `human_gate_missing` (Warning, 0.6) と
+  `tool_description_missing` (Info, 0.6) を追記し、severity / confidence を
+  公開。`docs/rules/human-gate-missing.md` と
+  `docs/rules/tool-description-missing.md` を新規追加。(audit-driven)
+
 ### Fixed
 
 - `.shingan.yaml` `overrides[].paths` の `**` glob が区切り文字を検査せず
