@@ -280,3 +280,128 @@ func TestPythonWorker_DoubleClose(t *testing.T) {
 		t.Error("Closed() must remain true after double Close")
 	}
 }
+
+// writeFakeWorker writes a synthetic worker script that misbehaves in a
+// specific way, returning its path. These exercise the Go-side framing
+// hardening without needing langgraph installed.
+func writeFakeWorker(t *testing.T, body string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "fake_worker.py")
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatalf("write fake worker: %v", err)
+	}
+	return p
+}
+
+// TestPythonWorker_StrayStdout_TerminatesWorker verifies that a worker which
+// emits an unparseable line (e.g. a C extension printing to fd 1) is treated
+// as protocol corruption: Call errors and the worker is marked Closed() so the
+// caller re-spawns instead of permanently skewing request IDs.
+func TestPythonWorker_StrayStdout_TerminatesWorker(t *testing.T) {
+	requirePython(t)
+	script := writeFakeWorker(t, "import sys\n"+
+		"sys.stdin.readline()\n"+
+		"sys.stdout.write('this is not json\\n')\n"+
+		"sys.stdout.flush()\n")
+	w, err := parser.NewPythonWorker(script, parser.WithCallTimeout(5*time.Second))
+	if err != nil {
+		t.Fatalf("NewPythonWorker: %v", err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+
+	_, err = w.Call("health_check", nil)
+	if err == nil {
+		t.Fatal("expected error from stray-stdout worker")
+	}
+	if !strings.Contains(err.Error(), "decode response") {
+		t.Errorf("error %q should mention decode failure", err)
+	}
+	if !w.Closed() {
+		t.Error("worker should be Closed() after protocol corruption")
+	}
+}
+
+// TestPythonWorker_IDMismatch_TerminatesWorker verifies a response carrying the
+// wrong id is unrecoverable and terminates the worker.
+func TestPythonWorker_IDMismatch_TerminatesWorker(t *testing.T) {
+	requirePython(t)
+	script := writeFakeWorker(t, "import sys, json\n"+
+		"sys.stdin.readline()\n"+
+		"sys.stdout.write(json.dumps({'id': 999, 'result': {}}) + '\\n')\n"+
+		"sys.stdout.flush()\n")
+	w, err := parser.NewPythonWorker(script, parser.WithCallTimeout(5*time.Second))
+	if err != nil {
+		t.Fatalf("NewPythonWorker: %v", err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+
+	_, err = w.Call("health_check", nil)
+	if err == nil {
+		t.Fatal("expected error from id-mismatch worker")
+	}
+	if !strings.Contains(err.Error(), "id mismatch") {
+		t.Errorf("error %q should mention id mismatch", err)
+	}
+	if !w.Closed() {
+		t.Error("worker should be Closed() after id mismatch")
+	}
+}
+
+// TestPythonWorker_OversizedFrame_TerminatesWorker verifies a response larger
+// than the configured frame cap is rejected and the worker terminated, rather
+// than letting the read buffer grow without bound.
+func TestPythonWorker_OversizedFrame_TerminatesWorker(t *testing.T) {
+	requirePython(t)
+	script := writeFakeWorker(t, "import sys\n"+
+		"sys.stdin.readline()\n"+
+		"sys.stdout.write('x' * 4096 + '\\n')\n"+
+		"sys.stdout.flush()\n")
+	w, err := parser.NewPythonWorker(script,
+		parser.WithCallTimeout(5*time.Second),
+		parser.WithMaxFrame(256),
+	)
+	if err != nil {
+		t.Fatalf("NewPythonWorker: %v", err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+
+	_, err = w.Call("health_check", nil)
+	if err == nil {
+		t.Fatal("expected error from oversized-frame worker")
+	}
+	if !strings.Contains(err.Error(), "frame too large") {
+		t.Errorf("error %q should mention frame too large", err)
+	}
+	if !w.Closed() {
+		t.Error("worker should be Closed() after oversized frame")
+	}
+}
+
+// TestPythonWorker_Timeout_TerminatesWorker verifies a hung worker is killed at
+// the call deadline and reported Closed().
+func TestPythonWorker_Timeout_TerminatesWorker(t *testing.T) {
+	requirePython(t)
+	script := writeFakeWorker(t, "import sys, time\n"+
+		"sys.stdin.readline()\n"+
+		"time.sleep(30)\n")
+	w, err := parser.NewPythonWorker(script, parser.WithCallTimeout(200*time.Millisecond))
+	if err != nil {
+		t.Fatalf("NewPythonWorker: %v", err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+
+	start := time.Now()
+	_, err = w.Call("health_check", nil)
+	if err == nil {
+		t.Fatal("expected timeout error from hung worker")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("error %q should mention timeout", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("timeout took too long: %s", elapsed)
+	}
+	if !w.Closed() {
+		t.Error("worker should be Closed() after timeout")
+	}
+}

@@ -22,6 +22,16 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
   を共有してもファイル競合で `SyntaxError` を出さなくなった。dev ビルドの cache
   key を `vdev` から `dev-<goos>-<goarch>-<binary-sha256[:8]>` に変更し、
   ローカルビルド間の衝突を防止。(audit-driven)
+- Python / Node worker (`PythonWorker.Call`) の JSON-RPC framing 健全性を強化:
+  - Python shim 内で `os.dup2(2, 1)` により C 拡張等の stray な fd1 書き込みを
+    stderr へ redirect。fd1 はプロトコル専用に dup した private fd で使用する。
+  - Go 側は ID 不一致・パース失敗・フレームサイズ超過 (デフォルト 16 MiB,
+    `WithMaxFrame` で調整可) を protocol corruption として worker を即時
+    terminate し、上位呼び出しに error を返す (`Closed()` で再 spawn を促す)。
+  - フレーム読取りは `bufio.ReadSlice` ループで上限を強制し、`ReadBytes` が
+    無制限に成長する問題を解消。
+  - 結果として長寿命 LSP / MCP プロセスで stray stdout 起因の永続的 ID ずれが
+    発生しなくなった。(audit-driven)
 
 ## [0.9.0] - 2026-06-01
 
