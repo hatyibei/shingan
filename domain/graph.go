@@ -154,8 +154,33 @@ type Node struct {
 	Name string `json:"name"`
 	// Type classifies the node's role in the workflow.
 	Type NodeType `json:"type"`
-	// Config holds framework-specific settings (model name, max_iterations, etc.).
+	// Config holds framework-specific settings. Historically this stringly-typed
+	// map was the contract domain rules read (Config["model"], etc.), which
+	// leaked parser-private string keys into the domain layer. The frequently
+	// referenced settings now have typed fields below (ADR-003 Onion
+	// strengthening); Config remains for parser-specific metadata and for
+	// backward compatibility with JSON inputs that still carry these keys.
+	// Prefer the typed accessors (GetModelName, GetMaxIterations, …) which read
+	// the typed field first and fall back to Config.
 	Config map[string]any `json:"config,omitempty"`
+
+	// Typed projections of the most frequently consumed Config keys. Parsers
+	// populate these; rules read them via the Get* accessors so domain logic no
+	// longer depends on parser-private Config string keys. Pointer fields
+	// distinguish "unset" from a zero value. Each is omitempty so existing JSON
+	// round-trips are unchanged when unset.
+	//
+	// MaxIterations: loop / control iteration bound (Config["max_iterations"]).
+	MaxIterations *int `json:"max_iterations,omitempty"`
+	// ToolCategory: coarse tool classification (Config["category"]).
+	ToolCategory string `json:"tool_category,omitempty"`
+	// ModelName: LLM model identifier (Config["model"]).
+	ModelName string `json:"model_name,omitempty"`
+	// Temperature: LLM sampling temperature (Config["temperature"]).
+	Temperature *float64 `json:"temperature,omitempty"`
+	// MaxConcurrency: max parallel fan-out / concurrency (Config["max_concurrency"]).
+	MaxConcurrency *int `json:"max_concurrency,omitempty"`
+
 	// Pos is an optional source location for the node.
 	// Position-aware parsers (adk-go AST) fill this automatically; JSON-based
 	// parsers preserve the "pos" field from input if present. Consumers should

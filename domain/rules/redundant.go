@@ -58,7 +58,7 @@ func (r *RedundantLLMDetector) Listener(ctx *domain.RuleContext) domain.Listener
 					return
 				}
 				key := llmKey{
-					model:          stringConfig(n, "model"),
+					model:          n.GetModelName(),
 					promptTemplate: pt,
 				}
 				groups[key] = append(groups[key], n.ID)
@@ -85,7 +85,7 @@ func (r *RedundantLLMDetector) Analyze(graph *domain.WorkflowGraph) []domain.Fin
 			continue
 		}
 		key := llmKey{
-			model:          stringConfig(node, "model"),
+			model:          node.GetModelName(),
 			promptTemplate: pt,
 		}
 		groups[key] = append(groups[key], node.ID)

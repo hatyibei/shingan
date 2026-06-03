@@ -125,7 +125,7 @@ func runCostChecks(llms []*domain.Node, inLoop map[string]bool) []domain.Finding
 	var findings []domain.Finding
 
 	for _, node := range llms {
-		model := stringConfig(node, "model")
+		model := node.GetModelName()
 		tier := tierFor(model)
 		if tier != costTierHigh {
 			continue

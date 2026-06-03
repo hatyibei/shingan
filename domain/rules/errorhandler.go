@@ -236,18 +236,10 @@ func allUnconditional(edges []domain.Edge) bool {
 // toolCategory returns the category string for a Tool node.
 // If Node.Config["category"] is not set or is not a string, it defaults to "api".
 func toolCategory(node *domain.Node) string {
-	if node.Config == nil {
-		return "api"
+	if cat := node.GetToolCategory(); cat != "" {
+		return cat
 	}
-	raw, ok := node.Config["category"]
-	if !ok || raw == nil {
-		return "api"
-	}
-	cat, ok := raw.(string)
-	if !ok || cat == "" {
-		return "api"
-	}
-	return cat
+	return "api"
 }
 
 // severityForCategory maps a Tool category to the appropriate Severity.

@@ -67,14 +67,20 @@ from __future__ import annotations
 
 import ast as _ast
 import json
+import os
 import sys
 import traceback
 from typing import Any, Dict, List, Optional, Tuple
 
 # ----- stdout/stderr discipline ---------------------------------------------
 # Keep stdout reserved for response frames; route any stray print() to stderr.
-_RESPONSE_STREAM = sys.stdout
-sys.stdout = sys.stderr
+# Duplicate the real stdout (fd 1) onto a private descriptor for JSON-RPC
+# frames, then point fd 1 itself at stderr so even a C extension writing
+# straight to fd 1 (bypassing Python) can't corrupt the response stream.
+_RESPONSE_FD = os.dup(1)
+os.dup2(2, 1)
+sys.stdout = sys.stderr  # python-level stray print() also lands on stderr.
+_RESPONSE_STREAM = os.fdopen(_RESPONSE_FD, "w", encoding="utf-8")
 
 
 def _emit(payload: Dict[str, Any]) -> None:

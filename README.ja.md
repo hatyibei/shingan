@@ -249,6 +249,8 @@ go test -tags=demo -v -run TestDemo_ .
 | prompt_injection_sink | user_input → LLM の system prompt template への到達 (substitution あり=Critical / なし=Warning / non-system template=Info) | Critical | 0.9 (Critical) / 0.7 (Warning) / 0.5 (Info) |
 | eval_missing | LLM ノード → コード実行系 Tool (eval/exec/code_interpreter/python_runner/shell) への到達 (validation gate なし=Critical / Condition のみ=Warning / Human gate=skip) | Critical | 0.9 (Critical) / 0.6 (Warning) |
 | dynamic_node_construction | Node.Config (`body`/`fn`/`handler`/`callback`/`code`/`factory`/`builder`) 内の `eval(`/`exec(`/`Function(`/`compile(`/`__import__(`/`getattr(`/`setattr(` 直書き | Critical | 0.95 (Critical) / 0.85 (Warning) / 0.6 (Info) |
+| human_gate_missing | 本番フラグ付きグラフが外部副作用 (API / code-exec / send / payment …) を持つのに `Human` 承認ノードが存在しない | Warning | 0.6 (ヒューリスティック) |
+| tool_description_missing | `Tool` ノードに有用な description が無い (LLM は description でツールを選択するため誤選択を招く) | Info | 0.6 (ヒューリスティック) |
 
 ## サポートフォーマット
 
@@ -296,7 +298,7 @@ go test -tags=demo -v -run TestDemo_ .
 go test ./...
 go vet ./...
 go build -o shingan ./cmd/shingan
-make lint        # check_confidence_reason + go vet
+make lint        # check-confidence-reason (go/analysis) + go vet
 ```
 
 新ルール追加時は [docs/rule-authoring.md](./docs/rule-authoring.md) を参照。
@@ -317,7 +319,7 @@ make lint        # check_confidence_reason + go vet
 
 ### Contributing → New rules
 
-新しい builtin rule を実装する contributor は **[docs/rule-authoring.md](./docs/rule-authoring.md)** を参照してください。 Local / Path / Global の 3 層 (ADR-007) のテンプレート、ConfidenceReason 選択ガイド (ADR-008)、`check_confidence_reason.sh` linter、TDD パターン、既存ルールの設計記録を網羅しています。 自分の repo からルールを配布したい外部 author は **[docs/plugin-sdk.md](./docs/plugin-sdk.md)** を参照 — public な `plugin.Register` API は v0.9 で `experimental:` prefix 必須という条件付きで公開済み (ABI 安定保証は v1.0)。 ADR-010 は当初すべての外部公開を v1.0 まで defer する判断でしたが、v0.9 実装が prefix ゲート付き early-access 経路でこれを更新しています。
+新しい builtin rule を実装する contributor は **[docs/rule-authoring.md](./docs/rule-authoring.md)** を参照してください。 Local / Path / Global の 3 層 (ADR-007) のテンプレート、ConfidenceReason 選択ガイド (ADR-008)、`check-confidence-reason` go/analysis linter、TDD パターン、既存ルールの設計記録を網羅しています。 自分の repo からルールを配布したい外部 author は **[docs/plugin-sdk.md](./docs/plugin-sdk.md)** を参照 — public な `plugin.Register` API は v0.9 で `experimental:` prefix 必須という条件付きで公開済み (ABI 安定保証は v1.0)。 ADR-010 は当初すべての外部公開を v1.0 まで defer する判断でしたが、v0.9 実装が prefix ゲート付き early-access 経路でこれを更新しています。
 
 ## ライセンス
 

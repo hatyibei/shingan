@@ -72,12 +72,15 @@ func (p *pipeReader) Close() error {
 
 func (p *pipeWriter) Write(b []byte) (int, error) {
 	p.target.mu.Lock()
+	defer p.target.mu.Unlock()
 	if p.target.closed {
-		p.target.mu.Unlock()
 		return 0, errClosedPipe
 	}
 	p.target.buf = append(p.target.buf, b...)
-	p.target.mu.Unlock()
+	// Notify under the same lock that Close() holds when it close()s notify,
+	// so the non-blocking send can never race with (or send on) a closed
+	// channel. The select/default keeps it non-blocking, so holding the lock
+	// here cannot deadlock against the lock-free reader.
 	select {
 	case p.target.notify <- struct{}{}:
 	default:

@@ -60,20 +60,34 @@ Baselines are forward-compatible JSON documents:
 
 ```json
 {
+  "version": 2,
   "generated_at": "2026-04-15T12:00:00Z",
   "findings": [
     {
       "rule": "cycle_detection",
       "node_id": "loop_body",
-      "message": "Loop node \"loop_body\" has a cycle but max_iterations is not set: risk of infinite loop"
+      "source_file": "agents/workflow.py",
+      "message_digest": "9f2b1c4d5e6a7b80"
     }
   ]
 }
 ```
 
-A fingerprint is `(rule, node_id, message)`. Severity and confidence are
-deliberately **not** part of the fingerprint — re-classifying a rule's severity
-should not invalidate the entire baseline.
+A fingerprint is `(rule, node_id, source_file, message_digest)`. Severity and
+confidence are deliberately **not** part of the fingerprint — re-classifying a
+rule's severity should not invalidate the entire baseline.
+
+Since **schema v2** (ADR-016) the fingerprint stores a stable `message_digest`
+rather than the full message text. The digest is the rule's `MessageTemplateID`
+when the rule provides one, otherwise the SHA-256 (first 16 hex) of the message
+with numbers (`[N]`) and quoted literals (`[S]`) normalized away. This keeps a
+baseline valid when a rule's wording is tweaked (typo fix, i18n) or when a
+number embedded in the message drifts (e.g. `fan-out: 7 branches` →
+`fan-out: 9 branches`).
+
+Legacy **v1** baselines (no `version` key, full `message` stored) are still
+read: each entry is migrated to a digest in memory (with a one-line warning),
+and the next `--save-baseline` rewrites the file in the v2 format.
 
 ## GitHub Action
 

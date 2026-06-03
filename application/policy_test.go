@@ -142,3 +142,38 @@ func TestDiscoverPolicy_NoneFound(t *testing.T) {
 		t.Errorf("expected '' for missing policy; got %q", got)
 	}
 }
+
+func TestMatchPattern_DoubleStar(t *testing.T) {
+	cases := []struct {
+		pattern string
+		path    string
+		want    bool
+	}{
+		// separator boundaries
+		{"legacy/**", "legacy/foo.py", true},
+		{"legacy/**", "legacy/sub/foo.py", true},
+		{"legacy/**", "legacy_v2.py", false}, // regression: must not match across word boundary
+		{"legacy/**", "legacy", false},
+		{"legacy/**", "legacy/", false},
+		// intermediate **
+		{"src/**/test.py", "src/test.py", true},
+		{"src/**/test.py", "src/a/test.py", true},
+		{"src/**/test.py", "src/a/b/test.py", true},
+		{"src/**/test.py", "src/test_helper.py", false},
+		// single *
+		{"*.py", "foo.py", true},
+		{"*.py", "sub/foo.py", false},
+		// exact match
+		{"foo.py", "foo.py", true},
+		{"foo.py", "bar.py", false},
+		// Windows path normalized via ToSlash
+		{"legacy/**", `legacy\foo.py`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.pattern+"_"+tc.path, func(t *testing.T) {
+			if got := matchPattern(tc.pattern, tc.path); got != tc.want {
+				t.Errorf("matchPattern(%q,%q)=%v want %v", tc.pattern, tc.path, got, tc.want)
+			}
+		})
+	}
+}

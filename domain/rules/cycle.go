@@ -4,7 +4,6 @@ package rules
 
 import (
 	"fmt"
-	"strconv"
 
 	"github.com/hatyibei/shingan/domain"
 )
@@ -238,8 +237,8 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 		if parentControl != nil {
 			// The cycle is inside a Loop (LoopAgent) node.
 			// Severity depends on max_iterations of the parent Loop node.
-			raw, exists := parentControl.Config["max_iterations"]
-			if !exists || raw == nil {
+			maxIter, ok := parentControl.GetMaxIterations()
+			if !ok && !configPresent(parentControl, "max_iterations") {
 				// No max_iterations on the parent Loop — unbounded cycle → Critical.
 				return domain.Finding{
 					RuleName: c.Name(),
@@ -254,8 +253,8 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 					ConfidenceReason: domain.ReasonExactStaticMatch,
 				}
 			}
-			maxIter, err := toInt(raw)
-			if err != nil || maxIter >= 100 {
+			// Present-but-unparseable (!ok) or a high bound both downgrade to Info.
+			if !ok || maxIter >= 100 {
 				return domain.Finding{
 					RuleName: c.Name(),
 					Severity: domain.Info,
@@ -311,9 +310,24 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 		}
 	}
 
-	// Loop/Control node — check max_iterations.
-	raw, exists := node.Config["max_iterations"]
-	if !exists || raw == nil {
+	// Loop/Control node — check max_iterations (typed field first, then Config).
+	maxIter, ok := node.GetMaxIterations()
+	if !ok {
+		if raw, present := rawConfigValue(node, "max_iterations"); present {
+			// Present but unparseable; treat as missing but surface the value.
+			return domain.Finding{
+				RuleName: c.Name(),
+				Severity: domain.Critical,
+				NodeID:   cycleNodeID,
+				Message: fmt.Sprintf(
+					"Loop node %q has max_iterations set to an unparseable value %q: risk of infinite loop",
+					cycleNodeID, fmt.Sprint(raw),
+				),
+				Suggestion:       "Set max_iterations to a valid integer less than 100.",
+				Confidence:       1.0,
+				ConfidenceReason: domain.ReasonExactStaticMatch,
+			}
+		}
 		return domain.Finding{
 			RuleName: c.Name(),
 			Severity: domain.Critical,
@@ -323,23 +337,6 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 				cycleNodeID,
 			),
 			Suggestion:       "Set max_iterations to a value less than 100 on the Loop node.",
-			Confidence:       1.0,
-			ConfidenceReason: domain.ReasonExactStaticMatch,
-		}
-	}
-
-	maxIter, err := toInt(raw)
-	if err != nil {
-		// Could not parse the value; treat as missing.
-		return domain.Finding{
-			RuleName: c.Name(),
-			Severity: domain.Critical,
-			NodeID:   cycleNodeID,
-			Message: fmt.Sprintf(
-				"Loop node %q has max_iterations set to an unparseable value %q: risk of infinite loop",
-				cycleNodeID, fmt.Sprint(raw),
-			),
-			Suggestion:       "Set max_iterations to a valid integer less than 100.",
 			Confidence:       1.0,
 			ConfidenceReason: domain.ReasonExactStaticMatch,
 		}
@@ -364,24 +361,21 @@ func (c *CycleDetector) evaluateCycle(graph *domain.WorkflowGraph, cycleNodeID s
 	return domain.Finding{}
 }
 
-// toInt converts common numeric types and string representations to int.
-func toInt(v any) (int, error) {
-	switch val := v.(type) {
-	case int:
-		return val, nil
-	case int64:
-		return int(val), nil
-	case float64:
-		return int(val), nil
-	case string:
-		n, err := strconv.Atoi(val)
-		if err != nil {
-			return 0, fmt.Errorf("cannot parse %q as int: %w", val, err)
-		}
-		return n, nil
-	default:
-		return 0, fmt.Errorf("unsupported type %T for max_iterations", v)
+// rawConfigValue returns the legacy Config[key] value and whether it is present
+// and non-nil. Used to preserve the "present but unparseable" diagnostic now
+// that the parseable path goes through the typed accessor.
+func rawConfigValue(n *domain.Node, key string) (any, bool) {
+	if n == nil || n.Config == nil {
+		return nil, false
 	}
+	v, ok := n.Config[key]
+	return v, ok && v != nil
+}
+
+// configPresent reports whether Config[key] is present and non-nil.
+func configPresent(n *domain.Node, key string) bool {
+	_, present := rawConfigValue(n, key)
+	return present
 }
 
 func init() {

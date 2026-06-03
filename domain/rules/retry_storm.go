@@ -193,7 +193,7 @@ func estimateParallelism(graph *domain.WorkflowGraph, src *domain.Node) int {
 	par := 1
 
 	// Signal 1: source's own max_concurrency.
-	if v, ok := intConfig(src, "max_concurrency"); ok && v > par {
+	if v, ok := src.GetMaxConcurrency(); ok && v > par {
 		par = v
 	}
 
@@ -207,13 +207,13 @@ func estimateParallelism(graph *domain.WorkflowGraph, src *domain.Node) int {
 		if pred, exists := graph.Nodes[e.From]; exists {
 			// Upstream Loop's max_iterations.
 			if pred.Type == domain.NodeTypeLoop {
-				if v, ok := intConfig(pred, "max_iterations"); ok && v > par {
+				if v, ok := pred.GetMaxIterations(); ok && v > par {
 					par = v
 				}
 			}
 			// Upstream node's max_concurrency (e.g. a parallel orchestrator
 			// declaring its own fan-out cap one hop above the leaf tool).
-			if v, ok := intConfig(pred, "max_concurrency"); ok && v > par {
+			if v, ok := pred.GetMaxConcurrency(); ok && v > par {
 				par = v
 			}
 		}

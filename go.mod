@@ -3,6 +3,8 @@ module github.com/hatyibei/shingan
 go 1.25.3
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.10.0
+	github.com/gofrs/flock v0.13.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/spf13/cobra v1.10.2

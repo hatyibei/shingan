@@ -42,10 +42,17 @@ const (
 	// user module) can cost >2s on first call; static parses are sub-second.
 	defaultCallTimeout = 30 * time.Second
 
-	// pythonWorkerScannerMax is the maximum size of a single response line.
-	// Real LangGraph workflows can produce graphs > 64 KiB JSON; we round to
-	// 1 MiB to comfortably cover multi-agent supervisors.
+	// pythonWorkerScannerMax sizes the bufio read buffer. Real LangGraph
+	// workflows can produce graphs > 64 KiB JSON; we round to 1 MiB to
+	// comfortably cover multi-agent supervisors in a single buffer fill.
 	pythonWorkerScannerMax = 1 << 20
+
+	// pythonWorkerMaxFrame is the hard cap on a single response frame. bufio's
+	// ReadBytes/ReadSlice would otherwise let a runaway or corrupted worker
+	// grow the accumulation buffer without bound. A frame exceeding this is
+	// treated as protocol corruption: the read is aborted and the worker is
+	// terminated rather than risking an OOM in a long-lived LSP/MCP process.
+	pythonWorkerMaxFrame = 16 << 20
 
 	// jsonRPCParseError mirrors the JSON-RPC spec; treated as fatal for the
 	// current call but does not kill the worker.
@@ -74,8 +81,9 @@ type PythonWorker struct {
 	cmd     *exec.Cmd
 	stdin   io.WriteCloser
 	stdout  *bufio.Reader
-	nextID  uint64
-	timeout time.Duration
+	nextID   uint64
+	timeout  time.Duration
+	maxFrame int
 
 	closed atomic.Bool
 	reaped atomic.Bool
@@ -123,6 +131,17 @@ func WithCallTimeout(d time.Duration) PythonWorkerOption {
 	}
 }
 
+// WithMaxFrame overrides the hard cap on a single response frame
+// (default pythonWorkerMaxFrame, 16 MiB). Mainly useful in tests that want to
+// exercise the oversized-frame path without emitting megabytes.
+func WithMaxFrame(n int) PythonWorkerOption {
+	return func(w *PythonWorker) {
+		if n > 0 {
+			w.maxFrame = n
+		}
+	}
+}
+
 // NewPythonWorker spawns the shim subprocess and returns a worker handle.
 // The script must exist; missing binaries yield a clear error message.
 func NewPythonWorker(scriptPath string, opts ...PythonWorkerOption) (*PythonWorker, error) {
@@ -141,6 +160,7 @@ func NewPythonWorker(scriptPath string, opts ...PythonWorkerOption) (*PythonWork
 		// TestCrewAIParser_PythonUnavailable) stay green.
 		missingBinHint: "install Python 3.10+ to use the LangGraph parser",
 		timeout:        defaultCallTimeout,
+		maxFrame:       pythonWorkerMaxFrame,
 	}
 	for _, opt := range opts {
 		opt(w)
@@ -247,24 +267,37 @@ func (w *PythonWorker) Call(method string, params interface{}) (json.RawMessage,
 
 	go func() {
 		if _, werr := w.stdin.Write(payload); werr != nil {
-			ch <- result{err: fmt.Errorf("python worker: write: %w", werr)}
+			ch <- result{err: fmt.Errorf("python worker: write: %w (worker may have died)", werr)}
 			return
 		}
-		line, rerr := w.stdout.ReadBytes('\n')
+		line, rerr := w.readLimitedLine(w.maxFrame)
+		if errors.Is(rerr, errFrameTooLarge) {
+			// An oversized frame leaves unread bytes in the pipe: the stream is
+			// desynchronised, so the worker is no longer usable.
+			ch <- result{err: corruptionMarker{fmt.Errorf("python worker: %w", rerr)}}
+			return
+		}
 		if rerr != nil && len(line) == 0 {
 			ch <- result{err: fmt.Errorf("python worker: read: %w", rerr)}
 			return
 		}
 		var resp jsonRPCResponse
 		if jerr := json.Unmarshal(line, &resp); jerr != nil {
-			ch <- result{err: fmt.Errorf("python worker: decode response %q: %w", string(line), jerr)}
+			// A line we own that doesn't parse means stray bytes reached fd1
+			// (e.g. a C extension's print). The stream is corrupt; kill the
+			// worker so the caller re-spawns instead of permanently skewing IDs.
+			ch <- result{err: corruptionMarker{fmt.Errorf("python worker: decode response %q: %w", string(line), jerr)}}
 			return
 		}
 		if resp.ID != id {
-			ch <- result{err: fmt.Errorf("python worker: response id mismatch: want %d got %d", id, resp.ID)}
+			// ID mismatch is unrecoverable: every subsequent response would be
+			// off-by-one. Terminate rather than silently dropping the frame.
+			ch <- result{err: corruptionMarker{fmt.Errorf("python worker: response id mismatch: want %d got %d", id, resp.ID)}}
 			return
 		}
 		if resp.Error != nil {
+			// An application-level RPC error is NOT corruption: the frame was
+			// well-formed and correctly addressed. Leave the worker running.
 			ch <- result{err: fmt.Errorf("python worker: rpc error %d: %s", resp.Error.Code, resp.Error.Message)}
 			return
 		}
@@ -274,22 +307,61 @@ func (w *PythonWorker) Call(method string, params interface{}) (json.RawMessage,
 	select {
 	case <-ctx.Done():
 		// Force-kill the worker — a hung Python deadlocks the parser otherwise.
-		// Also flip the closed flag so subsequent Call()s short-circuit with
-		// a clear error instead of writing to a broken stdin and getting
-		// EOF/broken-pipe noise (Codex iter4 P1). Callers that want to keep
-		// using LangGraph after a timeout must construct a fresh worker.
-		//
-		// Reap the killed process in a detached goroutine so it doesn't
-		// linger as a zombie in long-running LSP/MCP sessions (Codex iter5
-		// P2). Close() short-circuits once closed=true is observed, so
-		// without this every timeout would accumulate one unreaped child
-		// until the Go parent itself exits.
-		_ = w.kill()
-		w.closed.Store(true)
-		go w.reapAfterKill()
+		// Callers that want to keep using LangGraph after a timeout must
+		// construct a fresh worker (Closed() reports the dead state).
+		w.terminate()
 		return nil, fmt.Errorf("python worker: call %q timed out after %s", method, w.timeout)
 	case r := <-ch:
+		if isCorruptionErr(r.err) {
+			w.terminate()
+		}
 		return r.raw, r.err
+	}
+}
+
+// errFrameTooLarge is wrapped when a response frame exceeds pythonWorkerMaxFrame.
+var errFrameTooLarge = errSentinel("response frame too large")
+
+// corruptionMarker tags errors that indicate the response stream is no longer
+// aligned with request IDs (parse failure, ID mismatch, oversized frame). Such
+// errors trigger worker termination in Call.
+type corruptionMarker struct{ err error }
+
+func (c corruptionMarker) Error() string { return c.err.Error() }
+func (c corruptionMarker) Unwrap() error { return c.err }
+
+func isCorruptionErr(err error) bool {
+	var c corruptionMarker
+	return errors.As(err, &c)
+}
+
+// terminate kills the worker, marks it closed so later Call()s short-circuit,
+// and reaps the child in a detached goroutine to avoid zombies in long-running
+// LSP/MCP sessions.
+func (w *PythonWorker) terminate() {
+	_ = w.kill()
+	w.closed.Store(true)
+	go w.reapAfterKill()
+}
+
+// readLimitedLine reads a single newline-terminated frame from the worker,
+// failing with errFrameTooLarge once the accumulated bytes would exceed max.
+// Memory is bounded to max plus one bufio buffer regardless of worker output.
+func (w *PythonWorker) readLimitedLine(max int) ([]byte, error) {
+	var buf []byte
+	for {
+		chunk, err := w.stdout.ReadSlice('\n')
+		if len(buf)+len(chunk) > max {
+			return nil, errFrameTooLarge
+		}
+		buf = append(buf, chunk...) // chunk aliases bufio's buffer; copy out
+		if err == nil {
+			return buf, nil
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue // frame longer than the buffer; keep reading
+		}
+		return buf, err
 	}
 }
 

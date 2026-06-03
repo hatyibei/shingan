@@ -82,7 +82,7 @@ func (t *TemperatureMisuseChecker) Analyze(graph *domain.WorkflowGraph) []domain
 // checker. It returns the Finding plus ok=true when the node should be
 // reported, or ok=false otherwise.
 func evaluateTemperatureMisuse(node *domain.Node) (domain.Finding, bool) {
-	temp, hasTemp := floatConfig(node, "temperature")
+	temp, hasTemp := node.GetTemperature()
 	if !hasTemp {
 		return domain.Finding{}, false
 	}

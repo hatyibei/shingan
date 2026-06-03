@@ -189,10 +189,11 @@ func (p *N8nParser) Parse(input []byte) (*domain.WorkflowGraph, error) {
 		}
 
 		nodes[nodeID] = &domain.Node{
-			ID:     nodeID,
-			Name:   raw.Name,
-			Type:   nodeType,
-			Config: cfg,
+			ID:           nodeID,
+			Name:         raw.Name,
+			Type:         nodeType,
+			Config:       cfg,
+			ToolCategory: category,
 		}
 		nameToID[raw.Name] = nodeID
 		if raw.ID != "" {
@@ -303,6 +304,7 @@ func (p *N8nParser) Parse(input []byte) (*domain.WorkflowGraph, error) {
 				"category": "trigger",
 				"virtual":  true,
 			},
+			ToolCategory: "trigger",
 		}
 		for _, tid := range triggerIDs {
 			edges = append(edges, domain.Edge{From: virtualRoot, To: tid})
@@ -334,7 +336,7 @@ func allTriggerNodeIDs(nodes map[string]*domain.Node, order []string, _ []domain
 		if !ok || n == nil {
 			continue
 		}
-		if cat, _ := n.Config["category"].(string); cat == "trigger" {
+		if n.GetToolCategory() == "trigger" {
 			out = append(out, id)
 		}
 	}
@@ -379,7 +381,7 @@ func pickEntryNode(nodes map[string]*domain.Node, order []string, edges []domain
 		if !ok || n == nil {
 			continue
 		}
-		if cat, _ := n.Config["category"].(string); cat == "trigger" {
+		if n.GetToolCategory() == "trigger" {
 			return id
 		}
 	}

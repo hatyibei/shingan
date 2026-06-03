@@ -154,6 +154,33 @@ panic: plugin.MustRegister: plugin: shingan binary is older than
 plugin's MinShinganVersion: binary=0.8.0, plugin requires >=0.9.0
 ```
 
+**Plugin SDK ABI version check ✓ (independent defensive line).** Separate
+from the release-version check above, a rule may implement
+`domain.VersionedRule` to declare the *plugin SDK generation* it was compiled
+against — the shape of the `AnalysisRule` / `Manifest` contract, which changes
+on a different cadence than the release version:
+
+```go
+func (MyRule) PluginSDKVersion() string { return plugin.PluginSDKVersion } // "0.9.0"
+```
+
+At startup the CLI calls `plugin.VerifySDKCompatibility()`, which checks every
+registered `VersionedRule` against the binary's supported range
+(`plugin.MinPluginSDK`..`plugin.MaxPluginSDK`). A rule built against an older
+(signature predates a breaking change) or newer (binary too old) SDK is
+rejected as a **configuration error with exit code 3** — not a panic — so a
+mismatched wrapper fails fast with an actionable message instead of running a
+rule whose contract has shifted. Rules that don't implement `VersionedRule`
+make no SDK claim and are skipped (opt-in, like `MinShinganVersion`).
+
+```
+$ shingan-with-plugins analyze --input wf.py
+Error: plugin: rule built against an incompatible plugin SDK version (this binary supports SDK 0.9.0..0.9.0):
+  - experimental:my_rule (declares SDK "1.0.0"): newer than maximum supported SDK 0.9.0; upgrade shingan
+$ echo $?
+3
+```
+
 **`.shingan.yaml plugins:` declaration ✓** Projects
 declare which plugin rules they depend on:
 

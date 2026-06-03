@@ -35,6 +35,10 @@ type analyzeFlags struct {
 	// Phase 0.5 — operational trust.
 	policy string // --policy=<path>: load .shingan.yaml severity policy; "" = auto-discover
 
+	// Performance — directory-mode parallelism for subprocess-backed parsers
+	// (currently LangGraph). 0 = parser default (2); 1 = serial.
+	workers int // --workers=<n>
+
 	// stdout / stderr writers (Codex Slice B #2/#3). Threaded through
 	// from cmd.OutOrStdout / cmd.ErrOrStderr so wrappers and tests
 	// can capture report output via root.SetOut. Default to
@@ -111,6 +115,7 @@ needing your own input file.`,
 	cmd.Flags().StringVar(&flags.baseline, "baseline", "", "Path to baseline JSON; findings already present are suppressed")
 	cmd.Flags().StringVar(&flags.saveBaseline, "save-baseline", "", "Path to write current findings as a new baseline JSON")
 	cmd.Flags().StringVar(&flags.policy, "policy", "", "Path to .shingan.yaml policy file (severity overrides + per-path disable). Default: walk up from CWD looking for .shingan.yaml")
+	cmd.Flags().IntVar(&flags.workers, "workers", 0, "Parallel worker processes for directory analysis of subprocess-backed parsers (LangGraph). 0=default (2), 1=serial")
 
 	_ = cmd.MarkFlagRequired("input")
 
@@ -128,6 +133,17 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 	outputFormat := flags.output
 	if outputFormat == "" {
 		outputFormat = "json"
+	}
+
+	// 0a. Plugin SDK ABI generation check. A wrapper binary that links a
+	//     plugin rule built against an incompatible plugin SDK signature is a
+	//     configuration error — fail fast with exit code 3 rather than running
+	//     a rule whose contract may have shifted. Independent of the
+	//     `experimental:` prefix and the binary-version (MinShinganVersion)
+	//     check; this guards the SDK generation specifically.
+	if sdkErr := plugin.VerifySDKCompatibility(); sdkErr != nil {
+		fmt.Fprintln(os.Stderr, "Error:", sdkErr)
+		return 3, nil
 	}
 
 	// 0. Load + verify policy BEFORE any work — including before the
@@ -212,7 +228,7 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 
 	// 2. Create parser via ParserFactory (now that we know we have work).
 	parserFactory := factory.NewParserFactory()
-	workflowParser, err := parserFactory.Create(inputFormat)
+	workflowParser, err := parserFactory.CreateWithOptions(inputFormat, factory.ParserOptions{Workers: flags.workers})
 	if err != nil {
 		return 1, fmt.Errorf("create parser: %w", err)
 	}
@@ -410,7 +426,9 @@ func extInSet(e string, exts []string) bool {
 // Files that fail to parse are skipped with a warning (mirrors CLI
 // resilience for incremental refactors); fatal walk errors propagate.
 func parseSourceDirectoryAsMulti(dir string, p application.WorkflowParser, allow []string, exts ...string) ([]application.GraphWithSource, error) {
-	var out []application.GraphWithSource
+	// Collect matching paths first so we can optionally fan them out across a
+	// worker pool (LangGraph) instead of parsing strictly serially.
+	var paths []string
 	walkErr := filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return fmt.Errorf("walk error at %q: %w", path, walkErr)
@@ -421,6 +439,40 @@ func parseSourceDirectoryAsMulti(dir string, p application.WorkflowParser, allow
 		if allow != nil && !fileInAllowlist(path, allow) {
 			return nil
 		}
+		paths = append(paths, path)
+		return nil
+	})
+	if walkErr != nil {
+		return nil, fmt.Errorf("walk directory %q: %w", dir, walkErr)
+	}
+
+	// Concurrent path: parsers exposing ParseFilesMulti (LangGraph worker pool).
+	if mp, ok := p.(concurrentFileParser); ok && len(paths) > 1 {
+		results, err := mp.ParseFilesMulti(paths)
+		if err != nil {
+			// A batch-level failure (e.g. framework not importable) is global.
+			if errors.Is(err, parser.ErrPythonFrameworkMissing) {
+				return nil, fmt.Errorf("crewai/langgraph framework not installed: %w", err)
+			}
+			return nil, err
+		}
+		out := make([]application.GraphWithSource, 0, len(results))
+		for _, r := range results {
+			if r.Err != nil {
+				if errors.Is(r.Err, parser.ErrPythonFrameworkMissing) {
+					return nil, fmt.Errorf("crewai/langgraph framework not installed: %w", r.Err)
+				}
+				_, _ = fmt.Fprintf(os.Stderr, "warning: skipping %q: %v\n", r.Path, r.Err)
+				continue
+			}
+			out = append(out, application.GraphWithSource{Graph: r.Graph, SourceFile: r.Path})
+		}
+		return out, nil
+	}
+
+	// Serial fallback (single-worker parsers, or a single file).
+	var out []application.GraphWithSource
+	for _, path := range paths {
 		g, err := parseFile(path, p)
 		if err != nil {
 			// Codex iter4 P2: propagate framework-missing errors so CI
@@ -428,18 +480,21 @@ func parseSourceDirectoryAsMulti(dir string, p application.WorkflowParser, allow
 			// of silently producing 0 findings. Single-file syntax
 			// errors continue to be skipped with a warning.
 			if errors.Is(err, parser.ErrPythonFrameworkMissing) {
-				return fmt.Errorf("crewai/langgraph framework not installed: %w", err)
+				return nil, fmt.Errorf("crewai/langgraph framework not installed: %w", err)
 			}
 			_, _ = fmt.Fprintf(os.Stderr, "warning: skipping %q: %v\n", path, err)
-			return nil
+			continue
 		}
 		out = append(out, application.GraphWithSource{Graph: g, SourceFile: path})
-		return nil
-	})
-	if walkErr != nil {
-		return nil, fmt.Errorf("walk directory %q: %w", dir, walkErr)
 	}
 	return out, nil
+}
+
+// concurrentFileParser is the optional capability a parser exposes to parse
+// many files in parallel via an internal worker pool. Implemented by
+// LangGraphParser; other parsers fall back to the serial loop above.
+type concurrentFileParser interface {
+	ParseFilesMulti(paths []string) ([]parser.FileParseResult, error)
 }
 
 // loadGraphFiltered is loadGraphWithParser with an optional allowlist of file

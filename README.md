@@ -293,6 +293,8 @@ go test -tags=demo -v -run TestDemo_ .
 | unbounded_tool_arg | Tool argument schema fields without `maxLength` / `maxItems` / `maximum` | Warning | 0.7 / 0.5 / 0.4 |
 | secret_in_prompt_template | Hardcoded credentials inside LLM prompt templates | Critical | 0.95 (exact) / 0.7 (JWT) |
 | missing_eval_dataset | Production-flagged graph without an `eval_dataset` reference | Warning | 0.7 |
+| human_gate_missing | Production-flagged graph that performs sensitive external actions (API / code-exec / send / payment …) with no `Human` approval node anywhere | Warning | 0.6 (heuristic) |
+| tool_description_missing | `Tool` node lacking a usable description (LLM picks tools from description text; missing → wrong-tool selection) | Info | 0.6 (heuristic) |
 
 ## Supported formats
 
@@ -380,7 +382,7 @@ Every dogfood-driven FP fix shipped since v0.5 is listed in [docs/benchmarks.md 
 go test ./...
 go vet ./...
 go build -o shingan ./cmd/shingan
-make lint        # check_confidence_reason + go vet
+make lint        # check-confidence-reason (go/analysis) + go vet
 ```
 
 When adding a new rule, see [docs/rule-authoring.md](./docs/rule-authoring.md).
@@ -401,7 +403,7 @@ When adding a new rule, see [docs/rule-authoring.md](./docs/rule-authoring.md).
 
 ### Contributing → New rules
 
-Contributors implementing new builtin rules should start with **[docs/rule-authoring.md](./docs/rule-authoring.md)**. It covers the Local / Path / Global three-tier templates (ADR-007), ConfidenceReason selection guide (ADR-008), the `check_confidence_reason.sh` linter, TDD patterns, and design notes for every existing rule. External rule authors who want to ship rules from their own repo (no fork required) should read **[docs/plugin-sdk.md](./docs/plugin-sdk.md)** — the public `plugin.Register` API shipped in v0.9 with an `experimental:` prefix requirement; the stability promise on the ABI lands at v1.0 (ADR-010 originally deferred all external exposure to v1.0; the v0.9 implementation supersedes that with the prefix-gated early-access path).
+Contributors implementing new builtin rules should start with **[docs/rule-authoring.md](./docs/rule-authoring.md)**. It covers the Local / Path / Global three-tier templates (ADR-007), ConfidenceReason selection guide (ADR-008), the `check-confidence-reason` go/analysis linter, TDD patterns, and design notes for every existing rule. External rule authors who want to ship rules from their own repo (no fork required) should read **[docs/plugin-sdk.md](./docs/plugin-sdk.md)** — the public `plugin.Register` API shipped in v0.9 with an `experimental:` prefix requirement; the stability promise on the ABI lands at v1.0 (ADR-010 originally deferred all external exposure to v1.0; the v0.9 implementation supersedes that with the prefix-gated early-access path).
 
 ## License
 

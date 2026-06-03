@@ -87,6 +87,13 @@ type Finding struct {
 	// been migrated yet may leave it empty; the JSON/SARIF reporters omit
 	// the field via `omitempty` semantics on the producing layer.
 	ConfidenceReason ConfidenceReason
+	// MessageTemplateID is a stable, opaque identifier for the message
+	// template, independent of the human-readable wording. When set (by the
+	// orchestrator, from a rule implementing RuleWithMessageTemplate), it is
+	// used as the baseline MessageDigest so a wording change — typo fix or
+	// i18n — does not invalidate the baseline. Empty for rules that don't
+	// provide one; the digest then falls back to the normalized-message hash.
+	MessageTemplateID string
 	// SourceFile is the absolute or repo-relative path of the file the
 	// finding originates from. Populated by the multi-file directory
 	// pipeline (ADR-012) so per-file independent graphs can attribute
