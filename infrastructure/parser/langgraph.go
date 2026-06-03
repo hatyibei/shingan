@@ -19,6 +19,7 @@ package parser
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/hatyibei/shingan/domain"
@@ -29,10 +30,23 @@ import (
 type LangGraphParser struct {
 	worker *PythonWorker
 
+	// scriptPath and workerOpts are retained so directory-mode parsing
+	// (ParseFilesMulti) can spawn additional sibling workers for parallelism.
+	// They are empty when the parser was constructed with an existing worker
+	// (WithLangGraphWorker), in which case the pool degrades to the single
+	// worker.
+	scriptPath string
+	workerOpts []PythonWorkerOption
+	workers    int // directory-mode pool size (>=1)
+
 	mu       sync.Mutex
 	healthOK bool
 	healthCk bool // whether HealthCheck has been called yet
 }
+
+// defaultLangGraphWorkers is the directory-mode pool size when unset. Two
+// balances throughput against the per-worker Python startup + memory cost.
+const defaultLangGraphWorkers = 2
 
 // LangGraphOption configures a LangGraphParser at construction time.
 type LangGraphOption func(*langGraphConfig)
@@ -42,6 +56,7 @@ type langGraphConfig struct {
 	pythonBin      string
 	workerOpts     []PythonWorkerOption
 	existingWorker *PythonWorker
+	workers        int
 }
 
 // WithLangGraphScriptPath overrides the path to the shim Python script.
@@ -61,19 +76,33 @@ func WithLangGraphWorker(w *PythonWorker) LangGraphOption {
 	return func(c *langGraphConfig) { c.existingWorker = w }
 }
 
+// WithLangGraphWorkers sets the directory-mode worker-pool size used by
+// ParseFilesMulti. Values < 1 are clamped to 1 (serial). Default is 2.
+// Single-file Parse / ParseFile always use the one primary worker regardless.
+func WithLangGraphWorkers(n int) LangGraphOption {
+	return func(c *langGraphConfig) { c.workers = n }
+}
+
 // NewLangGraphParser instantiates the parser and (unless WithLangGraphWorker
 // is supplied) spawns the underlying Python subprocess. The returned parser
 // must be `Close()`d to release process resources.
 func NewLangGraphParser(opts ...LangGraphOption) (*LangGraphParser, error) {
 	cfg := &langGraphConfig{
 		pythonBin: "python3",
+		workers:   defaultLangGraphWorkers,
 	}
 	for _, o := range opts {
 		o(cfg)
 	}
+	workers := cfg.workers
+	if workers < 1 {
+		workers = 1
+	}
 
 	if cfg.existingWorker != nil {
-		return &LangGraphParser{worker: cfg.existingWorker}, nil
+		// No scriptPath/workerOpts retained: the pool degrades to this one
+		// worker (sibling spawning needs a script path).
+		return &LangGraphParser{worker: cfg.existingWorker, workers: workers}, nil
 	}
 
 	scriptPath := cfg.scriptPath
@@ -93,7 +122,12 @@ func NewLangGraphParser(opts ...LangGraphOption) (*LangGraphParser, error) {
 	if err != nil {
 		return nil, fmt.Errorf("langgraph parser: %w", err)
 	}
-	return &LangGraphParser{worker: worker}, nil
+	return &LangGraphParser{
+		worker:     worker,
+		scriptPath: scriptPath,
+		workerOpts: workerOpts,
+		workers:    workers,
+	}, nil
 }
 
 // SupportedFormat implements application.WorkflowParser.
@@ -142,11 +176,105 @@ func (p *LangGraphParser) ParseFile(path string) (*domain.WorkflowGraph, error) 
 	if err := p.ensureHealthy(); err != nil {
 		return nil, err
 	}
-	raw, err := p.worker.Call("parse_file", map[string]string{"path": path})
+	return parseFileOn(p.worker, path)
+}
+
+// parseFileOn issues a parse_file RPC on a specific worker and decodes the
+// result. Shared by ParseFile and the ParseFilesMulti pool so both paths agree
+// on error wording and decoding.
+func parseFileOn(w *PythonWorker, path string) (*domain.WorkflowGraph, error) {
+	raw, err := w.Call("parse_file", map[string]string{"path": path})
 	if err != nil {
 		return nil, fmt.Errorf("langgraph parser: parse_file %q: %w", path, err)
 	}
 	return decodeShimGraph(raw)
+}
+
+// FileParseResult pairs a source path with its parse outcome, returned by
+// ParseFilesMulti. Exactly one of Graph / Err is meaningful per entry.
+type FileParseResult struct {
+	Path  string
+	Graph *domain.WorkflowGraph
+	Err   error
+}
+
+// ParseFilesMulti parses many files concurrently using a pool of up to
+// `workers` Python workers (the primary plus freshly-spawned siblings), and
+// returns one FileParseResult per input path. Results are sorted by Path so the
+// output is deterministic regardless of completion order.
+//
+// Framework health is gated once on the primary worker: if langgraph isn't
+// importable the whole batch fails with that error (callers propagate it as a
+// global failure rather than a per-file skip). Per-file parse errors are
+// reported in the corresponding FileParseResult.Err.
+//
+// The pool degrades gracefully: if sibling workers can't be spawned (no script
+// path, or a spawn error) it uses however many it has, down to the single
+// primary worker (serial).
+func (p *LangGraphParser) ParseFilesMulti(paths []string) ([]FileParseResult, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	if err := p.ensureHealthy(); err != nil {
+		return nil, err
+	}
+
+	n := p.workers
+	if n < 1 {
+		n = 1
+	}
+	if n > len(paths) {
+		n = len(paths)
+	}
+
+	pool := []*PythonWorker{p.worker}
+	var siblings []*PythonWorker
+	if p.scriptPath != "" {
+		for len(pool) < n {
+			w, err := NewPythonWorker(p.scriptPath, p.workerOpts...)
+			if err != nil {
+				break // fall back to the workers we already have
+			}
+			siblings = append(siblings, w)
+			pool = append(pool, w)
+		}
+	}
+	defer func() {
+		for _, w := range siblings {
+			_ = w.Close()
+		}
+	}()
+
+	jobs := make(chan string)
+	results := make(chan FileParseResult)
+	var wg sync.WaitGroup
+	for _, w := range pool {
+		wg.Add(1)
+		go func(w *PythonWorker) {
+			defer wg.Done()
+			for path := range jobs {
+				g, err := parseFileOn(w, path)
+				results <- FileParseResult{Path: path, Graph: g, Err: err}
+			}
+		}(w)
+	}
+	go func() {
+		for _, path := range paths {
+			jobs <- path
+		}
+		close(jobs)
+	}()
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	out := make([]FileParseResult, 0, len(paths))
+	for r := range results {
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out, nil
 }
 
 // Close releases the underlying Python worker.

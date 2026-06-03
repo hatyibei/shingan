@@ -33,6 +33,22 @@ type AnalysisRule interface {
 	Analyze(graph *WorkflowGraph) []Finding
 }
 
+// VersionedRule is an optional interface a (typically plugin) rule may
+// implement to declare the plugin SDK ABI generation it was built against.
+// The plugin loader checks this against the binary's supported SDK range
+// (plugin.MinPluginSDK..plugin.MaxPluginSDK) so a rule compiled against an
+// incompatible SDK signature is rejected at startup rather than misbehaving at
+// runtime. It is independent of, and complementary to, the binary-version
+// check (plugin.Manifest.MinShinganVersion): one guards the release, the other
+// guards the SDK signature generation.
+type VersionedRule interface {
+	AnalysisRule
+	// PluginSDKVersion returns the plugin SDK ABI version the rule was built
+	// against, in semver form (e.g. "0.9.0"). An empty or unparseable value is
+	// treated as incompatible.
+	PluginSDKVersion() string
+}
+
 // LocalRule covers rules whose decision can be made by inspecting a single
 // node or edge in isolation. The walker visits each node exactly once and
 // dispatches to the listener's OnNode/OnAny handler.

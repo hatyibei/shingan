@@ -31,6 +31,21 @@ func NewParserFactory() *ParserFactory {
 // installed, etc.) yields a descriptive error that callers can surface to
 // the user.
 func (f *ParserFactory) Create(format string) (application.WorkflowParser, error) {
+	return f.CreateWithOptions(format, ParserOptions{})
+}
+
+// ParserOptions carries optional tuning knobs for parser construction. Zero
+// values select each parser's default, so Create(format) == CreateWithOptions
+// (format, ParserOptions{}).
+type ParserOptions struct {
+	// Workers sets the directory-mode worker-pool size for subprocess-backed
+	// parsers (currently LangGraph). 0 means "use the parser default"; values
+	// < 1 after that are clamped to 1 (serial) by the parser.
+	Workers int
+}
+
+// CreateWithOptions is Create with explicit tuning options.
+func (f *ParserFactory) CreateWithOptions(format string, opts ParserOptions) (application.WorkflowParser, error) {
 	switch format {
 	case "json":
 		return parser.NewJSONParser(), nil
@@ -39,7 +54,11 @@ func (f *ParserFactory) Create(format string) (application.WorkflowParser, error
 	case "samurai":
 		return parser.NewSamuraiParser(), nil
 	case "langgraph":
-		p, err := parser.NewLangGraphParser()
+		var lgOpts []parser.LangGraphOption
+		if opts.Workers > 0 {
+			lgOpts = append(lgOpts, parser.WithLangGraphWorkers(opts.Workers))
+		}
+		p, err := parser.NewLangGraphParser(lgOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("create langgraph parser: %w", err)
 		}

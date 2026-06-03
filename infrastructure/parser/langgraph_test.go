@@ -1,6 +1,7 @@
 package parser_test
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -672,4 +673,91 @@ func nodeIDList(g *domain.WorkflowGraph) []string {
 		out = append(out, id)
 	}
 	return out
+}
+
+// TestLangGraphParser_ParseFilesMulti_Empty verifies the no-op fast path needs
+// no worker interaction.
+func TestLangGraphParser_ParseFilesMulti_Empty(t *testing.T) {
+	requirePython(t)
+	p, err := parser.NewLangGraphParser(parser.WithLangGraphScriptPath(findShim(t)))
+	if err != nil {
+		t.Fatalf("NewLangGraphParser: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	res, err := p.ParseFilesMulti(nil)
+	if err != nil {
+		t.Fatalf("ParseFilesMulti(nil): %v", err)
+	}
+	if len(res) != 0 {
+		t.Errorf("expected no results, got %d", len(res))
+	}
+}
+
+// TestLangGraphParser_ParseFilesMulti_FrameworkMissing verifies the batch
+// fails as a whole (global error) when langgraph isn't importable, rather than
+// returning per-file results.
+func TestLangGraphParser_ParseFilesMulti_FrameworkMissing(t *testing.T) {
+	requirePython(t)
+	if cmd := exec.Command("python3", "-c", "import langgraph"); cmd.Run() == nil {
+		t.Skip("langgraph IS installed; this test only runs when it is missing")
+	}
+	p, err := parser.NewLangGraphParser(parser.WithLangGraphScriptPath(findShim(t)))
+	if err != nil {
+		t.Fatalf("NewLangGraphParser: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	_, err = p.ParseFilesMulti([]string{"a.py", "b.py"})
+	if err == nil {
+		t.Fatal("expected framework-missing error")
+	}
+	if !errors.Is(err, parser.ErrPythonFrameworkMissing) {
+		t.Errorf("error %v should wrap ErrPythonFrameworkMissing", err)
+	}
+}
+
+// TestLangGraphParser_ParseFilesMulti_PoolParsesAll verifies that a pool of
+// workers parses every file in a directory and returns deterministically
+// sorted results. Requires langgraph.
+func TestLangGraphParser_ParseFilesMulti_PoolParsesAll(t *testing.T) {
+	requirePythonLangGraph(t)
+	dir := findTestdataDir(t)
+	paths := []string{
+		filepath.Join(dir, "simple_chain.py"),
+		filepath.Join(dir, "branching.py"),
+		filepath.Join(dir, "react_loop.py"),
+		filepath.Join(dir, "multi_agent.py"),
+	}
+
+	p, err := parser.NewLangGraphParser(
+		parser.WithLangGraphScriptPath(findShim(t)),
+		parser.WithLangGraphWorkers(3),
+	)
+	if err != nil {
+		t.Fatalf("NewLangGraphParser: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	res, err := p.ParseFilesMulti(paths)
+	if err != nil {
+		t.Fatalf("ParseFilesMulti: %v", err)
+	}
+	if len(res) != len(paths) {
+		t.Fatalf("expected %d results, got %d", len(paths), len(res))
+	}
+	// Sorted by path, no errors, non-nil graphs.
+	for i := 1; i < len(res); i++ {
+		if res[i-1].Path > res[i].Path {
+			t.Errorf("results not sorted by path: %q before %q", res[i-1].Path, res[i].Path)
+		}
+	}
+	for _, r := range res {
+		if r.Err != nil {
+			t.Errorf("unexpected error for %q: %v", r.Path, r.Err)
+		}
+		if r.Graph == nil {
+			t.Errorf("nil graph for %q", r.Path)
+		}
+	}
 }

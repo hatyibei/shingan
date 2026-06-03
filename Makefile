@@ -13,8 +13,9 @@ test:
 	go test -race ./...
 
 ## check-reason: fail when a domain.Finding literal in domain/rules omits ConfidenceReason (ADR-008)
+##               go/analysis vet tool; also accepts the field set via assignment / factory.
 check-reason:
-	@./scripts/check_confidence_reason.sh
+	@go run ./tools/cmd/check-confidence-reason ./domain/rules/...
 
 ## lint: run go vet and the ConfidenceReason check together
 lint: check-reason

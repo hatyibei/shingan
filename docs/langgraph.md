@@ -156,6 +156,14 @@ Implementation files:
 | `parse_file …: ModuleNotFoundError: No module named 'foo'` | Target depends on external imports | Analyse in an environment that can run the target (a local venv is recommended) |
 | `call "parse_file" timed out after 30s` | Large module / heavy import | Extend the timeout via `WithCallTimeout` (tweak the LSP / CLI configuration) |
 | Empty graph from analysis | StateGraph isn't at the module top level | The build-inside-a-function pattern is Phase 2 territory |
+| `decode response …` / `response id mismatch` followed by a re-spawn | A C extension or noisy import wrote straight to the worker's stdout (fd 1), corrupting the JSON-RPC stream | Handled automatically: the shim now redirects fd 1 to stderr (`os.dup2(2, 1)`) so stray writes can't corrupt the protocol, and the worker self-terminates on any corrupt frame so the next analysis spawns a clean process. If you see these repeatedly, look for the offending library output on stderr (prefixed by the worker) and silence it upstream. |
+
+> **Note on stray output.** The Python shim reserves a private file descriptor
+> for response frames and points fd 1 at stderr, so anything a dependency prints
+> to stdout — including C extensions that bypass Python's `sys.stdout` — is
+> diverted to stderr and can never desynchronise the request/response stream.
+> If a frame is still malformed, exceeds 16 MiB, or carries the wrong id, the Go
+> side terminates the worker and the caller transparently re-spawns it.
 
 ## Version compatibility
 

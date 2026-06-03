@@ -152,7 +152,7 @@ func findSensitiveAction(g *domain.WorkflowGraph) (string, bool) {
 		if n.Type != domain.NodeTypeTool {
 			continue
 		}
-		if cat, _ := n.Config["category"].(string); cat != "" {
+		if cat := n.GetToolCategory(); cat != "" {
 			if sensitiveCategories[strings.ToLower(strings.TrimSpace(cat))] {
 				return id, true
 			}

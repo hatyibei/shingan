@@ -4,6 +4,92 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Changed
+
+- `domain.Node` に頻出設定の typed field を追加 (`MaxIterations`, `ToolCategory`,
+  `ModelName`, `Temperature`, `MaxConcurrency`) と typed accessor
+  (`GetMaxIterations` 等)。ルールは Config map の string キーを直接読まず
+  accessor 経由で参照するようになり、domain 層が parser-private な string
+  contract に依存しないという Onion 原則 (ADR-003) が一段強化された。accessor は
+  typed field を優先し、旧 `Config["..."]` キーへ後方互換フォールバックするため
+  既存 JSON 入力はそのまま動作する。adk-go / n8n parser は typed field も
+  populate する。(audit-driven)
+- `LangGraphParser` がディレクトリ解析時に worker pool (デフォルト 2 並列) を
+  使うようになった。`--workers N` フラグでチューニング可 (`N=1` で従来の直列
+  挙動、`0` でデフォルト)。`ParseFilesMulti` が primary + sibling worker に
+  ファイルを分配し、結果は path 順にソートして決定論を維持。単一ファイルの
+  `Parse` / `ParseFile` は従来通り 1 worker。(audit-driven)
+- `ConfidenceReason` 必須化チェック (ADR-008) を awk shell script
+  (`scripts/check_confidence_reason.sh`、削除) から `go/analysis` ベースの自前
+  vet analyzer (`tools/cmd/check-confidence-reason`) に置換。inline リテラルに
+  加え、構築後の代入 (`f := domain.Finding{...}; f.ConfidenceReason = ...`) や
+  factory 関数経由の生成も検出できるようになった。`make check-reason` /
+  `make lint` の pass/fail 挙動は同じ。
+
+### Changed (potentially breaking for baseline files)
+
+- Baseline fingerprint から `Message` フィールドを除外し、
+  `(RuleName, NodeID, SourceFile, MessageDigest)` ベースに変更 (ADR-016)。
+  `MessageDigest` は `RuleWithMessageTemplate` 実装ルールではテンプレート ID、
+  未実装ルールではメッセージの数値リテラルを `[N]` に正規化した SHA-256 先頭
+  16hex。ルール文言の typo 修正や fan-out 数値変動で baseline が無効化される
+  問題を解消。引用リテラルは finding 識別子として**保持**する: `unbounded_tool_arg`
+  等は 1 node に対し offending field ごとに finding を出し、同一 node の
+  `field "query"` と `field "payload"` は引用部分だけで区別されるため、これを
+  `[S]` へ潰すと baseline が新規 finding を誤抑制してしまう (codex review P2)。
+  node 名のメッセージ内ドリフトは別フィールドの `NodeID` で既に吸収済み。
+- Baseline JSON schema が v2 に。旧 v1 ファイル (`message` 全文, `version` 不在)
+  は読み込み時に digest へ自動移行 (warning 表示)、save 時は v2 で書き出す。
+
+### Added
+
+- Plugin SDK ABI version 互換チェック (`domain.VersionedRule.PluginSDKVersion()`)。
+  既存の `Manifest.MinShinganVersion` (リリース版) に加えて SDK signature 世代も
+  検証する独立した防衛線。起動時に `plugin.VerifySDKCompatibility()` が登録済み
+  ルールを binary のサポート範囲 (`plugin.MinPluginSDK`..`MaxPluginSDK`) と比較し、
+  範囲外プラグインは panic ではなく exit code 3 (config error) で蹴られる。
+  `VersionedRule` 未実装ルールは従来通りスキップ (opt-in)。(audit-driven)
+- `domain.RuleWithMessageTemplate` interface — ルール作者が安定した
+  `MessageTemplateID()` を提供できる optional API。orchestrator が該当ルールの
+  finding に `Finding.MessageTemplateID` を stamp し、baseline digest が文言変更
+  に影響されなくなる。
+
+### Docs
+
+- README / README.ja の Rules 表に `human_gate_missing` (Warning, 0.6) と
+  `tool_description_missing` (Info, 0.6) を追記し、severity / confidence を
+  公開。`docs/rules/human-gate-missing.md` と
+  `docs/rules/tool-description-missing.md` を新規追加。(audit-driven)
+
+### Fixed
+
+- `.shingan.yaml` `overrides[].paths` の `**` glob が区切り文字を検査せず
+  `legacy/**` が `legacy_v2.py` にもマッチしていた。`bmatcuk/doublestar/v4`
+  ベースに置換し、中間 `**` (`src/**/test.py`) も正しく動作するようになった。
+  パスは forward-slash に正規化してから照合するため Windows パスでも一貫した
+  挙動になる。policy override が意図通り適用されない警告ミスを修正。(audit-driven)
+- Findings の最終 sort で同一 `(severity, confidence, rule, source_file)` の場合に
+  Go map 反復順がそのまま結果順になり、実行ごとに markdown / SARIF レポートの
+  diff readability が壊れていた。tiebreaker に `NodeID` を追加し、`Analyze` /
+  `AnalyzeMulti` 双方を共通の `findingLess` 比較関数に統一して完全決定論化。
+  (audit-driven)
+- 埋め込み Python / Node shim のキャッシュ展開 (`~/.cache/shingan-shims/<ver>/`)
+  で atomic 書き込み (temp file + rename) と flock (`gofrs/flock`) を導入。
+  `-ldflags -X ...embeddedShimVersion=...` を忘れた dev ビルドが同一ディレクトリ
+  を共有してもファイル競合で `SyntaxError` を出さなくなった。dev ビルドの cache
+  key を `vdev` から `dev-<goos>-<goarch>-<binary-sha256[:8]>` に変更し、
+  ローカルビルド間の衝突を防止。(audit-driven)
+- Python / Node worker (`PythonWorker.Call`) の JSON-RPC framing 健全性を強化:
+  - Python shim 内で `os.dup2(2, 1)` により C 拡張等の stray な fd1 書き込みを
+    stderr へ redirect。fd1 はプロトコル専用に dup した private fd で使用する。
+  - Go 側は ID 不一致・パース失敗・フレームサイズ超過 (デフォルト 16 MiB,
+    `WithMaxFrame` で調整可) を protocol corruption として worker を即時
+    terminate し、上位呼び出しに error を返す (`Closed()` で再 spawn を促す)。
+  - フレーム読取りは `bufio.ReadSlice` ループで上限を強制し、`ReadBytes` が
+    無制限に成長する問題を解消。
+  - 結果として長寿命 LSP / MCP プロセスで stray stdout 起因の永続的 ID ずれが
+    発生しなくなった。(audit-driven)
+
 ## [0.9.0] - 2026-06-01
 
 ### Added

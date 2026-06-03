@@ -43,8 +43,15 @@ from typing import Any, Dict, List, Optional, Tuple
 # ----- stdout/stderr discipline ---------------------------------------------
 # `crewai` prints telemetry and pydantic warnings on import. Re-route all
 # "natural" stdout to stderr so that response framing on stdout stays clean.
-_RESPONSE_STREAM = sys.stdout
-sys.stdout = sys.stderr  # any stray print() now lands on stderr.
+# Duplicate the real stdout (fd 1) onto a private descriptor reserved for
+# JSON-RPC response frames, then point fd 1 itself at stderr. This is stronger
+# than reassigning sys.stdout: a C extension that writes straight to fd 1
+# (bypassing Python) now lands on stderr too, so it can never corrupt the
+# response stream the Go side reads.
+_RESPONSE_FD = os.dup(1)
+os.dup2(2, 1)
+sys.stdout = sys.stderr  # python-level stray print() also lands on stderr.
+_RESPONSE_STREAM = os.fdopen(_RESPONSE_FD, "w", encoding="utf-8")
 
 # Disable CrewAI telemetry so importing the user module doesn't emit network
 # traffic or noisy warnings on stderr.

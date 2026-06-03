@@ -502,32 +502,26 @@ A 1-2 line summary plus Severity rationale plus false-positive sources for each 
 
 ---
 
-## 9. ConfidenceReason linter (`scripts/check_confidence_reason.sh`)
+## 9. ConfidenceReason linter (`tools/cmd/check-confidence-reason`)
 
 ADR-008 requires "every Finding must carry a ConfidenceReason," but **Go cannot make a struct field mandatory**, so static analysis fills the gap.
 
-[`scripts/check_confidence_reason.sh`](../scripts/check_confidence_reason.sh) walks `domain/rules/*.go` with an awk state machine and:
+[`tools/cmd/check-confidence-reason`](../tools/cmd/check-confidence-reason) is a `go/analysis` vet tool that walks `domain/rules/...` and:
 
-- detects `domain.Finding{ ... }` literals that contain field assignments (`Foo: bar`) but no `ConfidenceReason:` line
-- excludes empty sentinels `domain.Finding{}` (no field assignments)
+- detects `domain.Finding{ ... }` literals that contain keyed fields but no `ConfidenceReason` field
+- excludes empty sentinels `domain.Finding{}` (no fields)
+- **also accepts the field set after construction** — `f := domain.Finding{...}; f.ConfidenceReason = ...`, including inside factory functions — which the previous awk script (`scripts/check_confidence_reason.sh`, removed) could not see
 
 ```bash
-$ make check-reason
-check_confidence_reason: OK (10 files scanned)
+$ make check-reason     # go run ./tools/cmd/check-confidence-reason ./domain/rules/...
 
-$ make lint            # check-reason + go vet
+$ make lint             # check-reason + go vet
 ```
 
 The `lint` job in CI (`.github/workflows/ci.yml`) invokes `make lint`. On violations, offending sites surface like this:
 
 ```
-domain/rules/foo.go:42: domain.Finding literal missing ConfidenceReason
-    domain.Finding{
-        RuleName: "foo",
-        Severity: domain.Warning,
-        ...
-    }
-check_confidence_reason: 1 file(s) contain offending Finding literals
+domain/rules/foo.go:42:9: domain.Finding literal missing ConfidenceReason (ADR-008): set it inline or via assignment
 ```
 
 Get into the habit of running `make lint` locally **as soon as you start coding**.
@@ -622,4 +616,4 @@ Recommended flow when starting each rule:
 - [application/path_walker.go](../application/path_walker.go) — Path tier
 - [application/global_walker.go](../application/global_walker.go) — Global tier
 - [application/orchestrator.go](../application/orchestrator.go) — 3-pass pipeline
-- [scripts/check_confidence_reason.sh](../scripts/check_confidence_reason.sh) — ADR-008 linter
+- [tools/cmd/check-confidence-reason](../tools/cmd/check-confidence-reason) — ADR-008 linter (go/analysis)

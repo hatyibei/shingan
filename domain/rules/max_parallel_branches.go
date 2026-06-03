@@ -62,7 +62,11 @@ func (m *MaxParallelBranchesChecker) Analyze(graph *domain.WorkflowGraph) []doma
 	var findings []domain.Finding
 
 	for id, node := range graph.Nodes {
-		// max_concurrency 設定があれば尊重してスキップ
+		// max_concurrency 設定があれば尊重してスキップ (typed field or legacy
+		// Config key; presence alone is enough to opt out, regardless of value).
+		if node.MaxConcurrency != nil {
+			continue
+		}
 		if _, ok := node.Config["max_concurrency"]; ok {
 			continue
 		}

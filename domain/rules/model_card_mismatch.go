@@ -154,7 +154,7 @@ func (m *ModelCardMismatchChecker) Analyze(graph *domain.WorkflowGraph) []domain
 // `https://api.openai.com.proxy.corp/v1` that previously slipped past
 // the substring matcher.
 func evaluateModelCardMismatch(node *domain.Node) (domain.Finding, bool) {
-	model := stringConfig(node, "model")
+	model := node.GetModelName()
 	if model == "" {
 		return domain.Finding{}, false
 	}
