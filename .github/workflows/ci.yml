@@ -37,6 +37,26 @@ jobs:
           name: coverage
           path: coverage.out
 
+  # govulncheck gates CI on *reachable* vulnerabilities — it only fails
+  # when the vulnerable symbol is actually called from our code, not for
+  # every CVE in the dependency tree. Pinned to a specific govulncheck
+  # release (not @latest) so the gate is reproducible: a new govulncheck
+  # release can't silently change CI behavior. Bump deliberately.
+  # See #28 (GO-2026-5026 in golang.org/x/net, fixed by the v0.55.0 bump).
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.3"
+          cache: true
+      - name: install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
+      - name: govulncheck
+        run: govulncheck ./...
+
   build:
     name: build
     runs-on: ubuntu-latest

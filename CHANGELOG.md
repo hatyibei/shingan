@@ -4,6 +4,17 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Security
+
+- **Bumped `golang.org/x/net` to v0.55.0 and added a govulncheck CI gate.**
+  `govulncheck` flagged GO-2026-5026 (Punycode/IDNA label-rejection bug in
+  `golang.org/x/net/idna`) as **reachable** in v0.54.0 — the trace runs through
+  `signal.Notify` → `idna.ToASCII` in `cmd/api`. The v0.55.0 bump drops reachable
+  vulnerabilities to **0** (`go test ./...` + `go build ./...` stay green). A new
+  `govulncheck` CI job (pinned to `govulncheck@v1.3.0`, not `@latest`, so the gate
+  is reproducible) now runs `govulncheck ./...` on every push/PR, failing only on
+  *reachable* vulnerabilities. Closes #28.
+
 ## [0.9.0] - 2026-06-01
 
 ### Added
