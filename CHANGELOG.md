@@ -4,6 +4,16 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Changed
+
+- **GitHub Action pins the CLI to the action ref instead of `@latest`.**
+  `action.yml` ran `go install …/cmd/shingan@latest`, so even a workflow that
+  pinned `uses: hatyibei/shingan@v0.9.0` silently ran the *newest* CLI —
+  non-reproducible CI and a supply-chain footgun. The install step now derives
+  the CLI version from `github.action_ref` (the tag the caller pinned), so the
+  action tag and CLI version stay in sync automatically, falling back to the
+  current pinned release (`v0.9.0`) for local `uses: ./` refs. Closes #30.
+
 ### Security
 
 - **npm postinstall integrity check is now fail-CLOSED.**
