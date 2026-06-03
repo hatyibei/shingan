@@ -6,6 +6,11 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ### Changed
 
+- `LangGraphParser` がディレクトリ解析時に worker pool (デフォルト 2 並列) を
+  使うようになった。`--workers N` フラグでチューニング可 (`N=1` で従来の直列
+  挙動、`0` でデフォルト)。`ParseFilesMulti` が primary + sibling worker に
+  ファイルを分配し、結果は path 順にソートして決定論を維持。単一ファイルの
+  `Parse` / `ParseFile` は従来通り 1 worker。(audit-driven)
 - `ConfidenceReason` 必須化チェック (ADR-008) を awk shell script
   (`scripts/check_confidence_reason.sh`、削除) から `go/analysis` ベースの自前
   vet analyzer (`tools/cmd/check-confidence-reason`) に置換。inline リテラルに
