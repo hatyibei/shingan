@@ -4,6 +4,14 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Fixed
+
+- `.shingan.yaml` `overrides[].paths` の `**` glob が区切り文字を検査せず
+  `legacy/**` が `legacy_v2.py` にもマッチしていた。`bmatcuk/doublestar/v4`
+  ベースに置換し、中間 `**` (`src/**/test.py`) も正しく動作するようになった。
+  パスは forward-slash に正規化してから照合するため Windows パスでも一貫した
+  挙動になる。policy override が意図通り適用されない警告ミスを修正。(audit-driven)
+
 ## [0.9.0] - 2026-06-01
 
 ### Added

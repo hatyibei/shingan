@@ -50,6 +50,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/hatyibei/shingan/domain"
 	"gopkg.in/yaml.v3"
 )
@@ -183,40 +184,50 @@ func pathMatchesAny(path string, patterns []string) bool {
 		return false
 	}
 	for _, p := range patterns {
-		if matched, _ := filepath.Match(p, path); matched {
-			return true
-		}
-		// Support `**` shorthand: split into prefix+suffix and check.
-		if matched := matchDoubleStar(p, path); matched {
+		if matchPattern(p, path) {
 			return true
 		}
 	}
 	return false
 }
 
-// matchDoubleStar gives shell-glob `**` support. `legacy/**` matches
-// `legacy/anything/here.py`; `**/test.py` matches any `test.py`.
-func matchDoubleStar(pattern, path string) bool {
+// matchPattern reports whether path matches the glob pattern. Patterns and
+// paths are normalized to forward slashes so `.shingan.yaml` overrides behave
+// identically on Windows.
+//
+// Matching is delegated to bmatcuk/doublestar, which honors path-separator
+// boundaries: `legacy/**` matches `legacy/foo.py` and `legacy/sub/foo.py` but
+// NOT `legacy_v2.py`; intermediate doublestars such as `src/**/test.py` work
+// as expected; and single `*` never crosses a `/`. Unlike filepath.Match,
+// doublestar always treats `/` as the separator, so behavior is identical on
+// Windows once paths are normalized to forward slashes.
+func matchPattern(pattern, path string) bool {
 	if pattern == "" {
 		return false
 	}
-	// Anchored prefix: `legacy/**` → match anything starting with `legacy/`.
-	if filepath.Base(pattern) == "**" {
-		prefix := filepath.Dir(pattern)
-		if prefix == "." || prefix == "" {
-			return true
-		}
-		return len(path) >= len(prefix) && path[:len(prefix)] == prefix
+	pattern = normalizeSlashes(pattern)
+	path = normalizeSlashes(path)
+	matched, err := doublestar.Match(pattern, path)
+	if err != nil || !matched {
+		return false
 	}
-	// Suffix-anchored: `**/something.py` → match if the path ends in `/something.py`.
-	if filepath.Dir(pattern) == "**" {
-		suffix := filepath.Base(pattern)
-		base := filepath.Base(path)
-		if matched, _ := filepath.Match(suffix, base); matched {
-			return true
+	// `dir/**` scopes an override to files *under* dir; doublestar also matches
+	// the bare directory (`legacy`, `legacy/`) against `legacy/**`. Exclude
+	// those so a directory-scoped override never matches the directory's own
+	// path — only paths nested beneath it.
+	if prefix, ok := strings.CutSuffix(pattern, "/**"); ok {
+		if path == prefix || path == prefix+"/" {
+			return false
 		}
 	}
-	return false
+	return true
+}
+
+// normalizeSlashes converts both the host separator and a literal backslash to
+// `/`, so Windows-style paths match the same patterns regardless of the OS the
+// analysis runs on.
+func normalizeSlashes(s string) string {
+	return strings.ReplaceAll(filepath.ToSlash(s), `\`, "/")
 }
 
 func parseSeverity(s string) (domain.Severity, bool) {
