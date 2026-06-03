@@ -6,6 +6,14 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ### Changed
 
+- `domain.Node` に頻出設定の typed field を追加 (`MaxIterations`, `ToolCategory`,
+  `ModelName`, `Temperature`, `MaxConcurrency`) と typed accessor
+  (`GetMaxIterations` 等)。ルールは Config map の string キーを直接読まず
+  accessor 経由で参照するようになり、domain 層が parser-private な string
+  contract に依存しないという Onion 原則 (ADR-003) が一段強化された。accessor は
+  typed field を優先し、旧 `Config["..."]` キーへ後方互換フォールバックするため
+  既存 JSON 入力はそのまま動作する。adk-go / n8n parser は typed field も
+  populate する。(audit-driven)
 - `LangGraphParser` がディレクトリ解析時に worker pool (デフォルト 2 並列) を
   使うようになった。`--workers N` フラグでチューニング可 (`N=1` で従来の直列
   挙動、`0` でデフォルト)。`ParseFilesMulti` が primary + sibling worker に

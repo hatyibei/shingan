@@ -93,7 +93,7 @@ func evaluateToolDescription(n *domain.Node) (domain.Finding, bool) {
 		return domain.Finding{}, false
 	}
 	// Triggers / webhooks aren't LLM-facing — exempt.
-	if cat, _ := n.Config["category"].(string); cat == "trigger" {
+	if n.GetToolCategory() == "trigger" {
 		return domain.Finding{}, false
 	}
 	// Honour node-level ignore (n8n JSON parity).

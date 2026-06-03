@@ -632,6 +632,7 @@ func (b *adkgoBuilder) processRealAPIConfig(cfg *ast.CompositeLit, agentType str
 		// MaxIterations is in loopagent.Config directly (not inside AgentConfig).
 		if maxIter := intFieldValue(topFields, "MaxIterations"); maxIter != nil {
 			node.Config["max_iterations"] = *maxIter
+			node.MaxIterations = maxIter
 		}
 		b.nodes[nodeID] = node
 		if subAgentFields != nil {
@@ -811,6 +812,7 @@ func (b *adkgoBuilder) processAgentLit(cl *ast.CompositeLit, parent *string) str
 		}
 		if model := stringFieldValue(fields, "Model"); model != "" {
 			node.Config["model"] = model
+			node.ModelName = model
 		}
 		if instr := stringFieldValue(fields, "Instruction"); instr != "" {
 			node.Config["instruction"] = instr
@@ -843,6 +845,7 @@ func (b *adkgoBuilder) processAgentLit(cl *ast.CompositeLit, parent *string) str
 		}
 		if maxIter := intFieldValue(fields, "MaxIterations"); maxIter != nil {
 			node.Config["max_iterations"] = *maxIter
+			node.MaxIterations = maxIter
 		}
 		b.nodes[nodeID] = node
 		b.processSubAgentsLoop(fields, nodeID)
@@ -1551,6 +1554,7 @@ func applyEnrichedCategory(graph *domain.WorkflowGraph, tArgs types.Type, catego
 			// or if the current category is the default.
 			if existing == "api" || existing == "" {
 				node.Config["category"] = category
+				node.ToolCategory = category
 			}
 		}
 	}

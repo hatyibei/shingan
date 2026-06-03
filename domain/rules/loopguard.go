@@ -83,11 +83,10 @@ func isLoopNode(t domain.NodeType) bool {
 // evaluateLoopGuard checks node and returns the Finding if max_iterations is
 // missing or unparseable. ok is false for safe loops.
 func evaluateLoopGuard(node *domain.Node) (domain.Finding, bool) {
-	raw, exists := node.Config["max_iterations"]
-	if exists && raw != nil {
-		if _, err := toInt(raw); err == nil {
-			return domain.Finding{}, false
-		}
+	// Present-and-parseable max_iterations → bounded loop, safe. A missing or
+	// unparseable value falls through to the finding below.
+	if _, ok := node.GetMaxIterations(); ok {
+		return domain.Finding{}, false
 	}
 	return domain.Finding{
 		RuleName: "loop_guard",

@@ -117,7 +117,7 @@ func (d *DeprecatedModelChecker) Analyze(graph *domain.WorkflowGraph) []domain.F
 // deprecated/shutdown model. The ok return is false when the node is not
 // flagged so the caller can skip the empty Finding.
 func evaluateDeprecatedModel(node *domain.Node) (domain.Finding, bool) {
-	model := stringConfig(node, "model")
+	model := node.GetModelName()
 	if model == "" {
 		return domain.Finding{}, false
 	}
