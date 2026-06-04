@@ -112,7 +112,7 @@ Apply order at runtime (later steps see fewer findings):
 shingan analyze --policy=.shingan.yaml --input=. --format=langgraph --output=markdown
 ```
 
-A malformed policy is logged to stderr but doesn't break the analysis — Shingan falls back to rule defaults so misconfigured CI still gives signal.
+A malformed or unreadable policy file is a **hard error**: Shingan logs it to stderr and exits non-zero (config error) *before* running any analysis, so a typo'd `.shingan.yaml` can't silently produce misleading results. (Earlier builds downgraded this to a warning and fell back to rule defaults; it was made fail-fast so a broken policy never yields false confidence in CI.)
 
 ## Roadmap (Phase 0.5–0.6)
 

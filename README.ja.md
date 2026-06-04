@@ -4,7 +4,7 @@
 
 > **エージェントが金を溶かす前に、構造で止める。**
 
-![Go version](https://img.shields.io/badge/Go-1.23-00ADD8?logo=go) ![License](https://img.shields.io/badge/License-MIT-green) ![CI](https://github.com/hatyibei/shingan/actions/workflows/ci.yml/badge.svg) [![npm](https://img.shields.io/npm/v/shingan-lint.svg)](https://www.npmjs.com/package/shingan-lint)
+![Go version](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go) ![License](https://img.shields.io/badge/License-MIT-green) ![CI](https://github.com/hatyibei/shingan/actions/workflows/ci.yml/badge.svg) [![npm](https://img.shields.io/npm/v/shingan-lint.svg)](https://www.npmjs.com/package/shingan-lint)
 
 > **ステータス: Beta。** 開発活発、v1.0 は `baseline` / `ignore` / severity policy / PR-bot 完成後の 2026 年後半を目標。**production-critical な CI gating には現状非推奨** — 今は `continue-on-error: true` の informational 統合を推奨。
 

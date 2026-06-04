@@ -1,4 +1,6 @@
-FROM golang:1.25-alpine AS builder
+# --platform=$BUILDPLATFORM pins the builder to the native arch so the Go
+# toolchain runs un-emulated; we cross-compile to the target arch below.
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 
 WORKDIR /build
 
@@ -7,10 +9,16 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/shingan ./cmd/shingan \
- && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/shingan-api ./cmd/api \
- && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/shingan-runner ./cmd/runner \
- && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/shingan-web ./cmd/shingan-web
+# buildx injects TARGETOS / TARGETARCH for each requested --platform; CGO is off
+# so this cross-compiles natively (no QEMU on the Go build). For a plain
+# `docker build` (no buildx) TARGETARCH is empty and Go falls back to the host
+# arch, so single-arch local builds keep working.
+ARG TARGETOS=linux
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /out/shingan ./cmd/shingan \
+ && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /out/shingan-api ./cmd/api \
+ && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /out/shingan-runner ./cmd/runner \
+ && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /out/shingan-web ./cmd/shingan-web
 
 FROM gcr.io/distroless/static-debian12:nonroot
 

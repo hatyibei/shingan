@@ -4,7 +4,7 @@
 
 > **Your agent can spend money, leak data, and call tools before you notice. Shingan catches dangerous workflow structures before runtime.**
 
-![Go version](https://img.shields.io/badge/Go-1.23-00ADD8?logo=go) ![License](https://img.shields.io/badge/License-MIT-green) ![CI](https://github.com/hatyibei/shingan/actions/workflows/ci.yml/badge.svg) [![npm](https://img.shields.io/npm/v/shingan-lint.svg)](https://www.npmjs.com/package/shingan-lint)
+![Go version](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go) ![License](https://img.shields.io/badge/License-MIT-green) ![CI](https://github.com/hatyibei/shingan/actions/workflows/ci.yml/badge.svg) [![npm](https://img.shields.io/npm/v/shingan-lint.svg)](https://www.npmjs.com/package/shingan-lint)
 
 > **Status: Beta.** Shingan is under active development; v1.0 is targeted for late 2026 once `baseline` / `ignore` / severity-policy / PR-bot land. **Not yet recommended for production-critical CI gating** — informational use (`continue-on-error: true`) is the recommended integration mode today.
 
