@@ -403,3 +403,44 @@ func oaCycleFindings(findings []domain.Finding) []domain.Finding {
 	}
 	return out
 }
+
+// TestOpenAIAgentsParser_UnrelatedAgentCtorIgnored guards codex #45: a
+// `new foo.Agent(...)` whose `foo` is NOT an @openai/agents namespace import must
+// not be treated as an OpenAI Agent, even when `{ Agent }` is imported by name.
+func TestOpenAIAgentsParser_UnrelatedAgentCtorIgnored(t *testing.T) {
+	p := newOAParser(t)
+	dir := findOpenAIAgentsTestdata(t)
+	graph, err := p.ParseFile(filepath.Join(dir, "unrelated_agent_ctor.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	if _, ok := graph.Nodes["Triage"]; !ok {
+		t.Errorf("real `new Agent` node \"Triage\" missing (nodes=%v)", oaNodeIDs(graph))
+	}
+	if _, ok := graph.Nodes["db_worker"]; ok {
+		t.Errorf("unrelated `new db.Agent` must NOT be a node (nodes=%v)", oaNodeIDs(graph))
+	}
+}
+
+// TestOpenAIAgentsParser_NamespaceImport guards codex #45: `import * as oa from
+// "@openai/agents"` then `oa.Agent` / `oa.Agent.create` / `oa.handoff` must be
+// recognized as Agent constructors/helpers.
+func TestOpenAIAgentsParser_NamespaceImport(t *testing.T) {
+	p := newOAParser(t)
+	dir := findOpenAIAgentsTestdata(t)
+	graph, err := p.ParseFile(filepath.Join(dir, "namespace_import.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, id := range []string{"Specialist", "Triage"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Errorf("expected namespace-ctor node %q (nodes=%v)", id, oaNodeIDs(graph))
+		}
+	}
+	if !oaHasEdge(graph, "Triage", "Specialist") {
+		t.Errorf("expected edge Triage->Specialist (oa.handoff / handoffs), edges=%v", graph.Edges)
+	}
+	if graph.EntryNodeID != "Triage" {
+		t.Errorf("EntryNodeID = %q, want Triage", graph.EntryNodeID)
+	}
+}

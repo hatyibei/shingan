@@ -125,6 +125,7 @@ function posOf(sourceFile, node, filePath) {
 function collectAgentBindings(sourceFile) {
   const agent = new Set(); // local names that mean `Agent`
   const handoffFn = new Set(); // local names that mean `handoff`
+  const namespace = new Set(); // local names of `import * as X from "@openai/agents"`
   for (const stmt of sourceFile.statements) {
     if (!ts.isImportDeclaration(stmt)) continue;
     const spec = stmt.moduleSpecifier;
@@ -132,8 +133,14 @@ function collectAgentBindings(sourceFile) {
     const mod = spec.text;
     if (mod !== "@openai/agents" && !mod.startsWith("@openai/agents/")) continue;
     const clause = stmt.importClause;
-    if (!clause || !clause.namedBindings || !ts.isNamedImports(clause.namedBindings))
+    if (!clause || !clause.namedBindings) continue;
+    // `import * as oa from "@openai/agents"` → matched later only as oa.Agent /
+    // oa.handoff (a namespace-qualified member), never a bare `foo.Agent`.
+    if (ts.isNamespaceImport(clause.namedBindings)) {
+      namespace.add(clause.namedBindings.name.text);
       continue;
+    }
+    if (!ts.isNamedImports(clause.namedBindings)) continue;
     for (const el of clause.namedBindings.elements) {
       const orig = el.propertyName ? el.propertyName.text : el.name.text;
       const local = el.name.text;
@@ -141,7 +148,7 @@ function collectAgentBindings(sourceFile) {
       else if (orig === "handoff") handoffFn.add(local);
     }
   }
-  return { agent, handoffFn };
+  return { agent, handoffFn, namespace };
 }
 
 // Resolve the static `name` string property of an Agent config object literal
@@ -168,27 +175,23 @@ function nameFromConfigObject(configObj) {
 // `isAgent` decides whether the callee/ctor names match an `@openai/agents`
 // Agent binding (alias-aware). Both forms are recognised; the canonical triage
 // example uses Agent.create specifically.
-function agentConfigObject(expr, isAgentName) {
+// `isAgentCtor(node)` decides whether an AST node is an `@openai/agents` Agent
+// constructor/receiver: a bare named-import identifier, or a namespace-qualified
+// `oa.Agent`. A plain `foo.Agent` (foo not an @openai/agents namespace import)
+// must NOT match — that is some unrelated library's Agent (codex review #45).
+function agentConfigObject(expr, isAgentCtor) {
   if (!expr) return null;
-  // new Agent({...}) / new ns.Agent({...})
+  // new Agent({...}) / new oa.Agent({...})
   if (ts.isNewExpression(expr)) {
-    const c = expr.expression;
-    let nm = "";
-    if (ts.isIdentifier(c)) nm = c.text;
-    else if (ts.isPropertyAccessExpression(c)) nm = c.name.text;
-    if (!isAgentName(nm)) return null;
+    if (!isAgentCtor(expr.expression)) return null;
     const arg0 = expr.arguments && expr.arguments[0];
     return arg0 && ts.isObjectLiteralExpression(arg0) ? arg0 : null;
   }
-  // Agent.create({...}) — CallExpression whose callee is `<AgentBinding>.create`
+  // Agent.create({...}) / oa.Agent.create({...}) — callee is `<AgentCtor>.create`
   if (ts.isCallExpression(expr) && ts.isPropertyAccessExpression(expr.expression)) {
     const pae = expr.expression;
     if (pae.name.text !== "create") return null;
-    const recv = pae.expression;
-    let nm = "";
-    if (ts.isIdentifier(recv)) nm = recv.text;
-    else if (ts.isPropertyAccessExpression(recv)) nm = recv.name.text;
-    if (!isAgentName(nm)) return null;
+    if (!isAgentCtor(pae.expression)) return null;
     const arg0 = expr.arguments && expr.arguments[0];
     return arg0 && ts.isObjectLiteralExpression(arg0) ? arg0 : null;
   }
@@ -250,12 +253,29 @@ function extract(content, filePath) {
   // imports (alias-aware). No such import -> empty sets -> nothing matches ->
   // empty graph.
   const bindings = collectAgentBindings(sourceFile);
-  const isAgentName = (nm) => bindings.agent.has(nm);
-  const isHandoffName = (nm) => bindings.handoffFn.has(nm);
+  // An Agent constructor/receiver is a bare named-import identifier (`Agent`) OR
+  // a member of an @openai/agents namespace import (`oa.Agent`). A `foo.Agent`
+  // where foo is not such a namespace must NOT match (codex #45).
+  const isAgentCtor = (node) => {
+    if (ts.isIdentifier(node)) return bindings.agent.has(node.text);
+    if (ts.isPropertyAccessExpression(node))
+      return node.name.text === "Agent" &&
+        ts.isIdentifier(node.expression) && bindings.namespace.has(node.expression.text);
+    return false;
+  };
+  // `handoff(x)` callee: bare named import, or `oa.handoff(x)` namespace member.
+  const isHandoffCallee = (node) => {
+    if (ts.isIdentifier(node)) return bindings.handoffFn.has(node.text);
+    if (ts.isPropertyAccessExpression(node))
+      return node.name.text === "handoff" &&
+        ts.isIdentifier(node.expression) && bindings.namespace.has(node.expression.text);
+    return false;
+  };
 
   // No @openai/agents Agent binding at all → not an Agents file → empty graph.
-  // (handoff alone, without Agent, cannot declare a node.)
-  if (bindings.agent.size === 0) {
+  // (handoff alone, without Agent, cannot declare a node.) A namespace import
+  // also qualifies (oa.Agent), so consider both.
+  if (bindings.agent.size === 0 && bindings.namespace.size === 0) {
     return {
       nodes: [],
       edges: [],
@@ -280,7 +300,7 @@ function extract(content, filePath) {
       ts.isIdentifier(node.name) &&
       node.initializer
     ) {
-      const cfg = agentConfigObject(node.initializer, isAgentName);
+      const cfg = agentConfigObject(node.initializer, isAgentCtor);
       if (cfg) {
         const varName = node.name.text;
         const declName = nameFromConfigObject(cfg);
@@ -318,14 +338,12 @@ function extract(content, filePath) {
       const id = nodeIdByVar.get(el.text);
       return id || null; // dest-must-be-declared: unknown ident -> omit
     }
-    // handoff(agentVar) / handoff(agentVar, {...}) — unwrap to the inner agent.
-    if (ts.isCallExpression(el) && ts.isIdentifier(el.expression)) {
-      if (isHandoffName(el.expression.text)) {
-        const inner = el.arguments && el.arguments[0];
-        if (inner && ts.isIdentifier(inner)) {
-          const id = nodeIdByVar.get(inner.text);
-          return id || null;
-        }
+    // handoff(agentVar) / oa.handoff(agentVar, {...}) — unwrap to the inner agent.
+    if (ts.isCallExpression(el) && isHandoffCallee(el.expression)) {
+      const inner = el.arguments && el.arguments[0];
+      if (inner && ts.isIdentifier(inner)) {
+        const id = nodeIdByVar.get(inner.text);
+        return id || null;
       }
     }
     return null;
