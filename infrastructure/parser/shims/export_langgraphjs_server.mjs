@@ -171,6 +171,7 @@ class GraphBuilder {
     this.entry = "";
     this.compiled = false;
     this.handlers = new Map(); // node id -> handler AST node (for Command goto)
+    this.nodeEnds = new Map(); // node id -> ends:[...] static-routing dest list
   }
 
   ensureNode(id, name, type, pos) {
@@ -365,6 +366,12 @@ function extract(content, filePath) {
   // passed by reference (addConditionalEdges("a", shouldContinue, map)) can be
   // resolved for END-exit detection.
   const fnDecls = new Map();
+  // Method-name collision tracking: a name defined by >=2 class methods makes a
+  // bare `this.method` reference ambiguous (fnDecls keeps only the first body),
+  // so resolveHandlerFn refuses to resolve it rather than graft the wrong
+  // class's Command gotos onto another graph (codex review #36).
+  const methodNameCount = new Map();
+  const ambiguousMethods = new Set();
   // Map a variable name -> its initializer expression node, so a handler like
   // `const toolNode = new ToolNode(tools)` can be resolved for node-type
   // classification even when it's passed to addNode by reference.
@@ -381,6 +388,23 @@ function extract(content, filePath) {
   const collectFns = (node) => {
     if (ts.isFunctionDeclaration(node) && node.name) {
       fnDecls.set(node.name.text, node);
+    }
+    // Class method declarations (`approveToolCall(state) { ... }`). A handler
+    // passed as `this.approveToolCall.bind(this)` resolves through fnDecls by
+    // the bare method name (resolveHandlerFn unwraps the .bind + this. access).
+    // A MethodDeclaration has a `.body`, so collectCommandGotos / classifyFnBody
+    // work on it unchanged. Don't clobber a same-named top-level function — a
+    // free `function foo` is a more direct handler target than a class method.
+    if (ts.isMethodDeclaration(node) && node.name && ts.isIdentifier(node.name)) {
+      const mn = node.name.text;
+      const seen = (methodNameCount.get(mn) || 0) + 1;
+      methodNameCount.set(mn, seen);
+      if (seen >= 2) ambiguousMethods.add(mn); // same method name in >=2 classes
+      // Don't clobber a same-named top-level function — a free `function foo` is
+      // a more direct handler target than a class method.
+      if (!fnDecls.has(mn)) {
+        fnDecls.set(mn, node);
+      }
     }
     if (ts.isVariableDeclaration(node) && node.name && ts.isIdentifier(node.name) && node.initializer) {
       if (
@@ -617,9 +641,36 @@ function extract(content, filePath) {
   // scanned for `new Command({goto: ...})`. Identifier handlers resolve through
   // fnDecls; inline arrows/functions are scanned directly. Returns the function
   // node (with a `.body`) or null when unresolvable (imported handler, etc.).
+  //
+  // Also unwraps the common class-method handler shapes the StateGraph builder
+  // accepts by reference:
+  //   * `fn.bind(this)`           -> resolve the pre-`.bind` receiver
+  //   * `this.method` (PropertyAccess on `this`) -> fnDecls.get("method"),
+  //     which now holds the class MethodDeclaration body (see collectFns).
+  //   * a bare `method` identifier -> fnDecls (function OR method).
+  // A `.bind(this)` wrapping a `this.method` (the `this.approveToolCall.bind(this)`
+  // wild shape) unwraps to the method body so its Command gotos are harvested.
   function resolveHandlerFn(arg, seen) {
     if (!arg) return null;
     if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) return arg;
+    // `<expr>.bind(this)` — drop the `.bind(...)` and recurse on `<expr>`.
+    if (
+      ts.isCallExpression(arg) &&
+      ts.isPropertyAccessExpression(arg.expression) &&
+      arg.expression.name.text === "bind"
+    ) {
+      return resolveHandlerFn(arg.expression.expression, seen);
+    }
+    // `this.method` (or `obj.method`) — resolve the method name via fnDecls,
+    // which collectFns populates with class MethodDeclaration bodies.
+    if (ts.isPropertyAccessExpression(arg)) {
+      // Multiple classes defining a same-named method → `this.method` is
+      // ambiguous; omit rather than resolve to an arbitrary class's body.
+      if (ambiguousMethods.has(arg.name.text)) return null;
+      const fn = fnDecls.get(arg.name.text);
+      if (fn) return fn;
+      return null;
+    }
     if (ts.isIdentifier(arg)) {
       const nm = arg.text;
       seen = seen || new Set();
@@ -757,6 +808,25 @@ function extract(content, filePath) {
               // Stash the handler AST node so a post-pass can scan its body for
               // `new Command({goto: ...})` dynamic routing (gap 2).
               if (args[1]) b.handlers.set(id, args[1]);
+              // Stash the addNode options `{ ends: [...] }` static-routing list.
+              // The newer StateGraph API declares a node's possible Command-goto
+              // destinations up front via the 3rd-arg `ends` array, so a node
+              // whose handler is an opaque/imported reference still gets its
+              // outgoing edges. Edges are emitted in the post-pass (after every
+              // node is registered) so the known-node gate sees all nodes.
+              const opts = args[2];
+              if (opts && ts.isObjectLiteralExpression(opts)) {
+                for (const prop of opts.properties) {
+                  if (!ts.isPropertyAssignment(prop)) continue;
+                  let key = "";
+                  if (ts.isIdentifier(prop.name)) key = prop.name.text;
+                  else if (ts.isStringLiteralLike(prop.name)) key = prop.name.text;
+                  if (key !== "ends") continue;
+                  if (ts.isArrayLiteralExpression(prop.initializer)) {
+                    b.nodeEnds.set(id, prop.initializer);
+                  }
+                }
+              }
             }
           } else if (phase === "edges" && method === "addEdge") {
             // addEdge(from, to). from/to may be sentinel or string, or an
@@ -917,6 +987,31 @@ function extract(content, filePath) {
   // Python `_augment_runtime_graph_with_command_goto` per-payload augmentation.
   {
     const existing = new Set(best.edges.map((e) => `${e.from} ${e.to}`));
+    // `addNode(name, handler, { ends: [...] })` static-routing post-pass. The
+    // `ends` array names a node's possible Command-goto destinations
+    // declaratively (newer StateGraph API). We materialise an over-approximated
+    // outgoing edge to each declared destination, treating END/START sentinels
+    // like a Command goto (END -> has_exit_branch, START -> skip). Runs before
+    // the Command-goto loop so its `existing` set dedups edges both halves name
+    // (the wild `ends:["tools","agent"]` mirrors the handler's Command gotos).
+    for (const [nodeIdStr, endsArr] of best.nodeEnds) {
+      for (const el of endsArr.elements) {
+        const sent = sentinelOf(el);
+        const dest = sent || stringOf(el);
+        if (!dest) continue;
+        if (dest === LG_END) {
+          best.markExit(nodeIdStr);
+          continue;
+        }
+        if (dest === LG_START) continue;
+        const destId = nodeId(dest);
+        if (!best.nodes.has(destId)) continue; // gate: known node only
+        const key = `${nodeIdStr} ${destId}`;
+        if (existing.has(key)) continue;
+        best.edges.push({ from: nodeIdStr, to: destId, condition: "ends" });
+        existing.add(key);
+      }
+    }
     for (const [nodeIdStr, handlerArg] of best.handlers) {
       const fn = resolveHandlerFn(handlerArg);
       if (!fn) continue;

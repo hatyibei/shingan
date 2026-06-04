@@ -310,9 +310,11 @@ def _consumed_event(func) -> Optional[str]:
 
 def _consumed_events(func) -> List[str]:
     """Return the list of event leaf names a step consumes (union params fan
-    out). Skips ``self`` and the ``Context`` param. The consumed event is the
-    first non-self, non-Context positional param that carries a resolvable
-    annotation.
+    out). Skips ``self`` and the ``Context`` param (recognised by the
+    conventional name ``ctx``/``context`` FIRST — so a project-local alias such
+    as ``ctx: AnyContext`` is skipped — with the literal ``Context`` annotation
+    leaf as a fallback). The consumed event is the first non-self, non-Context
+    positional param that carries a resolvable annotation.
     """
     args = func.args
     # Include kwonlyargs: a step may declare its event keyword-only
@@ -322,10 +324,20 @@ def _consumed_events(func) -> List[str]:
         if arg.arg == "self":
             continue
         ann = arg.annotation
-        # Skip the Context param (by annotation leaf or by conventional name).
-        if ann is not None and _canon(_leaf_name(ann)) in _CONTEXT_TYPE_NAMES:
+        # Skip the Context param. Name FIRST, regardless of annotation: steps
+        # are written `def step(self, ctx: <T>, ev: SomeEvent)` and the context
+        # is conventionally named ``ctx``/``context``. Its annotation is often a
+        # project-local alias (`ctx: AnyContext` where `AnyContext = Context`)
+        # rather than the literal ``Context``; relying on the annotation leaf
+        # alone mis-reads such a ctx param as the consumed event (wild dogfood:
+        # zylon-ai/private-gpt → 0 edges, entry_ambiguous). The conventional
+        # name is the reliable signal — event params are `ev`/`event`, never
+        # `ctx`/`context`.
+        if arg.arg in _CONTEXT_PARAM_NAMES:
             continue
-        if ann is None and arg.arg in _CONTEXT_PARAM_NAMES:
+        # Annotation-leaf fallback: an unconventionally named context param
+        # still annotated with the literal ``Context`` (or an aliased import).
+        if ann is not None and _canon(_leaf_name(ann)) in _CONTEXT_TYPE_NAMES:
             continue
         if ann is None:
             # Unannotated non-context param: no resolvable event type, keep
@@ -351,8 +363,33 @@ class _LlamaIndexASTVisitor:
         self._source_path = source_path
         # Ordered list of (step_name, FunctionDef) for the chosen workflow.
         self._steps: List[Tuple[str, Any]] = []
+        # User-defined subclasses of StartEvent / StopEvent. LlamaIndex code
+        # frequently defines a concrete entry/exit event by subclassing the
+        # sentinel (`class ImageInputEvent(StartEvent)` / `...(StopEvent)`) and
+        # annotating steps with the subclass, not the bare sentinel (wild
+        # dogfood: zylon-ai/private-gpt). Treat such subclass leaf names as the
+        # sentinel they extend so entry + has_exit_branch still resolve.
+        # Direct-subclass-only, matching the existing direct-Workflow-subclass
+        # contract (docstring "Only DIRECT Workflow subclasses are detected").
+        self._start_subclasses: Set[str] = set()
+        self._stop_subclasses: Set[str] = set()
 
     def collect(self, tree: _ast.Module) -> None:
+        # Gather direct StartEvent/StopEvent subclasses across the module BEFORE
+        # choosing the workflow, so the produce/consume scan in build() can map
+        # an annotation like `-> ImageProcessingResultEvent` back to its
+        # StopEvent base. (Event classes are typically module-level siblings of
+        # the workflow class, not nested in it.)
+        for node in _ast.walk(tree):
+            if not isinstance(node, _ast.ClassDef):
+                continue
+            for base in node.bases:
+                leaf = _canon(_base_name(base))
+                if leaf in _START_EVENT_NAMES:
+                    self._start_subclasses.add(node.name)
+                elif leaf in _STOP_EVENT_NAMES:
+                    self._stop_subclasses.add(node.name)
+
         # Find the first top-level (or nested) Workflow subclass with @step
         # methods. Scope steps to ONE class so unrelated workflows sharing event
         # names don't cross-link.
@@ -382,14 +419,21 @@ class _LlamaIndexASTVisitor:
         exit_nodes: Set[str] = set()
         start_consumers: List[str] = []
 
+        # Sentinel sets widened by user-defined direct subclasses: a step
+        # annotated with `ImageInputEvent(StartEvent)` consumes a StartEvent, and
+        # one returning `ResultEvent(StopEvent)` produces a StopEvent. The
+        # literal sentinels are always included.
+        start_names = _START_EVENT_NAMES | self._start_subclasses
+        stop_names = _STOP_EVENT_NAMES | self._stop_subclasses
+
         for name, func in self._steps:
             # Produced events (return annotation, possibly a union).
             for ev in _annotation_event_names(func.returns):
                 ev = _canon(ev)  # resolve aliased StartEvent/StopEvent
-                if ev in _STOP_EVENT_NAMES:
+                if ev in stop_names:
                     exit_nodes.add(name)
                     continue
-                if ev in _START_EVENT_NAMES:
+                if ev in start_names:
                     # A step that *returns* StartEvent is unusual; StartEvent is
                     # the entry signal, not a routable inter-step event. Ignore.
                     continue
@@ -402,11 +446,11 @@ class _LlamaIndexASTVisitor:
             # Consumed event(s) (param annotation, possibly a union).
             for ev in _consumed_events(func):
                 ev = _canon(ev)  # resolve aliased StartEvent/StopEvent
-                if ev in _START_EVENT_NAMES:
+                if ev in start_names:
                     if name not in start_consumers:
                         start_consumers.append(name)
                     continue
-                if ev in _STOP_EVENT_NAMES:
+                if ev in stop_names:
                     # Consuming StopEvent is not a real pattern; ignore.
                     continue
                 if ev in _BASE_EVENT_NAMES:

@@ -246,6 +246,114 @@ func TestMastraParser_LoopWithExit(t *testing.T) {
 	}
 }
 
+// TestMastraParser_LoopThenMapExit is the regression for the .dountil(...).map(...)
+// bounded-loop false-positive (wild: hashintel/labs sgai-agent-planner
+// planning-workflow.ts). The loop's continuation is a pass-through `.map(...)`,
+// which emits no node, so NO structural exit edge can form — the loop step would
+// degenerate to a lone self-loop and cycle.go would false-Critical a bounded
+// loop. The shim flags has_exit_branch on the loop step (the pass-through exit
+// has no materialisable step id), so cycle_detection must downgrade
+// Critical -> Warning (NOT to zero).
+func TestMastraParser_LoopThenMapExit(t *testing.T) {
+	p := newMastraParser(t)
+	dir := findMastraTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "loop_map_exit.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+
+	// Layer 1 — parse structure. The pass-through exit emits no node, so the
+	// only structural node/edge are the loop step and its self-loop.
+	rev, ok := graph.Nodes["revise"]
+	if !ok {
+		t.Fatalf("expected node %q (nodes=%v)", "revise", mastraNodeIDs(graph))
+	}
+	if !mastraHasEdge(graph, "revise", "revise") {
+		t.Fatalf("expected self-loop revise->revise (edges=%v)", graph.Edges)
+	}
+	// The .map() exit has no resolvable step id, so there is NO structural exit
+	// edge — the downgrade must come from the has_exit_branch flag instead.
+	if !rev.HasExitBranch {
+		t.Fatalf("loop step revise must have HasExitBranch (the .map() exit has no " +
+			"materialisable step id, so the structural-edge route is impossible)")
+	}
+
+	// Layer 2 — the acceptance criterion: bounded cycle => Warning, not Critical,
+	// and NOT suppressed to zero.
+	findings := rules.NewCycleDetector().Analyze(graph)
+	var cycleFindings []domain.Finding
+	for _, f := range findings {
+		if f.RuleName == "cycle_detection" {
+			cycleFindings = append(cycleFindings, f)
+		}
+	}
+	if len(cycleFindings) == 0 {
+		t.Fatalf("expected a cycle_detection finding for the bounded loop, got none")
+	}
+	for _, f := range cycleFindings {
+		if f.Severity == domain.Critical {
+			t.Errorf("cycle_detection reported Critical for the .dountil(...).map(...) "+
+				"bounded loop; want Warning (has_exit_branch must downgrade): %+v", f)
+		}
+		if f.Severity != domain.Warning {
+			t.Errorf("cycle_detection severity = %v, want Warning: %+v", f.Severity, f)
+		}
+	}
+}
+
+// TestMastraParser_LoopTerminalStaysCritical is the discriminating counterpart
+// to TestMastraParser_LoopThenMapExit: it locks the NARROWNESS of the
+// .dountil(...).map(...) fix. A genuinely chain-TERMINAL loop
+// (`.dountil(poll, cond).commit()` — no continuation of ANY kind) must NOT be
+// given a synthetic exit: has_exit_branch stays false and cycle_detection keeps
+// Critical. Without this test, a later "simplification" that flags the loop step
+// directly in the .dountil branch would silently mask a real unbounded loop and
+// nothing would catch it.
+func TestMastraParser_LoopTerminalStaysCritical(t *testing.T) {
+	p := newMastraParser(t)
+	dir := findMastraTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "loop_terminal.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+
+	poll, ok := graph.Nodes["poll"]
+	if !ok {
+		t.Fatalf("expected node %q (nodes=%v)", "poll", mastraNodeIDs(graph))
+	}
+	if !mastraHasEdge(graph, "poll", "poll") {
+		t.Fatalf("expected self-loop poll->poll (edges=%v)", graph.Edges)
+	}
+	// No continuation follows the loop — we invent NO exit (neither edge nor flag).
+	if poll.HasExitBranch {
+		t.Fatalf("terminal loop step poll must NOT have HasExitBranch — there is no " +
+			"continuation, so no exit may be synthesised")
+	}
+
+	// The lone exit-less self-loop must stay Critical.
+	findings := rules.NewCycleDetector().Analyze(graph)
+	var cycleFindings []domain.Finding
+	for _, f := range findings {
+		if f.RuleName == "cycle_detection" {
+			cycleFindings = append(cycleFindings, f)
+		}
+	}
+	if len(cycleFindings) == 0 {
+		t.Fatalf("expected a cycle_detection finding for the terminal loop, got none")
+	}
+	sawCritical := false
+	for _, f := range cycleFindings {
+		if f.Severity == domain.Critical {
+			sawCritical = true
+		}
+	}
+	if !sawCritical {
+		t.Errorf("terminal exit-less loop must stay Critical; got %+v", cycleFindings)
+	}
+}
+
 // TestMastraParser_NonMastraFile locks in the robustness contract: a .ts file
 // with no createWorkflow usage (or a syntax error) yields an empty graph, never
 // an error / worker crash. The worker must survive and parse a valid file next.
