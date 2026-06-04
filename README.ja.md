@@ -264,6 +264,12 @@ go test -tags=demo -v -run TestDemo_ .
 | samurai | Alpha | 汎用 GUI ワークフローエディタ向け JSON スキーマアダプタ (拡張サンプル) |
 | n8n | **Beta** | n8n ワークフロー JSON エクスポート、純 Go (Python / Node bridge 不要) ([詳細](./docs/n8n.md)) |
 | crewai | **Beta** | CrewAI Crew/Agent/Task 定義を Python long-lived subprocess + JSON-RPC で抽出。`pip install "crewai>=0.50.0"` 必要 ([詳細](./docs/crewai.md)) |
+| langgraph-js | **Experimental (PoC, v0.9)** | LangGraph.js (`@langchain/langgraph`)、TypeScript/JS。TypeScript Compiler API を Node shim で実行。`node` 必要、初回 `typescript` を自動 install |
+| pydantic-graph | **Experimental (PoC, v0.9)** | pydantic-ai `pydantic_graph` (`BaseNode.run()` の戻り型)、AST 解析のみの Python shim |
+| llamaindex | **Experimental (PoC, v0.9)** | LlamaIndex Workflows (イベント駆動 `@step` メソッド)、AST 解析のみの Python shim |
+| autogen | **Experimental (PoC, v0.9)** | Microsoft AutoGen GraphFlow (`DiGraphBuilder`)、AST 解析のみの Python shim |
+| mastra | **Experimental (PoC, v0.9)** | Mastra (mastra.ai) TS ワークフロー (`createWorkflow().then()…`)、TypeScript Compiler API を Node shim で実行。`node` 必要 |
+| openai-agents | **Experimental (PoC, v0.9)** | OpenAI Agents SDK (`@openai/agents`) のマルチエージェント定義。`new Agent({ handoffs })` / `Agent.create(...)` の handoff を有向エッジとして抽出。TypeScript Compiler API を Node shim で実行。`node` 必要 |
 
 ### IDE / Editor 統合
 

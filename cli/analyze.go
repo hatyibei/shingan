@@ -107,7 +107,7 @@ needing your own input file.`,
 	}
 
 	cmd.Flags().StringVar(&flags.input, "input", "", "Path to the workflow file or directory (required)")
-	cmd.Flags().StringVar(&flags.format, "format", "json", "Input format: json, adk-go, samurai, langgraph, n8n, crewai, langgraph-js, pydantic-graph, llamaindex, autogen, or mastra")
+	cmd.Flags().StringVar(&flags.format, "format", "json", "Input format: json, adk-go, samurai, langgraph, n8n, crewai, langgraph-js, pydantic-graph, llamaindex, autogen, mastra, or openai-agents")
 	cmd.Flags().StringVar(&flags.output, "output", "json", "Output format: json, markdown, or sarif")
 	cmd.Flags().StringVar(&flags.outputFile, "output-file", "", "Output file path (default: stdout)")
 	cmd.Flags().Float64Var(&flags.minConfidence, "min-confidence", 0.0, "Exclude findings with confidence below this threshold (0.0–1.0)")
@@ -391,17 +391,17 @@ func loadAsMulti(path, inputFormat string, p application.WorkflowParser, allow [
 		exts = []string{".go"}
 	case "langgraph", "crewai", "pydantic-graph", "llamaindex", "autogen":
 		exts = []string{".py"}
-	case "langgraph-js", "mastra":
+	case "langgraph-js", "mastra", "openai-agents":
 		exts = langGraphJSExts
 	default:
-		return nil, fmt.Errorf("directory input is only supported for adk-go, langgraph, crewai, langgraph-js, pydantic-graph, llamaindex, autogen, and mastra formats; use a single JSON file for json/samurai/n8n formats")
+		return nil, fmt.Errorf("directory input is only supported for adk-go, langgraph, crewai, langgraph-js, pydantic-graph, llamaindex, autogen, mastra, and openai-agents formats; use a single JSON file for json/samurai/n8n formats")
 	}
 	return parseSourceDirectoryAsMulti(path, p, allow, exts...)
 }
 
 // langGraphJSExts are the file extensions walked for the Node-backed
-// TypeScript formats (`--format langgraph-js` and `--format mastra`) directory
-// input. The Node shim parses TypeScript and JavaScript (incl. JSX / TSX), so a
+// TypeScript formats (`--format langgraph-js`, `--format mastra`, and
+// `--format openai-agents`) directory input. The Node shim parses TypeScript and JavaScript (incl. JSX / TSX), so a
 // project mixing these must not be silently analyzed as empty
 // (codex review 2026-05-31).
 var langGraphJSExts = []string{".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"}
@@ -522,10 +522,10 @@ func loadGraphFiltered(path, inputFormat string, p application.WorkflowParser, a
 		return parseSourceDirectoryFiltered(path, p, allow, ".go")
 	case "langgraph", "crewai", "pydantic-graph", "llamaindex", "autogen":
 		return parseSourceDirectoryFiltered(path, p, allow, ".py")
-	case "langgraph-js", "mastra":
+	case "langgraph-js", "mastra", "openai-agents":
 		return parseSourceDirectoryFiltered(path, p, allow, langGraphJSExts...)
 	default:
-		return nil, fmt.Errorf("directory input is only supported for adk-go, langgraph, crewai, langgraph-js, pydantic-graph, llamaindex, autogen, and mastra formats; use a single JSON file for json/samurai/n8n formats")
+		return nil, fmt.Errorf("directory input is only supported for adk-go, langgraph, crewai, langgraph-js, pydantic-graph, llamaindex, autogen, mastra, and openai-agents formats; use a single JSON file for json/samurai/n8n formats")
 	}
 }
 
