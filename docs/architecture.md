@@ -21,7 +21,7 @@ Shingan adopts the Onion Architecture. Dependencies always flow from outer layer
 │    shingan-gen/  — cobra commands, Factory calls, DI wiring      │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │  infrastructure/                                           │  │
-│  │    parser/      — 11 framework parsers (JSON / ADK-Go /     │  │
+│  │    parser/      — 12 framework parsers (JSON / ADK-Go /     │  │
 │  │                   LangGraph / CrewAI / n8n / … )            │  │
 │  │    reporter/    — Markdown / JSON / SARIF reporter impls    │  │
 │  │    factory/     — AnalyzerFactory / ParserFactory impls     │  │
@@ -93,10 +93,11 @@ Interfaces are defined on the **consumer side** (application/), not the implemen
 
 ### infrastructure/
 
-- `parser/` — **11 framework parsers** mapping each framework onto the shared
+- `parser/` — **12 framework parsers** mapping each framework onto the shared
   `WorkflowGraph` IR: `json` (native schema), `adkgo` (Go AST via `go/parser`),
-  `samurai`, `langgraph`, `n8n`, `crewai`, plus the five added in v0.9
-  (`langgraph-js`, `mastra`, `pydantic-graph`, `llamaindex`, `autogen`). The
+  `samurai`, `langgraph`, `n8n`, `crewai`, plus the six added in v0.9
+  (`langgraph-js`, `mastra`, `pydantic-graph`, `llamaindex`, `autogen`,
+  `openai-agents`). The
   Python/TS-backed parsers run their shim in a long-lived subprocess over
   JSON-RPC; n8n is pure Go.
 - `reporter/markdown` / `reporter/json` / `reporter/sarif` — output formats
