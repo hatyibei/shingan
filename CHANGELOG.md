@@ -70,6 +70,24 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
   に読み戻さず、`shingan analyze` の出力は byte-for-byte 不変。Bayesian/ML 較正
   エンジンは ADR-018 に design knobs を記録のうえ意図的に defer。
   `domain.FeedbackRecord` / `infrastructure/feedback` / `docs/feedback.md`。
+- **`--format=openai-agents` parser (Experimental PoC, v0.9) for the OpenAI
+  Agents SDK (`@openai/agents`).** Extracts multi-agent handoff graphs from
+  TypeScript/JavaScript via the TypeScript Compiler API in a Node shim
+  (`export_openai_agents_server.mjs`), reusing the Mastra / LangGraph.js Node
+  worker + `typescript` bootstrap wholesale. One node per declared
+  `new Agent({...})` / `Agent.create({...})` (alias-aware on the
+  `@openai/agents` import), keyed by the agent's `name` (or binding name);
+  `handoffs: [b, handoff(c)]` becomes directed edges agentA→B, agentA→C, and
+  `tools: [child.asTool(...)]` agents-as-tools become edges too. Handoff targets
+  are resolved to declared agents only (dest-must-be-declared — cross-module /
+  computed targets are omitted, never fabricated), mirroring the LangGraph.js
+  gate. Entry = the zero-in-degree agent; multiple roots set `entry_ambiguous`.
+  Like AutoGen / Mastra there is **no exit sentinel**: `has_exit_branch` is never
+  set, so a pure handoff loop stays Critical and a loop with a structural
+  handoff out of the cycle downgrades to Warning via `cycleHasExit`. Validated on
+  wild `@openai/agents` repos (faithful 7-agent triage graph, agents-as-tools
+  orchestrator, no phantom edges). Wired into the factory and the CLI
+  directory-walk extension set. (ADR-015)
 - Plugin SDK ABI version 互換チェック (`domain.VersionedRule.PluginSDKVersion()`)。
   既存の `Manifest.MinShinganVersion` (リリース版) に加えて SDK signature 世代も
   検証する独立した防衛線。起動時に `plugin.VerifySDKCompatibility()` が登録済み

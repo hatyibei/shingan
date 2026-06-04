@@ -214,6 +214,28 @@ func TestParserFactory_Mastra(t *testing.T) {
 	}
 }
 
+func TestParserFactory_OpenAIAgents(t *testing.T) {
+	// Creating the openai-agents parser spawns a Node subprocess; skip when node
+	// is unavailable (CI without node). The shim is AST-only so node alone is
+	// sufficient — no @openai/agents install required.
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skipf("node not found in PATH: %v", err)
+	}
+	f := factory.NewParserFactory()
+	p, err := f.Create("openai-agents")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if op, ok := p.(*parser.OpenAIAgentsParser); ok {
+		t.Cleanup(func() { _ = op.Close() })
+	} else {
+		t.Errorf("expected *parser.OpenAIAgentsParser, got %T", p)
+	}
+	if got := p.SupportedFormat(); got != "openai-agents" {
+		t.Errorf("SupportedFormat() = %q, want \"openai-agents\"", got)
+	}
+}
+
 func TestParserFactory_UnknownFormat(t *testing.T) {
 	f := factory.NewParserFactory()
 	p, err := f.Create("yaml")
