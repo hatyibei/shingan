@@ -313,8 +313,9 @@ go test -tags=demo -v -run TestDemo_ .
 | llamaindex | **Experimental (PoC, v0.9)** | LlamaIndex Workflows (event-driven `@step` methods), AST-only Python shim |
 | autogen | **Experimental (PoC, v0.9)** | Microsoft AutoGen GraphFlow (`DiGraphBuilder`), AST-only Python shim |
 | mastra | **Experimental (PoC, v0.9)** | Mastra (mastra.ai) TS workflows (`createWorkflow().then()…`), TypeScript Compiler API in a Node shim. Needs `node` |
+| openai-agents | **Experimental (PoC, v0.9)** | OpenAI Agents SDK (`@openai/agents`) multi-agent definitions: `new Agent({ handoffs })` / `Agent.create(...)` handoffs (and `agent.asTool()`) extracted as directed edges, TypeScript Compiler API in a Node shim. Needs `node` |
 
-> The five v0.9 parsers are **PoC-level**: each handles idiomatic workflows of
+> The six v0.9 parsers are **PoC-level**: each handles idiomatic workflows of
 > its framework. Coverage limits (dynamic graphs, closure branch conditions,
 > split-builder chains, annotation-only return types) are documented per format.
 
