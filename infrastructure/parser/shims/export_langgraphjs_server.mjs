@@ -1143,7 +1143,45 @@ function extract(content, filePath) {
   let entry = best.entry;
   let entryAmbiguous = false;
 
-  // (0) Disjoint-root multi-graph detection. Only non-empty root sets count; a
+  // (0a) File-global multi-graph detection (coarse, robust across builder styles
+  // — codex #49). Count distinct `new StateGraph(...)` roots that are assigned to
+  // a variable (declaration OR reassignment) or `.compile()`d, across the WHOLE
+  // file (not just `best`): >=2 means the file declares multiple independent
+  // graphs with no single canonical entry. The per-`best` disjoint check (0b)
+  // below only attributes fluent-chain roots, so it misses identifier-receiver /
+  // reassigned / different-varname multi-graph files (`let wf = new StateGraph();
+  // ...; wf = new StateGraph();` or two `const wf1/wf2`), including ones mixing
+  // `addEdge(START,…)` and `setEntryPoint(…)`. Flagging entry_ambiguous makes
+  // reachability skip rather than false-flagging the other graphs' nodes; the
+  // 1-root START fan-out path is unaffected. Per-graph reachability/cycle coverage
+  // on multi-graph files is the deferred multi-graph-emission gap (#42).
+  {
+    const sgRoots = new Set();
+    const walkSG = (n) => {
+      if (ts.isVariableDeclaration(n) && n.initializer) {
+        const r = stateGraphRootOf(n.initializer);
+        if (r) sgRoots.add(r);
+      } else if (
+        ts.isBinaryExpression(n) &&
+        n.operatorToken.kind === ts.SyntaxKind.EqualsToken
+      ) {
+        const r = stateGraphRootOf(n.right);
+        if (r) sgRoots.add(r);
+      } else if (
+        ts.isCallExpression(n) &&
+        ts.isPropertyAccessExpression(n.expression) &&
+        n.expression.name.text === "compile"
+      ) {
+        const r = stateGraphRootOf(n.expression.expression);
+        if (r) sgRoots.add(r);
+      }
+      ts.forEachChild(n, walkSG);
+    };
+    walkSG(sourceFile);
+    if (sgRoots.size >= 2) entryAmbiguous = true;
+  }
+
+  // (0b) Disjoint-root multi-graph detection. Only non-empty root sets count; a
   // pair of roots with no shared node id means two genuinely separate graphs
   // (one root can never form a disjoint pair, so single-graph files and the
   // START-fan-out files below can't false-fire). Cheap pairwise check — the

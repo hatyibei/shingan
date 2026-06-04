@@ -714,3 +714,25 @@ func TestLangGraphJSParser_AmbiguousMethodHandler(t *testing.T) {
 		t.Errorf("ambiguous this.route must not graft the decoy class's goto: router->wrong_target (edges=%v)", graph.Edges)
 	}
 }
+
+// TestLangGraphJSParser_MultiStateGraphIdentifierStyle guards the codex #49 fix:
+// multiple StateGraph graphs via a reused variable name + identifier-style
+// addNode + mixed addEdge(START)/setEntryPoint are detected as multi-graph via
+// the file-global StateGraph-root count (the per-builder fluent disjoint check
+// misses this style), so no node is falsely unreachable across the graphs.
+func TestLangGraphJSParser_MultiStateGraphIdentifierStyle(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+	graph, err := p.ParseFile(filepath.Join(dir, "multi_state_graph_identifier.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	if !graph.EntryAmbiguous || graph.EntryNodeID != "" {
+		t.Errorf("expected EntryAmbiguous + empty entry for an identifier-style multi-StateGraph file, got ambiguous=%v entry=%q", graph.EntryAmbiguous, graph.EntryNodeID)
+	}
+	for _, f := range rules.NewReachabilityChecker().Analyze(graph) {
+		if f.RuleName == "unreachable_node" {
+			t.Errorf("identifier-style multi-StateGraph must not produce unreachable_node FPs: %+v", f)
+		}
+	}
+}
