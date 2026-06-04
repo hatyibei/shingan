@@ -60,6 +60,16 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ### Added
 
+- `shingan feedback` サブコマンド + capture-only feedback store (#3, ADR-018)。
+  finding に対する true/false positive ラベル (`tp`/`fp`) を、baseline と同じ
+  安定 fingerprint (`rule + node_id + source_file + message_digest`) をキーに
+  JSONL へ追記する。単発追記 (`--rule/--node/--message` または `--digest`) と
+  ファイル一括 ingest (`--ingest`、`analyze --output json` の finding 形状を
+  そのまま受け付け) の 2 モード。confidence は fingerprint に含まれないため
+  ラベルは confidence ドリフト後も有効。**capture-only**: 何も解析パイプライン
+  に読み戻さず、`shingan analyze` の出力は byte-for-byte 不変。Bayesian/ML 較正
+  エンジンは ADR-018 に design knobs を記録のうえ意図的に defer。
+  `domain.FeedbackRecord` / `infrastructure/feedback` / `docs/feedback.md`。
 - **`--format=openai-agents` parser (Experimental PoC, v0.9) for the OpenAI
   Agents SDK (`@openai/agents`).** Extracts multi-agent handoff graphs from
   TypeScript/JavaScript via the TypeScript Compiler API in a Node shim
