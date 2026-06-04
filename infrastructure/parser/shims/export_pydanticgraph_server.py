@@ -449,10 +449,19 @@ class _PydanticGraphASTVisitor:
         # merged graph then has exactly one zero-in-degree node (the subgraph's
         # entry), so reachability would mark the parent graph's nodes as
         # unreachable. Treat the entry as ambiguous and let reachability skip.
-        graphs_with_known = sum(
-            1 for g in self._graphs if any(n in known for n in g)
+        # Multi-graph ONLY when two declarations cover DISJOINT known-node sets
+        # (genuinely separate graph scopes, e.g. a parent graph + a subgraph).
+        # Two declarations of the SAME / overlapping node set — a graph exported
+        # twice, or via an alias — is one logical graph; counting declarations
+        # alone would mis-flag it and suppress real reachability findings (codex
+        # review #36). The graph count is tiny, so the pairwise check is cheap.
+        known_graphs = [frozenset(n for n in g if n in known) for g in self._graphs]
+        known_graphs = [g for g in known_graphs if g]
+        multi_graph = any(
+            not (known_graphs[i] & known_graphs[j])
+            for i in range(len(known_graphs))
+            for j in range(i + 1, len(known_graphs))
         )
-        multi_graph = graphs_with_known >= 2
 
         entry, ambiguous = self._infer_entry(node_names, real_indeg, multi_graph)
 

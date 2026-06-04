@@ -383,3 +383,29 @@ func TestPydanticGraphParser_IncompleteAnnotation(t *testing.T) {
 		}
 	}
 }
+
+// TestPydanticGraphParser_DuplicateGraphNotMultiGraph guards the codex #36
+// refinement: two Graph(nodes=[...]) declarations naming the SAME node set (a
+// graph exported twice / via an alias) form ONE logical graph, so the
+// multi-graph ambiguity must NOT trigger — reachability must still run with a
+// resolved entry, not be suppressed.
+func TestPydanticGraphParser_DuplicateGraphNotMultiGraph(t *testing.T) {
+	p := newPGParser(t)
+	dir := findPydanticGraphTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "duplicate_graph.py"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, id := range []string{"Start", "Work"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Errorf("expected node %q (nodes=%v)", id, pgNodeIDs(graph))
+		}
+	}
+	if graph.EntryAmbiguous {
+		t.Errorf("two same-node-set Graph decls must not be treated as multi-graph (ambiguous)")
+	}
+	if graph.EntryNodeID != "Start" {
+		t.Errorf("EntryNodeID = %q, want %q (reachability must run)", graph.EntryNodeID, "Start")
+	}
+}

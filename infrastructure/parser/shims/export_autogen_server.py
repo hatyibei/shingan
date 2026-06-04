@@ -250,19 +250,44 @@ class _AutoGenASTVisitor:
                         self._var_to_agent[tgt.id] = agent_name
 
     def _collect_loop_targets(self, node: _ast.AST) -> None:
-        """Record names bound as for-loop / comprehension control targets so a
-        bare reference to the iteration placeholder is not mistaken for a real
-        agent node (kills the phantom ``add_node(loop_var)`` node)."""
-        targets: List[_ast.expr] = []
+        """Record a for-loop / comprehension control variable as a phantom-node
+        placeholder ONLY when that variable is actually passed to ``add_node()``
+        inside this loop's body (``for agent in (...): builder.add_node(agent)``).
+        That is the pattern that would otherwise register a node literally named
+        after the loop variable. A loop variable that merely shares a name with a
+        real agent variable elsewhere in the module must NOT be suppressed —
+        keying on the loop body avoids that false negative (codex review #36)."""
         if isinstance(node, (_ast.For, _ast.AsyncFor)):
-            targets.append(node.target)
-        elif isinstance(node, (_ast.ListComp, _ast.SetComp, _ast.GeneratorExp, _ast.DictComp)):
-            for gen in node.generators:
-                targets.append(gen.target)
-        for tgt in targets:
-            for name in _ast.walk(tgt):
-                if isinstance(name, _ast.Name):
-                    self._loop_targets.add(name.id)
+            targets = [node.target]
+            body_nodes: List[_ast.AST] = list(node.body)
+        elif isinstance(node, (_ast.ListComp, _ast.SetComp, _ast.GeneratorExp)):
+            targets = [gen.target for gen in node.generators]
+            body_nodes = [node.elt]
+        elif isinstance(node, _ast.DictComp):
+            targets = [gen.target for gen in node.generators]
+            body_nodes = [node.key, node.value]
+        else:
+            return
+        names = {n.id for tgt in targets for n in _ast.walk(tgt) if isinstance(n, _ast.Name)}
+        for nm in names:
+            if self._body_adds_node(body_nodes, nm):
+                self._loop_targets.add(nm)
+
+    @staticmethod
+    def _body_adds_node(body_nodes: List[_ast.AST], var: str) -> bool:
+        """True when some ``add_node(var)`` (positional or node=/agent= kwarg,
+        var as a bare Name) appears anywhere in the given body nodes."""
+        for bn in body_nodes:
+            for sub in _ast.walk(bn):
+                if not (isinstance(sub, _ast.Call) and _attr_leaf(sub.func) in _ADD_NODE_NAMES):
+                    continue
+                candidates = list(sub.args[:1]) + [
+                    kw.value for kw in sub.keywords if kw.arg in ("node", "agent")
+                ]
+                for c in candidates:
+                    if isinstance(c, _ast.Name) and c.id == var:
+                        return True
+        return False
 
     # ---- Pass 2: builder call walk -----------------------------------------
     def collect_builder_calls(self, tree: _ast.Module) -> None:

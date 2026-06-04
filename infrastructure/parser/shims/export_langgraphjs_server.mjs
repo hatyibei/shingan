@@ -366,6 +366,12 @@ function extract(content, filePath) {
   // passed by reference (addConditionalEdges("a", shouldContinue, map)) can be
   // resolved for END-exit detection.
   const fnDecls = new Map();
+  // Method-name collision tracking: a name defined by >=2 class methods makes a
+  // bare `this.method` reference ambiguous (fnDecls keeps only the first body),
+  // so resolveHandlerFn refuses to resolve it rather than graft the wrong
+  // class's Command gotos onto another graph (codex review #36).
+  const methodNameCount = new Map();
+  const ambiguousMethods = new Set();
   // Map a variable name -> its initializer expression node, so a handler like
   // `const toolNode = new ToolNode(tools)` can be resolved for node-type
   // classification even when it's passed to addNode by reference.
@@ -389,13 +395,16 @@ function extract(content, filePath) {
     // A MethodDeclaration has a `.body`, so collectCommandGotos / classifyFnBody
     // work on it unchanged. Don't clobber a same-named top-level function — a
     // free `function foo` is a more direct handler target than a class method.
-    if (
-      ts.isMethodDeclaration(node) &&
-      node.name &&
-      ts.isIdentifier(node.name) &&
-      !fnDecls.has(node.name.text)
-    ) {
-      fnDecls.set(node.name.text, node);
+    if (ts.isMethodDeclaration(node) && node.name && ts.isIdentifier(node.name)) {
+      const mn = node.name.text;
+      const seen = (methodNameCount.get(mn) || 0) + 1;
+      methodNameCount.set(mn, seen);
+      if (seen >= 2) ambiguousMethods.add(mn); // same method name in >=2 classes
+      // Don't clobber a same-named top-level function — a free `function foo` is
+      // a more direct handler target than a class method.
+      if (!fnDecls.has(mn)) {
+        fnDecls.set(mn, node);
+      }
     }
     if (ts.isVariableDeclaration(node) && node.name && ts.isIdentifier(node.name) && node.initializer) {
       if (
@@ -655,6 +664,9 @@ function extract(content, filePath) {
     // `this.method` (or `obj.method`) — resolve the method name via fnDecls,
     // which collectFns populates with class MethodDeclaration bodies.
     if (ts.isPropertyAccessExpression(arg)) {
+      // Multiple classes defining a same-named method → `this.method` is
+      // ambiguous; omit rather than resolve to an arbitrary class's body.
+      if (ambiguousMethods.has(arg.name.text)) return null;
       const fn = fnDecls.get(arg.name.text);
       if (fn) return fn;
       return null;

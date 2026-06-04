@@ -547,3 +547,26 @@ func hasConditionalEdgeJS(g *domain.WorkflowGraph, from, to, cond string) bool {
 	}
 	return false
 }
+
+// TestLangGraphJSParser_AmbiguousMethodHandler guards the codex #36 refinement:
+// when two classes define a same-named method ("route"), a this.route.bind(this)
+// handler must NOT resolve to an arbitrary class's body — otherwise the decoy
+// class's Command goto is grafted onto this graph. The shim omits rather than
+// invents, so no wrong-class edge appears.
+func TestLangGraphJSParser_AmbiguousMethodHandler(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "dup_method_handlers.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, id := range []string{"router", "real_target", "wrong_target"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Fatalf("expected node %q (nodes=%v)", id, nodeIDsJS(graph))
+		}
+	}
+	if hasEdgeJS(graph, "router", "wrong_target") {
+		t.Errorf("ambiguous this.route must not graft the decoy class's goto: router->wrong_target (edges=%v)", graph.Edges)
+	}
+}

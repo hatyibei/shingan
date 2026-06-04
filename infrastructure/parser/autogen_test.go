@@ -365,11 +365,11 @@ func TestAutoGenParser_NetworkXNotAutoGen(t *testing.T) {
 }
 
 // TestAutoGenParser_LoopAddNode_NoPhantomNode locks the wild-dogfood fix
-// (hugocool/FateForger): the ``for agent in (n1, n2, ...): builder.add_node(agent)``
+// (hugocool/FateForger): the “for agent in (n1, n2, ...): builder.add_node(agent)“
 // idiom must NOT register a phantom node literally named after the loop
 // variable. The loop variable is an iteration placeholder, never bound to an
 // agent ctor, so it is dropped — previously it surfaced as a false
-// ``unreachable_node`` finding.
+// “unreachable_node“ finding.
 func TestAutoGenParser_LoopAddNode_NoPhantomNode(t *testing.T) {
 	p := newAutoGenParser(t)
 	dir := findAutoGenTestdata(t)
@@ -402,12 +402,12 @@ func TestAutoGenParser_LoopAddNode_NoPhantomNode(t *testing.T) {
 
 // TestAutoGenParser_ClassSelfAttr_Recovered locks the wild-dogfood fix
 // (Austinggg/CreAgentive): the canonical class-based idiom holds each agent on
-// an instance attribute (``self.user_proxy``) and registers it via
-// ``builder.add_node(self.user_proxy)``. The ``self.<attr>`` reference must
+// an instance attribute (“self.user_proxy“) and registers it via
+// “builder.add_node(self.user_proxy)“. The “self.<attr>“ reference must
 // resolve to the trailing attribute name instead of returning None —
 // previously every add_node/add_edge early-returned and the ENTIRE class-based
-// graph was dropped (false negative). Non-agent attrs (``self.model_client``,
-// ``self.graph_flow``) that are never graph arguments must NOT become nodes.
+// graph was dropped (false negative). Non-agent attrs (“self.model_client“,
+// “self.graph_flow“) that are never graph arguments must NOT become nodes.
 func TestAutoGenParser_ClassSelfAttr_Recovered(t *testing.T) {
 	p := newAutoGenParser(t)
 	dir := findAutoGenTestdata(t)
@@ -472,5 +472,25 @@ func TestAutoGenParser_KeywordEdges(t *testing.T) {
 	}
 	if graph.EntryNodeID != "planner" {
 		t.Errorf("EntryNodeID = %q, want planner (kwarg set_entry_point)", graph.EntryNodeID)
+	}
+}
+
+// TestAutoGenParser_LoopVarShadowKeepsRealNode guards the codex #36 refinement:
+// a for-loop control variable ("for agent in ...:") that is never add_node'd in
+// that loop must NOT suppress a real builder node that happens to share the name
+// ("agent" added via the bare-name fallback elsewhere). Module-wide loop-target
+// suppression would wrongly drop the real node.
+func TestAutoGenParser_LoopVarShadowKeepsRealNode(t *testing.T) {
+	p := newAutoGenParser(t)
+	dir := findAutoGenTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "loop_var_shadow.py"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, id := range []string{"agent", "helper"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Errorf("expected node %q to survive (nodes=%v)", id, agNodeIDs(graph))
+		}
 	}
 }
