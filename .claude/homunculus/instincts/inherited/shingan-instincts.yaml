@@ -1,0 +1,428 @@
+# Instincts generated from https://github.com/hatyibei/shingan
+# Generated: 2026-06-04T11:40:33.790Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: shingan-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Commit Length
+
+## Action
+
+Write moderate-length commit messages (~68 characters)
+
+## Evidence
+
+- Average commit message length: 68 chars
+- Based on 3 commits
+
+---
+id: shingan-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Naming Files
+
+## Action
+
+Use snake_case naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: snake_case
+
+---
+id: shingan-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: shingan-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: shingan-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: shingan-workflow-feature-implementation-with-cli-and-infra
+trigger: "when doing feature implementation with cli and infra"
+confidence: 0.55
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Workflow Feature Implementation With Cli And Infra
+
+## Action
+
+Follow the feature-implementation-with-cli-and-infra workflow:
+1. Add or modify CLI command implementation and its tests
+2. Add or modify domain logic and its tests
+3. Add or modify infrastructure layer for persistence and its tests
+4. Update or add documentation (docs/ and ADRs)
+5. Update CHANGELOG.md
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~1x per month
+- Files: cli/*.go, cli/*_test.go, domain/*.go
+
+---
+id: shingan-workflow-bugfix-with-test
+trigger: "when doing bugfix with test"
+confidence: 0.55
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Workflow Bugfix With Test
+
+## Action
+
+Follow the bugfix-with-test workflow:
+1. Update CLI or infrastructure code to fix the bug
+2. Add or update relevant tests to cover the bug scenario
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~1x per month
+- Files: cli/*.go, cli/*_test.go, infrastructure/*/*.go
+
+---
+id: shingan-instinct-file-naming
+trigger: "When creating or renaming a file"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct File Naming
+
+## Action
+
+Use snake_case for file names
+
+## Evidence
+
+- Pattern in namingConventions.files: snake_case
+
+---
+id: shingan-instinct-function-naming
+trigger: "When defining a new function"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Function Naming
+
+## Action
+
+Use camelCase for function names
+
+## Evidence
+
+- Pattern in namingConventions.functions: camelCase
+
+---
+id: shingan-instinct-class-naming
+trigger: "When defining a new struct or class"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Class Naming
+
+## Action
+
+Use PascalCase for class/struct names
+
+## Evidence
+
+- Pattern in namingConventions.classes: PascalCase
+
+---
+id: shingan-instinct-constant-naming
+trigger: "When defining a constant"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Constant Naming
+
+## Action
+
+Use SCREAMING_SNAKE_CASE for constant names
+
+## Evidence
+
+- Pattern in namingConventions.constants: SCREAMING_SNAKE_CASE
+
+---
+id: shingan-instinct-import-style
+trigger: "When importing modules"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Import Style
+
+## Action
+
+Use relative imports
+
+## Evidence
+
+- Pattern in importStyle: relative
+
+---
+id: shingan-instinct-export-style
+trigger: "When exporting code elements"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Export Style
+
+## Action
+
+Use named exports
+
+## Evidence
+
+- Pattern in exportStyle: named
+
+---
+id: shingan-instinct-test-location
+trigger: "When adding or updating tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Test Location
+
+## Action
+
+Place test files in the same folder as the code, using *_test.go naming
+
+## Evidence
+
+- Pattern in folderStructure.testLocation: separate
+- Files like cli/*_test.go, domain/*_test.go, infrastructure/*/*_test.go
+
+---
+id: shingan-instinct-test-coverage-bugfix
+trigger: "When fixing a bug"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Test Coverage Bugfix
+
+## Action
+
+Add or update regression tests to cover the bug scenario
+
+## Evidence
+
+- Workflow: bugfix-with-test
+- Example commits: Add or update relevant tests to cover the bug scenario
+
+---
+id: shingan-instinct-test-coverage-feature
+trigger: "When implementing a new feature"
+confidence: 0.85
+domain: testing
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Test Coverage Feature
+
+## Action
+
+Add or modify tests for CLI, domain, and infrastructure layers
+
+## Evidence
+
+- Workflow: feature-implementation-with-cli-and-infra
+- Example commits: Add or modify CLI command implementation and its tests, domain logic and its tests, infrastructure layer and its tests
+
+---
+id: shingan-instinct-commit-prefix
+trigger: "When writing a commit message"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Commit Prefix
+
+## Action
+
+Prefix the message with feat or fix as appropriate
+
+## Evidence
+
+- Pattern in commits.prefixes: ["feat", "fix"]
+- Examples: feat(feedback): ..., fix(feedback): ...
+
+---
+id: shingan-instinct-commit-format
+trigger: "When writing a commit message"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Commit Format
+
+## Action
+
+Use the format: <type>(<scope>): <description> (optional references)
+
+## Evidence
+
+- Examples: feat(feedback): capture-only tp/fp feedback store (#3, ADR-018)
+- fix(feedback): reject incomplete fingerprints + invalid labels (codex #44)
+
+---
+id: shingan-instinct-commit-length
+trigger: "When writing a commit message"
+confidence: 0.7
+domain: git
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Commit Length
+
+## Action
+
+Keep the commit message concise (around 68 characters on average)
+
+## Evidence
+
+- Pattern in commits.averageLength: 68
+
+---
+id: shingan-instinct-feature-workflow
+trigger: "When adding a new feature with end-to-end support (CLI, domain, infra, docs, tests)"
+confidence: 0.95
+domain: workflow
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Feature Workflow
+
+## Action
+
+Follow the sequence: update CLI and tests, domain logic and tests, infrastructure and tests, documentation, then CHANGELOG.md
+
+## Evidence
+
+- Workflow: feature-implementation-with-cli-and-infra
+- Commit sequence and files involved
+
+---
+id: shingan-instinct-bugfix-workflow
+trigger: "When fixing a bug in CLI or infrastructure code"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Instinct Bugfix Workflow
+
+## Action
+
+Update code and add or update regression tests for the bug scenario
+
+## Evidence
+
+- Workflow: bugfix-with-test
+- Commit sequence and files involved
+
