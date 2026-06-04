@@ -70,6 +70,13 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
   `MessageTemplateID()` を提供できる optional API。orchestrator が該当ルールの
   finding に `Finding.MessageTemplateID` を stamp し、baseline digest が文言変更
   に影響されなくなる。
+- **Multi-arch container image published to GHCR.** `git push --tags` now also
+  builds and pushes `ghcr.io/hatyibei/shingan` (linux/amd64 + linux/arm64) in a
+  dedicated `docker` release job that runs after goreleaser, so a Docker
+  build/push failure can't roll back the already-published binaries or npm
+  package. The README's `docker pull ghcr.io/hatyibei/shingan` now resolves; the
+  Dockerfile cross-compiles per `TARGETARCH` (a plain `docker build` still works
+  for single-arch local use).
 
 ### Docs
 
@@ -96,6 +103,12 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
   `GlobalRule` tier interfaces, and Markdown/JSON/SARIF reporters. Genuine
   historical narrative (README roadmap, the v0.1-false-positives use-case note,
   ADR-003's as-decided design) is left intact. Closes #33.
+- **Operational-contract consistency sweep (external-review-driven).** Fixed
+  stale surface docs that contradicted the code: the README / README.ja Go
+  badge `1.23` → `1.25` (matches `go.mod` + CI), `SECURITY.md` supported
+  versions `0.1.x` → `0.9.x`, and `docs/severity-policy.md` corrected to state
+  that a malformed policy is a fail-fast hard error (exit non-zero before any
+  analysis) rather than a non-fatal fallback — matching `cli/analyze.go`.
 
 ### Security
 
