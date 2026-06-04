@@ -78,15 +78,29 @@ type ingestFinding struct {
 // fingerprint resolves the ingest item to a domain.FindingFingerprint, or an
 // error if neither identifier is present.
 func (it feedbackIngestItem) fingerprint() (domain.FindingFingerprint, error) {
-	if it.Fingerprint != nil {
-		return *it.Fingerprint, nil
-	}
-	if it.Finding != nil {
+	// Reject incomplete identities (codex #44): a record with no rule, or built
+	// from an empty message (which hashes to a fixed digest), can never match a
+	// real finding — so it would silently pollute the store. Mirror the
+	// single-append validation, which requires a rule and a message/digest.
+	switch {
+	case it.Fingerprint != nil:
+		fp := *it.Fingerprint
+		if fp.RuleName == "" || fp.MessageDigest == "" {
+			return domain.FindingFingerprint{},
+				fmt.Errorf("\"fingerprint\" needs a non-empty rule and message_digest")
+		}
+		return fp, nil
+	case it.Finding != nil:
+		if it.Finding.Rule == "" || it.Finding.Message == "" {
+			return domain.FindingFingerprint{},
+				fmt.Errorf("\"finding\" needs a non-empty rule and message")
+		}
 		return fingerprintFromFinding(
 			it.Finding.Rule, it.Finding.NodeID, it.Finding.SourceFile, it.Finding.Message), nil
+	default:
+		return domain.FindingFingerprint{},
+			fmt.Errorf("item has neither a \"fingerprint\" nor a \"finding\" object")
 	}
-	return domain.FindingFingerprint{},
-		fmt.Errorf("item has neither a \"fingerprint\" nor a \"finding\" object")
 }
 
 // fingerprintFromFinding maps the analyze-output fields of a finding to its

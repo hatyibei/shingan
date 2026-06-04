@@ -155,3 +155,20 @@ func TestLoad_MalformedLine(t *testing.T) {
 		t.Error("malformed line should error")
 	}
 }
+
+// TestLoad_RejectsInvalidLabel guards codex #44: a hand-edited store with an
+// unknown label must fail loudly with its line number, not flow through as data.
+func TestLoad_RejectsInvalidLabel(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "labels.jsonl")
+	content := `{"fingerprint":{"rule":"loop_guard","node_id":"a","message_digest":"d1"},"label":"fp","source":"cli","timestamp":"2026-06-04T00:00:00Z"}
+{"fingerprint":{"rule":"cycle_detection","node_id":"b","message_digest":"d2"},"label":"maybe","source":"cli","timestamp":"2026-06-04T00:00:00Z"}
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatalf("expected error for invalid label, got nil")
+	} else if !strings.Contains(err.Error(), "line 2") || !strings.Contains(err.Error(), "maybe") {
+		t.Errorf("error should name the line + bad label, got: %v", err)
+	}
+}

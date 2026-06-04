@@ -236,3 +236,32 @@ func TestFeedback_MissingStoreFlag(t *testing.T) {
 		t.Error("missing --store should be a non-zero exit")
 	}
 }
+
+// TestFeedback_IngestRejectsIncompleteIdentity guards codex #44: an ingest item
+// with no rule, or a finding with an empty message (whose digest matches nothing
+// real), must abort before any write rather than persist an unkeyed record.
+func TestFeedback_IngestRejectsIncompleteIdentity(t *testing.T) {
+	cases := []struct{ name, content string }{
+		{"finding-no-rule", `[{"finding": {"node_id": "a", "message": "x"}, "label": "fp"}]`},
+		{"finding-empty-message", `[{"finding": {"rule": "loop_guard", "node_id": "a", "message": ""}, "label": "fp"}]`},
+		{"fingerprint-no-rule", `[{"fingerprint": {"node_id": "n", "message_digest": "abc"}, "label": "fp"}]`},
+		{"fingerprint-no-digest", `[{"fingerprint": {"rule": "r", "node_id": "n"}, "label": "fp"}]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			store := filepath.Join(dir, "labels.jsonl")
+			ingest := filepath.Join(dir, "triage.json")
+			if err := os.WriteFile(ingest, []byte(tc.content), 0o644); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			flags := &feedbackFlags{store: store, ingest: ingest, now: fbTS, out: &bytes.Buffer{}, errOut: &bytes.Buffer{}}
+			if err := executeFeedback(flags); err == nil {
+				t.Fatalf("expected error for incomplete identity, got nil")
+			}
+			if _, err := os.Stat(store); !os.IsNotExist(err) {
+				t.Errorf("store must not be created when ingest aborts (stat err=%v)", err)
+			}
+		})
+	}
+}

@@ -102,6 +102,12 @@ func Load(path string) ([]domain.FeedbackRecord, error) {
 		if err := json.Unmarshal(raw, &rec); err != nil {
 			return nil, fmt.Errorf("parse feedback %q line %d: %w", path, line, err)
 		}
+		// Reject a corrupted/hand-edited label (codex #44): the contract is
+		// tp|fp, so an unknown label must fail loudly with its line rather than
+		// flow to consumers as if it were real feedback.
+		if !rec.Label.Valid() {
+			return nil, fmt.Errorf("feedback %q line %d: invalid label %q (want tp or fp)", path, line, rec.Label)
+		}
 		records = append(records, rec)
 	}
 	if err := scanner.Err(); err != nil {
