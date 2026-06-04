@@ -1734,6 +1734,76 @@ plugin/plugin.go             → github.com/hatyibei/shingan/domain
 
 ---
 
+# ADR-018: ML-based dynamic confidence — capture-only feedback store（学習層は defer）
+
+## ステータス
+Accepted (2026-06-04) — #3（ML-based dynamic confidence）への最初の一歩
+
+## コンテキスト
+
+Issue #3 は「true/false positive のラベルを蓄積し、将来 confidence を動的に
+較正する」構想だが、issue 自身が **現状は静的 confidence で十分** と述べている。
+学習層を今作るのは時期尚早で、根拠となるラベルデータも存在しない。一方、
+データは「安定した finding 識別子」に対して蓄積し始めないと、量が貯まったとき
+には過去のラベルが識別子ドリフトで無効化されてしまう。
+
+そこで本 ADR は **capture-only**（記録専用）の feedback store だけを実装し、
+Bayesian/ML の較正エンジンは **意図的に defer** する。本 increment は
+`shingan analyze` の挙動を **一切変えない**（`Finding.Confidence` /
+`application.ApplyPolicy` / `filterByConfidence` / reporter 出力に触れない）。
+
+## 決定
+
+1. **既存の `domain.FindingFingerprint` をそのままキーにする。**
+   `(rule + node_id + source_file + message_digest)`。Confidence はこの
+   fingerprint に **含まれない**（ADR-016）。これは偶然ではなく要件で、
+   confidence がドリフトしてもラベルが有効であり続ける — 将来の較正が必要と
+   する性質そのもの。新しい識別子は発明しない。
+
+2. **`FeedbackRecord = { Fingerprint, Label(tp|fp), Source(cli|sarif|api),
+   Timestamp }` を JSONL で永続化する。** 1 行 1 レコードで追記が安価、時間と
+   ともにデータが accrue する。Timestamp は注入可能（テスト決定性のため）。
+   I/O は `infrastructure/feedback`（baseline I/O をミラー）、CLI は
+   `shingan feedback`（ingest ファイル / 単発追記）。何も解析パイプラインに
+   読み戻さない。
+
+## 将来の Bayesian 較正層の設計ノブ（本 ADR では **実装しない**、記録のみ）
+
+データ量が学習層を正当化したときに失われないよう、orientation で確定した
+設計判断をここに記録する。**エンジンは本 PR では実装されていない。**
+
+- **学習粒度 = `rule × ConfidenceReason`。** confidence を調整する 4 つの
+  reason（`over_approximated_dynamic` / `parser_fallback` / `experimental_rule`
+  / `heuristic_pattern`）ごとに別バケットで学習する。`exact_static_match` は
+  **常に 1.0 のまま、学習対象外**（決定論的検出を一度のラベルで揺らさない）。
+- **事前強度 `k`（prior strength）。** 各バケットの事前分布（rule の静的
+  confidence を平均とする Beta 等）の擬似観測数。`k` が大きいほど少数の
+  ラベルでは動かない。
+- **バケットあたり最小観測数。** ある (rule, reason) バケットに最小観測数が
+  貯まるまでは **一切 confidence を調整しない**（静的値のまま）。
+- **CI 決定性のため、調整は保守的な事後下限（posterior lower bound）で
+  ゲートする。** 1 件の(特に fp)ラベルが rule の confidence を急落させない
+  よう、点推定ではなく信頼区間下限を使う。これにより CI の pass/fail が
+  ラベル 1 件で反転する事態を防ぐ。
+
+## 影響
+
+- **`shingan analyze` の挙動はゼロ変更**（`shingan demo` の before/after が
+  byte-for-byte 同一であることで検証）。feedback store は write/read のみ。
+- 新規追加: `domain.FeedbackRecord`（+ `FeedbackLabel` / `FeedbackSource`）、
+  `infrastructure/feedback`、`shingan feedback` サブコマンド、`docs/feedback.md`。
+- `domain.FindingFingerprint` の再利用により、legacy v1 fingerprint(full
+  message) の read-time マイグレーションを無償で継承する。
+- **既知の限界**: `analyze --output json` は `message` を出すが
+  `message_template_id` を出さない（出すと demo の byte-for-byte 不変が壊れる）。
+  そのため analyze JSON の finding からの fingerprint 復元は、通常ルールでは
+  正確だが `RuleWithMessageTemplate` 実装ルールでは digest がテンプレート ID で
+  なくメッセージのハッシュになり **一致しない**。該当 finding は明示的な
+  `fingerprint` オブジェクト（または `--digest`）で feedback する。
+  `docs/feedback.md` に明記。
+
+---
+
 # 変更履歴
 
 | 日付 | 変更内容 | 変更者 |
@@ -1747,3 +1817,4 @@ plugin/plugin.go             → github.com/hatyibei/shingan/domain
 | 2026-06-03 | ADR-003 補強。`domain.Node` の頻出 Config キー (`max_iterations`/`category`/`model`/`temperature`/`max_concurrency`) を typed field 化し、ルールは typed accessor 経由で参照するよう移行。domain 層が parser-private な Config string contract に依存しないという Onion 原則を強化 (Config map は後方互換のため残置)。 | hatyibei |
 | 2026-06-03 | ADR-016 追加。baseline fingerprint から message 全文を除外し `(rule, node_id, source_file, message_digest)` に変更。message のルール文言 typo 修正・数値変動・i18n で baseline が無効化される問題を解消。JSON schema v2 化 (v1 後方互換 load)、`RuleWithMessageTemplate` で安定 ID を提供可能に。 | hatyibei |
 | 2026-06-03 | ADR-017 追加。外部セキュリティレビュー (#31) が「application は domain のみに依存」というドキュメントとコード実態 (`application → yaml.v3` / `application → plugin → domain/rules・version・x/mod/semver`) の乖離を指摘。忠実なリファクタは公開 SDK (`plugin`) 面に波及するため、Option B（実依存グラフの明文化 + 限定例外の受容）を採用。コード変更なし。 | hatyibei |
+| 2026-06-04 | ADR-018 追加。#3 (ML-based dynamic confidence) の第一歩として **capture-only** な feedback store のみを実装し、Bayesian/ML 較正エンジンは意図的に defer。既存 `domain.FindingFingerprint` をキーに `FeedbackRecord{Fingerprint, Label(tp\|fp), Source, Timestamp}` を JSONL 永続化 (`infrastructure/feedback` + `shingan feedback`)。`shingan analyze` の挙動はゼロ変更。将来の学習層の design knobs（学習粒度 `rule × ConfidenceReason`、`exact_static_match` は学習対象外、prior strength `k`、バケット最小観測数、CI 決定性のため事後下限でゲート）を記録。 | hatyibei |

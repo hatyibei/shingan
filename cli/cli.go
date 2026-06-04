@@ -43,8 +43,8 @@ func (e *exitCodeError) Error() string { return fmt.Sprintf("exit code %d", e.co
 
 // NewRootCmd builds the root cobra command tree with every subcommand
 // shingan ships with (analyze, demo, list-rules, explain, rules,
-// version). External wrapper binaries call this when they need to add
-// their own subcommands before invoking Execute().
+// feedback, version). External wrapper binaries call this when they need
+// to add their own subcommands before invoking Execute().
 func NewRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "shingan",
@@ -90,6 +90,7 @@ Output: markdown, JSON, or SARIF (GitHub Code Scanning compatible).`,
 	cmd.AddCommand(newListRulesCmd())
 	cmd.AddCommand(newExplainCmd())
 	cmd.AddCommand(newRulesCmd())
+	cmd.AddCommand(newFeedbackCmd())
 	cmd.AddCommand(newVersionCmd())
 
 	return cmd
