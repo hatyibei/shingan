@@ -21,7 +21,7 @@ Shinganは Onion Architecture を採用する。依存は常に外側から内�
 │    shingan-gen/  — cobra コマンド、Factory 呼出、DI配線            │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │  infrastructure/                                           │  │
-│  │    parser/      — 11 フレームワークパーサー（JSON・ADK-Go・   │  │
+│  │    parser/      — 12 フレームワークパーサー（JSON・ADK-Go・   │  │
 │  │                   LangGraph・CrewAI・n8n・… ）              │  │
 │  │    reporter/    — Markdown・JSON・SARIF レポーター実装         │  │
 │  │    factory/     — AnalyzerFactory・ParserFactory 実装        │  │
@@ -91,11 +91,11 @@ interface は**利用側**（application/）に定義する。実装側（infras
 
 ### infrastructure/
 
-- `parser/` — **11 フレームワークパーサー**。各フレームワークを共通の
+- `parser/` — **12 フレームワークパーサー**。各フレームワークを共通の
   `WorkflowGraph` IR へマッピングする：`json`（独自スキーマ）、`adkgo`
   （`go/parser` による Go AST）、`samurai`、`langgraph`、`n8n`、`crewai`、
-  さらに v0.9 で追加した 5 つ（`langgraph-js`・`mastra`・`pydantic-graph`・
-  `llamaindex`・`autogen`）。Python/TS 系パーサーはシムを常駐サブプロセス上で
+  さらに v0.9 で追加した 6 つ（`langgraph-js`・`mastra`・`pydantic-graph`・
+  `llamaindex`・`autogen`・`openai-agents`）。Python/TS 系パーサーはシムを常駐サブプロセス上で
   JSON-RPC 経由で動かし、n8n は純 Go。
 - `reporter/markdown` / `reporter/json` / `reporter/sarif` — 出力形式実装
 - `factory/` — AnalyzerFactory・ParserFactory・ReporterFactory の具象実装

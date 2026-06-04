@@ -4,6 +4,8 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-06-04
+
 ### Changed
 
 - `domain.Node` に頻出設定の typed field を追加 (`MaxIterations`, `ToolCategory`,
