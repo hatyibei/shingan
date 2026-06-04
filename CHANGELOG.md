@@ -146,6 +146,38 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ### Fixed
 
+- **v0.9 framework parsers — 5 wild-dogfood false-positive / false-negative
+  fixes** (19 real OSS repos across all 5 new parsers; 0 crashes). Each fix was
+  reproduced on a wild repo, covered by a regression fixture, and checked for
+  same-parser regressions on the other wild targets:
+  - **pydantic-graph**: a file declaring **multiple `Graph(nodes=[...])`** (a
+    parent graph + a subgraph) was merged into one node set with one inferred
+    entry, so the other graph's nodes fired false `unreachable_node` at
+    confidence 1.0 (X-Zero-L/pydantic-ai-deep-research: 4 FPs). The shim now
+    tracks node sets per `Graph()` decl; ≥2 declared graphs → `entry_ambiguous`
+    so reachability correctly skips (cycle_detection etc. unaffected).
+  - **autogen**: `_resolve_ref` now resolves `self.<attr>` agent references
+    (`ast.Attribute`) — recovering entire class-based `DiGraphBuilder` graphs
+    that were silently dropped (Austinggg/CreAgentive, the canonical idiom) —
+    and no longer registers a `for`-loop control variable as a phantom node
+    (hugocool/FateForger: false `unreachable_node` on a node literally named
+    `agent`).
+  - **mastra**: a bounded `.dountil(...).map(...)` loop was flagged **Critical**
+    "graph definition error" because the node-less `.map`/`.sleep` continuation
+    dropped the structural exit edge; the frontier now advances through
+    pass-throughs so the loop downgrades to the correct Warning (hashintel/labs).
+  - **langgraph-js**: a routing node whose handler is `this.method.bind(this)`
+    and whose edges are declared via the `addNode(…, { ends: [...] })` option
+    lost both outgoing edges → false `unreachable_node` on `tools`.
+    `resolveHandlerFn` now unwraps `.bind()` + resolves `this.method` against
+    class methods, and the `ends:[...]` option is parsed into edges
+    (agentailor/fullstack-langgraph-nextjs-agent; the ReAct+human-approval cycle
+    is now modeled).
+  - **llamaindex**: an aliased `Context` param (`ctx: AnyContext`) and
+    `StartEvent`/`StopEvent` **subclasses** collapsed whole workflows to 0 edges
+    (zylon-ai/private-gpt: 6/7 files). The shim now treats any `ctx`/`context`
+    param as the Context regardless of annotation and matches event classes by
+    base leaf, recovering the real workflow graphs.
 - `.shingan.yaml` `overrides[].paths` の `**` glob が区切り文字を検査せず
   `legacy/**` が `legacy_v2.py` にもマッチしていた。`bmatcuk/doublestar/v4`
   ベースに置換し、中間 `**` (`src/**/test.py`) も正しく動作するようになった。

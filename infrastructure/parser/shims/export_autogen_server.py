@@ -210,10 +210,25 @@ class _AutoGenASTVisitor:
         # variables bound to a DiGraphBuilder() — only calls on these (or an
         # inline/fluent DiGraphBuilder() chain) are treated as graph edits.
         self._builder_vars: set = set()
+        # for-loop / comprehension control-variable names. A name used as a
+        # loop target is an iteration placeholder, NOT a stable agent binding:
+        # in ``for agent in (n1, n2, ...): builder.add_node(agent)`` the only
+        # ``add_node`` call carries the loop variable, so registering it would
+        # emit a phantom node literally named "agent". The REAL nodes are
+        # recovered from the per-endpoint ``add_edge`` references (each edge
+        # endpoint is registered via _register_node), so dropping the loop
+        # variable loses nothing as long as every node also appears on an edge.
+        # Such a bare Name, when it was never bound to an agent ctor, is dropped
+        # in _resolve_ref. NOTE: this set is flat/module-wide — a name used as a
+        # loop target anywhere suppresses that bare identifier as a node
+        # everywhere; verified harmless on the wild targets (agent vars never
+        # collide with loop-variable names).
+        self._loop_targets: set = set()
 
     # ---- Pass 1: assignment / agent-binding pass ---------------------------
     def collect_bindings(self, tree: _ast.Module) -> None:
         for node in _ast.walk(tree):
+            self._collect_loop_targets(node)
             if not isinstance(node, _ast.Assign):
                 continue
             if not isinstance(node.value, _ast.Call):
@@ -233,6 +248,46 @@ class _AutoGenASTVisitor:
                     self._var_pos[tgt.id] = pos
                     if agent_name is not None:
                         self._var_to_agent[tgt.id] = agent_name
+
+    def _collect_loop_targets(self, node: _ast.AST) -> None:
+        """Record a for-loop / comprehension control variable as a phantom-node
+        placeholder ONLY when that variable is actually passed to ``add_node()``
+        inside this loop's body (``for agent in (...): builder.add_node(agent)``).
+        That is the pattern that would otherwise register a node literally named
+        after the loop variable. A loop variable that merely shares a name with a
+        real agent variable elsewhere in the module must NOT be suppressed —
+        keying on the loop body avoids that false negative (codex review #36)."""
+        if isinstance(node, (_ast.For, _ast.AsyncFor)):
+            targets = [node.target]
+            body_nodes: List[_ast.AST] = list(node.body)
+        elif isinstance(node, (_ast.ListComp, _ast.SetComp, _ast.GeneratorExp)):
+            targets = [gen.target for gen in node.generators]
+            body_nodes = [node.elt]
+        elif isinstance(node, _ast.DictComp):
+            targets = [gen.target for gen in node.generators]
+            body_nodes = [node.key, node.value]
+        else:
+            return
+        names = {n.id for tgt in targets for n in _ast.walk(tgt) if isinstance(n, _ast.Name)}
+        for nm in names:
+            if self._body_adds_node(body_nodes, nm):
+                self._loop_targets.add(nm)
+
+    @staticmethod
+    def _body_adds_node(body_nodes: List[_ast.AST], var: str) -> bool:
+        """True when some ``add_node(var)`` (positional or node=/agent= kwarg,
+        var as a bare Name) appears anywhere in the given body nodes."""
+        for bn in body_nodes:
+            for sub in _ast.walk(bn):
+                if not (isinstance(sub, _ast.Call) and _attr_leaf(sub.func) in _ADD_NODE_NAMES):
+                    continue
+                candidates = list(sub.args[:1]) + [
+                    kw.value for kw in sub.keywords if kw.arg in ("node", "agent")
+                ]
+                for c in candidates:
+                    if isinstance(c, _ast.Name) and c.id == var:
+                        return True
+        return False
 
     # ---- Pass 2: builder call walk -----------------------------------------
     def collect_builder_calls(self, tree: _ast.Module) -> None:
@@ -289,9 +344,18 @@ class _AutoGenASTVisitor:
         Resolution order:
           1. inline ``AssistantAgent(name="X")`` → X
           2. variable bound to an AssistantAgent(name="X") in pass 1 → X
-          3. bare variable name (the fallback when name= is computed/missing)
-        Returns None for references we can't name (e.g. attribute access on an
-        unknown object) so the caller can skip rather than invent.
+          3. attribute access ``self.user_proxy`` → the trailing attr name
+             (``user_proxy``), with the same _var_to_agent fallback — this is
+             the canonical class-based DiGraphBuilder idiom (instance attrs hold
+             the agents). Only called from add_node/add_edge/set_entry_point, so
+             a self.<attr> that is never a graph argument is never invented.
+          4. bare variable name (the fallback when name= is computed/missing)
+        A bare Name that is a for-loop / comprehension control target and was
+        never bound to an agent ctor is dropped (returns None): it is the
+        iteration placeholder, not a stable agent — registering it would emit a
+        phantom node literally named after the loop variable.
+        Returns None for references we can't name so the caller can skip rather
+        than invent.
         """
         # Inline agent construction: add_node(AssistantAgent(name="X")).
         if isinstance(expr, _ast.Call):
@@ -302,8 +366,24 @@ class _AutoGenASTVisitor:
                 if nm is not None:
                     return nm, pos
             return None
+        # Attribute access: ``self.user_proxy`` / ``self.extractor`` — resolve
+        # to the trailing attr name. The class-based idiom binds agents to
+        # instance attributes (``self.user_proxy = ...``) and adds them as
+        # ``builder.add_node(self.user_proxy)``; without this the whole graph is
+        # dropped. We honour _var_to_agent on the attr name when an inline
+        # ``self.x = SomeAgent(name="X")`` was statically resolvable.
+        if isinstance(expr, _ast.Attribute):
+            attr = expr.attr
+            pos = self._var_pos.get(attr, (getattr(expr, "lineno", 0), getattr(expr, "col_offset", 0)))
+            resolved = self._var_to_agent.get(attr, attr)
+            return resolved, pos
         if isinstance(expr, _ast.Name):
             var = expr.id
+            # An unbound loop / comprehension control variable is an iteration
+            # placeholder, never a real node. Drop it so a phantom node named
+            # after the loop variable is not registered.
+            if var in self._loop_targets and var not in self._var_to_agent:
+                return None
             pos = self._var_pos.get(var, (getattr(expr, "lineno", 0), getattr(expr, "col_offset", 0)))
             resolved = self._var_to_agent.get(var, var)
             return resolved, pos

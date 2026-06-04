@@ -306,6 +306,50 @@ func TestPydanticGraphParser_MultiRootAmbiguous(t *testing.T) {
 	}
 }
 
+// TestPydanticGraphParser_TwoGraphs locks the dogfood 2026-06-03 fix
+// (X-Zero-L/pydantic-ai-deep-research graph.py): a module that declares TWO
+// separate Graph(nodes=[...]) — a parent graph plus a subgraph whose entry is
+// invoked from a parent node via `section_graph.run(SubEntry())` — must not be
+// flattened into one merged graph with a single inferred entry. Only the
+// subgraph's entry is zero-in-degree (the parent's root has a back-edge), so a
+// single entry would report all four parent-graph nodes as unreachable false
+// positives. With >=2 distinct Graph declarations each contributing a known
+// node, the parser flags EntryAmbiguous (entry unset) — and that wins over the
+// explicit `section_graph.run(SubEntry())` start — so reachability SKIPS the
+// merged graph. Asserts REACHABILITY only: cycle_detection on this shape is a
+// separate, deferred concern and is intentionally NOT asserted here.
+func TestPydanticGraphParser_TwoGraphs(t *testing.T) {
+	p := newPGParser(t)
+	dir := findPydanticGraphTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "two_graphs.py"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	// All seven nodes from both Graph declarations are still extracted.
+	for _, id := range []string{"Plan", "Feedback", "Finalize", "Report", "SubEntry", "SubSearch", "SubWrite"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Errorf("expected node %q (nodes=%v)", id, pgNodeIDs(graph))
+		}
+	}
+	// Two distinct graphs ⇒ no single root ⇒ entry is ambiguous, even though
+	// `section_graph.run(SubEntry())` is an explicit start (the >=2-graph check
+	// must win over the explicit-start early return).
+	if !graph.EntryAmbiguous {
+		t.Errorf("expected EntryAmbiguous=true for two distinct Graph(nodes=[...]) declarations")
+	}
+	if graph.EntryNodeID != "" {
+		t.Errorf("EntryNodeID must be empty when ambiguous, got %q", graph.EntryNodeID)
+	}
+	// Reachability must SKIP — no unreachable_node FP on the parent-graph nodes
+	// (which a single-entry SubEntry merge would have falsely flagged).
+	for _, f := range rules.NewReachabilityChecker().Analyze(graph) {
+		if f.RuleName == "unreachable_node" {
+			t.Errorf("two-graph module must not produce unreachable_node findings: %+v", f)
+		}
+	}
+}
+
 // TestPydanticGraphParser_IncompleteAnnotation locks the dogfood 2026-06-01
 // fix: a run() annotated with one node type whose BODY returns several must
 // yield ALL the body edges — so the cycle exits via DecisionNode->End (a
@@ -337,5 +381,31 @@ func TestPydanticGraphParser_IncompleteAnnotation(t *testing.T) {
 		if f.RuleName == "unreachable_node" {
 			t.Errorf("no node should be unreachable once body returns are read: %+v", f)
 		}
+	}
+}
+
+// TestPydanticGraphParser_DuplicateGraphNotMultiGraph guards the codex #36
+// refinement: two Graph(nodes=[...]) declarations naming the SAME node set (a
+// graph exported twice / via an alias) form ONE logical graph, so the
+// multi-graph ambiguity must NOT trigger — reachability must still run with a
+// resolved entry, not be suppressed.
+func TestPydanticGraphParser_DuplicateGraphNotMultiGraph(t *testing.T) {
+	p := newPGParser(t)
+	dir := findPydanticGraphTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "duplicate_graph.py"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, id := range []string{"Start", "Work"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Errorf("expected node %q (nodes=%v)", id, pgNodeIDs(graph))
+		}
+	}
+	if graph.EntryAmbiguous {
+		t.Errorf("two same-node-set Graph decls must not be treated as multi-graph (ambiguous)")
+	}
+	if graph.EntryNodeID != "Start" {
+		t.Errorf("EntryNodeID = %q, want %q (reachability must run)", graph.EntryNodeID, "Start")
 	}
 }
