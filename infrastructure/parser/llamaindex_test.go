@@ -423,6 +423,50 @@ func TestLlamaIndexParser_AliasedImports(t *testing.T) {
 	}
 }
 
+// TestLlamaIndexParser_AliasedContextSubclassEvents locks the wild-dogfood fix
+// (zylon-ai/private-gpt → image_handler.py): a step whose Context param is
+// annotated with a project-local alias (`ctx: AnyContext`, not the literal
+// `Context`) plus entry/exit events that are direct SUBCLASSES of
+// StartEvent/StopEvent. Before the fix the aliased ctx param was mis-read as
+// the consumed event and the subclass sentinels went unmatched, so the graph
+// had 0 edges, an ambiguous entry, and no exit branch (a false "looks clean").
+// After the fix begin->finish, entry=begin, and has_exit_branch must recover.
+func TestLlamaIndexParser_AliasedContextSubclassEvents(t *testing.T) {
+	p := newLIParser(t)
+	dir := findLlamaIndexTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "aliased_context_subclass_events.py"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, id := range []string{"begin", "finish"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Fatalf("expected node %q despite aliased ctx + subclass events (nodes=%v)", id, liNodeIDs(graph))
+		}
+	}
+	// The begin->finish edge (via the non-sentinel MidEvent) only exists once
+	// the aliased `ctx: AnyContext` param is skipped instead of being mis-read
+	// as the consumed event.
+	if !liHasEdge(graph, "begin", "finish") {
+		t.Errorf("expected edge begin->finish; aliased ctx mis-read as consumed event (edges=%v)", graph.Edges)
+	}
+	// begin consumes InputEvent(StartEvent) → it is the (unambiguous) entry.
+	if graph.EntryAmbiguous {
+		t.Errorf("entry must not be ambiguous: begin consumes a StartEvent subclass")
+	}
+	if graph.EntryNodeID != "begin" {
+		t.Errorf("EntryNodeID = %q, want begin (consumes InputEvent, a StartEvent subclass)", graph.EntryNodeID)
+	}
+	// finish returns ResultEvent(StopEvent) → exit branch via the subclass.
+	if graph.Nodes["finish"] == nil || !graph.Nodes["finish"].HasExitBranch {
+		t.Errorf("finish should have HasExitBranch (returns ResultEvent, a StopEvent subclass)")
+	}
+	// begin is not an exit node.
+	if graph.Nodes["begin"] != nil && graph.Nodes["begin"].HasExitBranch {
+		t.Errorf("begin should NOT have HasExitBranch")
+	}
+}
+
 // TestLlamaIndexParser_KeywordOnlyEvent locks the codex-review P2 fix: a step
 // declaring its event keyword-only (`async def run(self, *, ev: StartEvent)`)
 // must still be located, so the entry resolves and is not ambiguous.

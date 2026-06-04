@@ -441,6 +441,75 @@ func TestLangGraphJSParser_NodeTypes(t *testing.T) {
 	}
 }
 
+// TestLangGraphJSParser_BindEndsRouting covers the wild .bind(this)-handler +
+// addNode `{ ends: [...] }` shape (agentailor fullstack-langgraph-nextjs-agent).
+// Two gaps converge on one node: `tool_approval` is added as
+//
+//	addNode("tool_approval", this.approveToolCall.bind(this), { ends: ["tools","agent"] })
+//
+// (1) the handler is a `.bind()` CallExpression on a `this.method` access, and
+// (2) the 3rd-arg `{ ends }` routing option was never parsed. Together the node
+// got ZERO outgoing edges, so "tools" (reachable only via tool_approval) fired a
+// FALSE unreachable_node at confidence 1.0. The fix restores tool_approval's
+// outgoing edges (via BOTH the `ends` list and the unwrapped Command gotos,
+// deduped), so "tools" is reachable and the ReAct cycle stays Warning.
+func TestLangGraphJSParser_BindEndsRouting(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "bind_ends_routing.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, id := range []string{"agent", "tools", "tool_approval"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Fatalf("expected node %q (nodes=%v)", id, nodeIDsJS(graph))
+		}
+	}
+	if graph.EntryNodeID != "agent" {
+		t.Errorf("EntryNodeID = %q, want %q", graph.EntryNodeID, "agent")
+	}
+	// The routing node's outgoing edges must exist — from the `ends` list and/or
+	// the unwrapped .bind(this) handler's Command gotos. Without them "tools" is
+	// unreachable.
+	if !hasEdgeJS(graph, "tool_approval", "tools") {
+		t.Errorf("expected edge tool_approval->tools (ends / command goto), edges=%v", graph.Edges)
+	}
+	if !hasEdgeJS(graph, "tool_approval", "agent") {
+		t.Errorf("expected edge tool_approval->agent (ends / command goto), edges=%v", graph.Edges)
+	}
+	// Dedup: the `ends` list and the .bind handler's Command gotos name the same
+	// two destinations; exactly one edge per (from,to) must be materialised.
+	if n := countEdgesJS(graph, "tool_approval", "tools"); n != 1 {
+		t.Errorf("expected exactly 1 tool_approval->tools edge, got %d (edges=%v)", n, graph.Edges)
+	}
+	if n := countEdgesJS(graph, "tool_approval", "agent"); n != 1 {
+		t.Errorf("expected exactly 1 tool_approval->agent edge, got %d (edges=%v)", n, graph.Edges)
+	}
+	// agent carries the structural END exit (the array pathMap ["tool_approval",
+	// END] on addConditionalEdges) so the cycle downgrades to Warning.
+	if !graph.Nodes["agent"].HasExitBranch {
+		t.Fatalf("node agent must have HasExitBranch (conditional END exit)")
+	}
+
+	// The load-bearing acceptance: "tools" must NOT be flagged unreachable. This
+	// is the exact wild false positive (confidence-1.0 unreachable_node on tools).
+	reach := rules.NewReachabilityChecker().Analyze(graph)
+	for _, f := range reach {
+		if f.RuleName == "unreachable_node" && f.NodeID == "tools" {
+			t.Errorf("FALSE unreachable_node for reachable \"tools\": %+v (edges=%v)", f, graph.Edges)
+		}
+	}
+
+	// And no Critical cycle: agent is in the SCC and carries the exit branch.
+	cyc := rules.NewCycleDetector().Analyze(graph)
+	for _, f := range cyc {
+		if f.RuleName == "cycle_detection" && f.Severity == domain.Critical {
+			t.Errorf("cycle_detection reported Critical for the bounded ReAct loop; want Warning: %+v", f)
+		}
+	}
+}
+
 // --- small assertion helpers ------------------------------------------------
 
 func nodeIDsJS(g *domain.WorkflowGraph) []string {
@@ -458,6 +527,16 @@ func hasEdgeJS(g *domain.WorkflowGraph, from, to string) bool {
 		}
 	}
 	return false
+}
+
+func countEdgesJS(g *domain.WorkflowGraph, from, to string) int {
+	n := 0
+	for _, e := range g.Edges {
+		if e.From == from && e.To == to {
+			n++
+		}
+	}
+	return n
 }
 
 func hasConditionalEdgeJS(g *domain.WorkflowGraph, from, to, cond string) bool {

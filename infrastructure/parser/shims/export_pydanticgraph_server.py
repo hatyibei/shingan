@@ -273,7 +273,20 @@ class _PydanticGraphASTVisitor:
         # Node names registered via Graph(nodes=[...]); used to scope the graph
         # when present (a module may define helper BaseNode classes that aren't
         # part of the Graph). Empty ⇒ fall back to all discovered classes.
+        # Flattened union across every Graph(...) decl — the historical scoping
+        # semantics rely on this combined set (helper classes stay out, but no
+        # node is dropped just because one decl referenced an unresolved name).
         self._registered: List[str] = []
+        # Per-Graph node sets, ONE entry per `Graph(nodes=[...])` declaration,
+        # in source order. A module that declares two separate graphs (a parent
+        # graph + a subgraph whose entry is invoked from a parent node) has >=2
+        # entries here. When >=2 of them each contribute a KNOWN (discovered)
+        # node, the entry is genuinely ambiguous — there is no single root — so
+        # build()/_infer_entry mark EntryAmbiguous and clear the entry, letting
+        # reachability skip the merged graph instead of reporting the parent's
+        # nodes as unreachable from the subgraph's root (dogfood 2026-06-03,
+        # X-Zero-L/pydantic-ai-deep-research graph.py: section_graph + graph).
+        self._graphs: List[Set[str]] = []
 
     # ---- Pass 1: collect classes -------------------------------------------
     def collect(self, tree: _ast.Module) -> None:
@@ -294,18 +307,27 @@ class _PydanticGraphASTVisitor:
         elif isinstance(func, _ast.Attribute):
             fname = func.attr
         if fname == "Graph":
+            this_graph: Set[str] = set()
             for kw in call.keywords:
                 if kw.arg == "nodes":
                     for el in self._iter_seq(kw.value):
                         nm = self._node_ref_name(el)
                         if nm:
                             self._registered.append(nm)
+                            this_graph.add(nm)
             # Positional nodes=[...] (first positional arg) too.
             if call.args:
                 for el in self._iter_seq(call.args[0]):
                     nm = self._node_ref_name(el)
                     if nm:
                         self._registered.append(nm)
+                        this_graph.add(nm)
+            # Record this declaration's node set so build() can tell apart a
+            # single Graph from several distinct ones. Only non-empty sets
+            # count (a bare `Graph()` with no resolvable nodes is not a graph
+            # we can scope by).
+            if this_graph:
+                self._graphs.append(this_graph)
             for kw in call.keywords:
                 if kw.arg == "start_node":
                     nm = self._node_ref_name(kw.value)
@@ -420,7 +442,19 @@ class _PydanticGraphASTVisitor:
                 "has_exit_branch": name in exit_nodes,
             })
 
-        entry, ambiguous = self._infer_entry(node_names, real_indeg)
+        # Multi-graph ambiguity: when the module declares >=2 DISTINCT graphs
+        # that each contribute >=1 KNOWN (discovered) node, there is no single
+        # root — one Graph is typically a subgraph driven from a node of the
+        # other (e.g. HumanFeedback.run() awaits section_graph.run()). The
+        # merged graph then has exactly one zero-in-degree node (the subgraph's
+        # entry), so reachability would mark the parent graph's nodes as
+        # unreachable. Treat the entry as ambiguous and let reachability skip.
+        graphs_with_known = sum(
+            1 for g in self._graphs if any(n in known for n in g)
+        )
+        multi_graph = graphs_with_known >= 2
+
+        entry, ambiguous = self._infer_entry(node_names, real_indeg, multi_graph)
 
         metadata: Dict[str, Any] = {
             "source_format": "pydantic-graph",
@@ -447,9 +481,22 @@ class _PydanticGraphASTVisitor:
             "metadata": metadata,
         }
 
-    def _infer_entry(self, node_names: List[str], real_indeg: Dict[str, int]) -> Tuple[str, bool]:
+    def _infer_entry(
+        self,
+        node_names: List[str],
+        real_indeg: Dict[str, int],
+        multi_graph: bool = False,
+    ) -> Tuple[str, bool]:
         if not node_names:
             return "", False
+        # 0. Multiple distinct Graph(nodes=[...]) declarations → ambiguous entry.
+        #    This wins over an explicit start: a parent node may invoke a
+        #    subgraph via `section_graph.run(GenerateQueires())`, which would
+        #    otherwise force GenerateQueires as a non-ambiguous entry and make
+        #    the parent graph's nodes look unreachable from it. With no single
+        #    root, leave the entry unset so reachability skips the merged graph.
+        if multi_graph:
+            return "", True
         # 1. Explicit start (graph.run(Start()) / start_node=) wins.
         for s in self._explicit_starts:
             if s in node_names:
