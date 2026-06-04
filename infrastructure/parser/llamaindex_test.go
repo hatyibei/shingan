@@ -467,6 +467,116 @@ func TestLlamaIndexParser_AliasedContextSubclassEvents(t *testing.T) {
 	}
 }
 
+// TestLlamaIndexParser_HITLExternalEvent locks the external-dogfood fix
+// (botextractai/ai-event-driven -> main.py): a step (`get_feedback`) consumes a
+// `HumanResponseEvent` injected EXTERNALLY by the run() driver via
+// `ctx.send_event(HumanResponseEvent(...))`; NO @step produces that event.
+// Before the fix the producer/consumer edge match found no producer and the
+// shim reported `get_feedback` a false `unreachable_node`. After the fix the
+// HITL event is treated as externally injectable: the consuming step is wired
+// from the ENTRY node, so the entry STILL resolves unambiguously (not the
+// skip-reachability hack — that would hide real unreachable nodes), and
+// reachability emits no unreachable_node finding for it.
+func TestLlamaIndexParser_HITLExternalEvent(t *testing.T) {
+	p := newLIParser(t)
+	dir := findLlamaIndexTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "hitl_external_event.py"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, id := range []string{"generate", "request", "get_feedback"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Fatalf("expected node %q (nodes=%v)", id, liNodeIDs(graph))
+		}
+	}
+	// Entry must STILL resolve to the StartEvent consumer and must NOT be
+	// ambiguous — the fix wires the HITL step from the entry, it does not fall
+	// back to the entry-ambiguous skip-reachability shortcut (which would mask
+	// genuinely unreachable nodes elsewhere in the workflow).
+	if graph.EntryAmbiguous {
+		t.Errorf("entry must not be ambiguous: generate consumes StartEvent")
+	}
+	if graph.EntryNodeID != "generate" {
+		t.Errorf("EntryNodeID = %q, want generate (consumes StartEvent)", graph.EntryNodeID)
+	}
+	// The synthetic external-producer edge entry->get_feedback makes the HITL
+	// step reachable; the real generate->request edge is unaffected.
+	if !liHasEdge(graph, "generate", "get_feedback") {
+		t.Errorf("expected synthetic external-HITL edge generate->get_feedback (edges=%v)", graph.Edges)
+	}
+	if !liHasEdge(graph, "generate", "request") {
+		t.Errorf("expected real edge generate->request via DraftEvent (edges=%v)", graph.Edges)
+	}
+	// get_feedback returns StopEvent -> exit branch; request emits
+	// InputRequiredEvent OUT to the driver (produced-but-unconsumed, NOT an exit).
+	if !graph.Nodes["get_feedback"].HasExitBranch {
+		t.Errorf("get_feedback should have HasExitBranch (-> StopEvent)")
+	}
+	if graph.Nodes["request"].HasExitBranch {
+		t.Errorf("request should NOT have HasExitBranch (InputRequiredEvent is not an exit sentinel)")
+	}
+	// The actual acceptance criterion: reachability must NOT flag the
+	// HITL-consuming step as unreachable.
+	for _, f := range rules.NewReachabilityChecker().Analyze(graph) {
+		if f.RuleName == "unreachable_node" {
+			t.Errorf("HITL-consuming step must not produce unreachable_node finding: %+v", f)
+		}
+	}
+}
+
+// TestLlamaIndexParser_HITLSubclassEvent locks the base-leaf-aware half of the
+// HITL fix (mirroring the StartEvent/StopEvent subclass handling): a step
+// consuming a DIRECT subclass of a HITL event — even via an ALIASED import —
+// is still treated as externally injectable and wired from the entry, so it is
+// not flagged unreachable. Inline (like NonWorkflowFile) to keep one focused
+// assertion per fixture file.
+func TestLlamaIndexParser_HITLSubclassEvent(t *testing.T) {
+	p := newLIParser(t)
+
+	graph, err := p.Parse([]byte(
+		"from __future__ import annotations\n" +
+			"from llama_index.core.workflow import (\n" +
+			"    HumanResponseEvent as HRE, StartEvent, StopEvent, Workflow, step, Event,\n" +
+			")\n" +
+			"class ApprovalEvent(HRE):\n" +
+			"    approved: bool\n" +
+			"class MidEvent(Event):\n" +
+			"    x: int\n" +
+			"class Flow(Workflow):\n" +
+			"    @step\n" +
+			"    async def begin(self, ev: StartEvent) -> MidEvent:\n" +
+			"        return MidEvent(x=1)\n" +
+			"    @step\n" +
+			"    async def middle(self, ev: MidEvent) -> StopEvent:\n" +
+			"        return StopEvent(result='done')\n" +
+			"    @step\n" +
+			"    async def handle_approval(self, ev: ApprovalEvent) -> StopEvent:\n" +
+			"        return StopEvent(result='approved')\n",
+	))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	for _, id := range []string{"begin", "middle", "handle_approval"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Fatalf("expected node %q (nodes=%v)", id, liNodeIDs(graph))
+		}
+	}
+	if graph.EntryAmbiguous || graph.EntryNodeID != "begin" {
+		t.Errorf("EntryNodeID=%q ambiguous=%v, want begin / false", graph.EntryNodeID, graph.EntryAmbiguous)
+	}
+	// The aliased HITL subclass ApprovalEvent(HRE) consumed by handle_approval
+	// must be recognised as externally injectable -> wired from the entry.
+	if !liHasEdge(graph, "begin", "handle_approval") {
+		t.Errorf("expected synthetic edge begin->handle_approval for aliased HITL subclass (edges=%v)", graph.Edges)
+	}
+	for _, f := range rules.NewReachabilityChecker().Analyze(graph) {
+		if f.RuleName == "unreachable_node" {
+			t.Errorf("HITL-subclass-consuming step must not produce unreachable_node: %+v", f)
+		}
+	}
+}
+
 // TestLlamaIndexParser_KeywordOnlyEvent locks the codex-review P2 fix: a step
 // declaring its event keyword-only (`async def run(self, *, ev: StartEvent)`)
 // must still be located, so the entry resolves and is not ambiguous.
