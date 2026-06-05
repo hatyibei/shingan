@@ -111,6 +111,40 @@ function stringOf(arg) {
   return null;
 }
 
+// Extract the STATIC text of a string-literal or template-literal AST node, for
+// prompt scanning. For a template literal we keep the literal spans and DROP the
+// `${…}` interpolations (the static text is what carries a pasted secret). A
+// plain/no-substitution template (`\`…\``) returns its single cooked text.
+// Returns the text, or null when `arg` is not a string-like node.
+function staticTextOf(arg) {
+  if (!arg) return null;
+  if (ts.isStringLiteralLike(arg)) return arg.text;
+  // No-substitution template literal: `\`hello\``.
+  if (ts.isNoSubstitutionTemplateLiteral(arg)) return arg.text;
+  // Template expression: `\`head ${x} tail\`` -> concat the static spans only.
+  if (ts.isTemplateExpression(arg)) {
+    let out = arg.head.text;
+    for (const span of arg.templateSpans) out += span.literal.text;
+    return out;
+  }
+  // String concatenation of literals: `"a" + "b" + …` (a common multi-line
+  // prompt factoring). Recurse both operands of a `+`; a non-resolvable operand
+  // (a runtime variable) contributes empty text rather than aborting, so the
+  // STATIC text around it is still captured (where a pasted secret lives).
+  if (
+    ts.isBinaryExpression(arg) &&
+    arg.operatorToken.kind === ts.SyntaxKind.PlusToken
+  ) {
+    const l = staticTextOf(arg.left);
+    const r = staticTextOf(arg.right);
+    if (l == null && r == null) return null;
+    return (l || "") + (r || "");
+  }
+  // Parenthesised expression — unwrap.
+  if (ts.isParenthesizedExpression(arg)) return staticTextOf(arg.expression);
+  return null;
+}
+
 // Constructor name of a `new Foo(...)` / `new ns.Foo(...)` expression, else "".
 function ctorName(newExpr) {
   if (!newExpr || !ts.isNewExpression(newExpr)) return "";
@@ -166,6 +200,50 @@ const LLM_IDENTS = new Set(["llm", "model", "chatModel", "chat_model"]);
 // references a tools array / calls a tool-execution API, is a tool node.
 const TOOL_CTORS = new Set(["ToolNode"]);
 const TOOL_IDENTS = new Set(["tools", "toolNode", "toolExecutor", "toolnode"]);
+
+// ----- prompt-string extraction (security: secret_in_prompt_template) -------
+// The Go rule `secret_in_prompt_template` scans an LLM node's
+// `config.system_prompt` for hardcoded credentials. The AST-only shim must
+// therefore lift the *static prompt text* out of an LLM handler body and stash
+// it on the node config. We extract text from genuine prompt POSITIONS only
+// (NOT every string literal — capturing `"gpt-4o"` from `new ChatOpenAI({model})`
+// would be noise and could newly classify a trivial node as a prompt-injection
+// sink). Recognised positions:
+//   * `new SystemMessage("…")` / `SystemMessage("…")`     (message ctor text arg)
+//   * `{ role: "system"|"user"|…, content: "…" }`         (message object content)
+//   * `llm.invoke("…")` / `model.invoke([...])`           (string arg to a
+//                                                          model-like .invoke/.stream)
+//   * `const systemPrompt = "…"` / `const prompt = "…"`   (prompt-named binding)
+// Degrade gracefully (ADR-015): extract obvious prompt strings, omit anything
+// that cannot be statically resolved. Never fabricate.
+//
+// LangChain message constructors whose first string-like argument is prompt
+// text. A pasted secret in ANY message string is a leak, so human/tool message
+// ctors are included alongside SystemMessage.
+const PROMPT_MESSAGE_CTORS = new Set([
+  "SystemMessage",
+  "HumanMessage",
+  "AIMessage",
+  "ToolMessage",
+  "FunctionMessage",
+  "ChatMessage",
+]);
+// Roles whose `{ role, content }` object literal carries prompt text worth
+// scanning. "system" is the highest-value case; user/assistant content is
+// included since a hardcoded secret in any message string still leaks.
+const PROMPT_MESSAGE_ROLES = new Set([
+  "system",
+  "user",
+  "human",
+  "assistant",
+  "ai",
+  "developer",
+]);
+// `const <name> = "…"` bindings whose NAME looks prompt-like are lifted even
+// when not passed directly to an invoke (a very common factoring). Matched
+// loosely; the Go secret scan tolerates non-prompt noise (it only fires on a
+// credential pattern) so a slightly over-broad name match is safe.
+const PROMPT_BINDING_RE = /(prompt|system|instruction|template|persona|preamble)/i;
 
 // ----- per-graph accumulator -----------------------------------------------
 // We track one builder per `new StateGraph(...)` assignment, keyed by the
@@ -767,6 +845,133 @@ function extract(content, filePath) {
     return null;
   }
 
+  // Resolve an expression to its STATIC prompt text when it is, or references, a
+  // prompt string. Handles a string/template literal directly and a
+  // prompt-named identifier resolved one hop through varInits/fnDecls
+  // (`const systemPrompt = "…"; …invoke(systemPrompt)`). Returns text or null.
+  function resolvePromptText(expr, seen) {
+    const lit = staticTextOf(expr);
+    if (lit != null) return lit;
+    if (expr && ts.isIdentifier(expr)) {
+      const nm = expr.text;
+      seen = seen || new Set();
+      if (seen.has(nm)) return null;
+      seen.add(nm);
+      const init = varInits.get(nm);
+      if (init) return resolvePromptText(init, seen);
+    }
+    return null;
+  }
+
+  // Harvest the prompt-position strings inside one LLM handler function body and
+  // return them concatenated (newline-joined), or "" when none. Walks every
+  // node and collects text from the recognised prompt positions only
+  // (PROMPT_MESSAGE_CTORS, `{role,content}` literals, model-like `.invoke`/
+  // `.stream` string args, prompt-named `const …` bindings). Order-stable and
+  // de-duplicated so the same literal referenced twice is not double-counted.
+  function collectPromptStrings(fn) {
+    if (!fn || !fn.body) return "";
+    const parts = [];
+    const seenText = new Set();
+    const add = (text) => {
+      if (text == null || text === "") return;
+      if (seenText.has(text)) return;
+      seenText.add(text);
+      parts.push(text);
+    };
+
+    const visit = (n) => {
+      // Don't descend into nested handler functions — their prompts belong to
+      // whatever node uses them, not this one. (A handler rarely nests another
+      // graph node, but be conservative.)
+      // 1. `new SystemMessage("…")` / `SystemMessage("…")` (and HumanMessage, …).
+      if (ts.isNewExpression(n) || ts.isCallExpression(n)) {
+        const callee = n.expression;
+        let cn = "";
+        if (ts.isIdentifier(callee)) cn = callee.text;
+        else if (ts.isPropertyAccessExpression(callee)) cn = callee.name.text;
+
+        if (cn && PROMPT_MESSAGE_CTORS.has(cn)) {
+          const a0 = n.arguments && n.arguments[0];
+          add(resolvePromptText(a0));
+        }
+        // 2. `.invoke("…")` / `.stream("…")` / `.invoke([...])` on a model-like
+        //    receiver — capture string-literal args and the contents of an
+        //    inline messages array.
+        if (
+          ts.isCallExpression(n) &&
+          ts.isPropertyAccessExpression(callee) &&
+          LLM_RUN_METHODS.has(callee.name.text) &&
+          receiverIsModelLike(callee.expression)
+        ) {
+          for (const a of n.arguments || []) {
+            const direct = resolvePromptText(a);
+            if (direct != null) add(direct);
+            // `model.invoke([msg, msg, …])` — array elements are visited by the
+            // normal walk below (message ctors / {role,content}); nothing more
+            // to do here for the array itself.
+          }
+        }
+      }
+      // 3. `{ role: "system"|…, content: "…" }` object-literal message.
+      if (ts.isObjectLiteralExpression(n)) {
+        let role = "";
+        let content = null;
+        let hasContentKey = false;
+        for (const prop of n.properties) {
+          if (!ts.isPropertyAssignment(prop)) continue;
+          let key = "";
+          if (ts.isIdentifier(prop.name)) key = prop.name.text;
+          else if (ts.isStringLiteralLike(prop.name)) key = prop.name.text;
+          if (key === "role") {
+            const r = staticTextOf(prop.initializer);
+            if (r != null) role = r.toLowerCase();
+          } else if (key === "content") {
+            hasContentKey = true;
+            content = resolvePromptText(prop.initializer);
+          }
+        }
+        // A `{role, content}` shaped object whose role is a known message role
+        // (or which has a content key with no role, i.e. an implicit message)
+        // contributes its content text.
+        if (hasContentKey && content != null) {
+          if (role === "" || PROMPT_MESSAGE_ROLES.has(role)) add(content);
+        }
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(fn.body);
+
+    // 4. Prompt-named `const <name> = "…"` bindings DECLARED INSIDE this handler
+    //    (`const systemPrompt = "You are …"`), even if never passed to invoke —
+    //    a common factoring where the secret sits in the binding. Collected via
+    //    a dedicated declaration walk so it is independent of usage.
+    const visitBindings = (n) => {
+      if (
+        ts.isVariableDeclaration(n) &&
+        n.name &&
+        ts.isIdentifier(n.name) &&
+        n.initializer &&
+        PROMPT_BINDING_RE.test(n.name.text)
+      ) {
+        add(staticTextOf(n.initializer));
+      }
+      ts.forEachChild(n, visitBindings);
+    };
+    visitBindings(fn.body);
+
+    return parts.join("\n");
+  }
+
+  // For an LLM node's handler arg, lift its static prompt text (if any) so the
+  // Go `secret_in_prompt_template` rule can scan `config.system_prompt`. Returns
+  // "" when the handler is unresolvable or carries no recognisable prompt.
+  function extractPromptForHandler(handlerArg) {
+    const fn = resolveHandlerFn(handlerArg);
+    if (!fn) return "";
+    return collectPromptStrings(fn);
+  }
+
   // Harvest `new Command({goto: X})` / `Command({goto: X})` destinations from a
   // handler function body. Returns a Set of resolved destinations where each is
   // either the LG_END sentinel or a string node name. `goto` may be a string
@@ -884,12 +1089,26 @@ function extract(content, filePath) {
             const name = stringOf(args[0]);
             if (name) {
               const id = nodeId(name);
-              b.ensureNode(
+              const nodeType = classifyHandler(args[1]);
+              const nodeObj = b.ensureNode(
                 id,
                 name,
-                classifyHandler(args[1]),
+                nodeType,
                 posOf(sourceFile, node, filePath)
               );
+              // Prompt-string extraction (security: secret_in_prompt_template).
+              // For LLM nodes, lift the static prompt text out of the handler
+              // body into config.system_prompt so the Go rule can scan it for a
+              // hardcoded credential. Only set the key when text was found, and
+              // never clobber an already-populated value (a node re-registered
+              // via a second addNode keeps its first non-empty prompt). Degrade
+              // gracefully: no recognisable prompt → key stays unset (ADR-015).
+              if (nodeType === "llm" && args[1]) {
+                const prompt = extractPromptForHandler(args[1]);
+                if (prompt && !nodeObj.config.system_prompt) {
+                  nodeObj.config.system_prompt = prompt;
+                }
+              }
               // Attribute this node to the StateGraph root it was added through,
               // so several `new StateGraph(...)` decls merged under one reused
               // variable name (Magic-Resume's three `const workflow = ...`) are
