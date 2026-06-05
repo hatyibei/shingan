@@ -4,6 +4,31 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Fixed
+
+- **`unreachable_node` false positives surfaced by the external dogfood loop**
+  (35 real OSS repos scanned; these FPs would have caused false upstream reports):
+  - **langgraph-js START fan-out** — when `__start__` routes to ≥2 nodes
+    (`addEdge(START, A); addEdge(START, B)` or `addConditionalEdges(START, …)`),
+    the shim kept only one successor as the entry and dropped the rest, so the
+    others fired false `unreachable_node` at confidence 1.0. `__start__` is now
+    materialised as a synthetic Control entry node with an edge to each
+    successor so reachability flows to every parallel entry (single-successor
+    graphs are unchanged — no synthetic node).
+  - **langgraph-js multi-`StateGraph` collapse** — a file declaring multiple
+    `new StateGraph(...).compile()` graphs (esp. reusing the same variable name)
+    merged them under one root, false-flagging graphs 2..N's nodes. ≥2 disjoint
+    builders now set `entry_ambiguous` (mirrors the pydantic-graph multi-`Graph`
+    fix), so reachability skips rather than inventing unreachable findings.
+  - **llamaindex externally-injected HITL events** — a `@step` consuming a
+    human-in-the-loop event injected via `ctx.send_event(HumanResponseEvent(…))`
+    from the run() driver (produced by no `@step`) was falsely flagged
+    unreachable. `HumanResponseEvent` / `InputRequiredEvent` (subclass / alias
+    aware) are now treated as externally-injectable, so HITL steps stay
+    reachable. Verified: 14 false `unreachable_node` across the wild repos
+    (Magic-Resume, tiangong) → 0; `cycle_detection` (correct bounded warnings)
+    unchanged.
+
 ## [0.9.1] - 2026-06-04
 
 ### Changed

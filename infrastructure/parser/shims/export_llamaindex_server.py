@@ -49,6 +49,17 @@ Honest accounting (what is approximated / deferred)
     count is not modelled (every step is one ``task`` node).
   * Multi-workflow files: only the first ``Workflow`` subclass in the module is
     exported (single-graph-per-file contract). Helper workflows are ignored.
+  * Human-in-the-loop (HITL) events — ``HumanResponseEvent`` /
+    ``InputRequiredEvent`` (and direct subclasses, base-leaf aware like the
+    StartEvent/StopEvent handling) — are EXTERNALLY INJECTABLE: the ``run()``
+    driver feeds a ``HumanResponseEvent`` into the graph via
+    ``ctx.send_event(HumanResponseEvent(...))``, so NO ``@step`` need produce it.
+    A step consuming such an event would otherwise look unreachable (no producer
+    edge); we model the external producer by connecting it from the ENTRY node
+    — but ONLY when the step has no real in-edge already (a genuine ``@step``
+    producer always wins, so this never fabricates a spurious cycle). This is
+    exactly the botextractai ``get_feedback`` shape. Mirrors the
+    StartEvent/StopEvent direct-subclass-only contract.
   * Only DIRECT ``Workflow`` subclasses are detected: ``class Real(BaseFlow)``
     where ``BaseFlow(Workflow)`` is defined elsewhere yields an empty graph
     (we match the base-class leaf name without resolving the inheritance chain).
@@ -120,6 +131,14 @@ def _err(req_id: Any, code: int, message: str, data: Optional[Any] = None) -> Di
 # types by the identifier the user wrote.
 _START_EVENT_NAMES = {"StartEvent"}
 _STOP_EVENT_NAMES = {"StopEvent"}
+# Human-in-the-loop events provided by ``llama_index.core.workflow``. These are
+# injected EXTERNALLY by the run() driver (``ctx.send_event(HumanResponseEvent(
+# ...))``) rather than produced by any ``@step``, so a step consuming one is
+# reachable at runtime even though the static producer/consumer match finds no
+# producer. Recognised by leaf name (the framework is never imported), with
+# direct subclasses widening the set in ``collect()`` — mirroring the
+# StartEvent/StopEvent subclass handling.
+_HITL_EVENT_NAMES = {"HumanResponseEvent", "InputRequiredEvent"}
 # Bare ``Event`` (the base class) carries no routable type information — every
 # concrete event is an ``Event``, so matching producers/consumers on it would
 # cross-link unrelated steps (and fabricate self-loops). Treat it as an opaque,
@@ -145,7 +164,7 @@ _WORKFLOW_BASE = "Workflow"
 # per request, so a module-level map is safe).
 _FRAMEWORK_NAMES = frozenset(
     _START_EVENT_NAMES | _STOP_EVENT_NAMES | _BASE_EVENT_NAMES
-    | _CONTEXT_TYPE_NAMES | {_STEP_DECORATOR, _WORKFLOW_BASE}
+    | _HITL_EVENT_NAMES | _CONTEXT_TYPE_NAMES | {_STEP_DECORATOR, _WORKFLOW_BASE}
 )
 _ALIASES: Dict[str, str] = {}
 
@@ -373,6 +392,11 @@ class _LlamaIndexASTVisitor:
         # contract (docstring "Only DIRECT Workflow subclasses are detected").
         self._start_subclasses: Set[str] = set()
         self._stop_subclasses: Set[str] = set()
+        # Direct subclasses of the HITL events (``class Approval(
+        # HumanResponseEvent)``). Treated as externally injectable like their
+        # base, so a step consuming the subclass is not flagged unreachable.
+        # Direct-subclass-only, matching the StartEvent/StopEvent contract.
+        self._hitl_subclasses: Set[str] = set()
 
     def collect(self, tree: _ast.Module) -> None:
         # Gather direct StartEvent/StopEvent subclasses across the module BEFORE
@@ -389,6 +413,8 @@ class _LlamaIndexASTVisitor:
                     self._start_subclasses.add(node.name)
                 elif leaf in _STOP_EVENT_NAMES:
                     self._stop_subclasses.add(node.name)
+                elif leaf in _HITL_EVENT_NAMES:
+                    self._hitl_subclasses.add(node.name)
 
         # Find the first top-level (or nested) Workflow subclass with @step
         # methods. Scope steps to ONE class so unrelated workflows sharing event
@@ -418,6 +444,12 @@ class _LlamaIndexASTVisitor:
         consumers: Dict[str, List[str]] = {}
         exit_nodes: Set[str] = set()
         start_consumers: List[str] = []
+        # Steps that consume a HITL event (HumanResponseEvent / InputRequiredEvent
+        # or a direct subclass). The event is injected externally by the run()
+        # driver, so these are recorded for the synthetic entry→step edge below
+        # — but the event ALSO stays in the normal ``consumers`` map, so if some
+        # @step genuinely produces it the real producer edge still wins.
+        hitl_consumers: Set[str] = set()
 
         # Sentinel sets widened by user-defined direct subclasses: a step
         # annotated with `ImageInputEvent(StartEvent)` consumes a StartEvent, and
@@ -425,6 +457,7 @@ class _LlamaIndexASTVisitor:
         # literal sentinels are always included.
         start_names = _START_EVENT_NAMES | self._start_subclasses
         stop_names = _STOP_EVENT_NAMES | self._stop_subclasses
+        hitl_names = _HITL_EVENT_NAMES | self._hitl_subclasses
 
         for name, func in self._steps:
             # Produced events (return annotation, possibly a union).
@@ -456,6 +489,15 @@ class _LlamaIndexASTVisitor:
                 if ev in _BASE_EVENT_NAMES:
                     # Bare ``Event`` is unresolvable — omit, never invent.
                     continue
+                if ev in hitl_names:
+                    # Externally-injected HITL event: record the step so it can
+                    # be wired from the entry below (typically no @step produces
+                    # it). Fall through to ALSO add it to ``consumers`` — if some
+                    # @step genuinely produces this event the real producer edge
+                    # fires and gives the step an in-edge, which then SUPPRESSES
+                    # the synthetic entry edge (precise: external producer only
+                    # when there is no static one).
+                    hitl_consumers.add(name)
                 consumers.setdefault(ev, [])
                 if name not in consumers[ev]:
                     consumers[ev].append(name)
@@ -497,6 +539,28 @@ class _LlamaIndexASTVisitor:
             })
 
         entry, ambiguous = self._infer_entry(step_names, start_consumers)
+
+        # Externally-injected HITL events: a step consuming HumanResponseEvent /
+        # InputRequiredEvent (or a direct subclass) is reachable at runtime even
+        # though no @step produces the event — the run() driver injects it via
+        # ``ctx.send_event(...)``. Model that external producer as the ENTRY node
+        # so reachability does not false-positive ``unreachable_node`` (real
+        # example: botextractai ``get_feedback``). Two guards keep this precise:
+        #   * Only when the entry resolved unambiguously (an ambiguous-entry graph
+        #     already skips reachability, and we have no node to anchor to).
+        #   * Only for a HITL step with NO existing in-edge: a genuine @step
+        #     producer already gave it one, so we add nothing and never fabricate
+        #     a spurious entry→step edge (which could invent a cycle).
+        if not ambiguous and entry:
+            targets = {e["to"] for e in out_edges}
+            for c in step_names:
+                if c not in hitl_consumers or c == entry or c in targets:
+                    continue
+                key = (entry, c)
+                if key in seen_edges:
+                    continue
+                seen_edges.add(key)
+                out_edges.append({"from": entry, "to": c})
 
         metadata: Dict[str, Any] = {
             "source_format": "llamaindex",

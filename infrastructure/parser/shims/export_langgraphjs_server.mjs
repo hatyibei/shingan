@@ -48,6 +48,13 @@ import * as readline from "readline";
 // are what user code references after `import { START, END } from ...`.
 const LG_START = "__start__";
 const LG_END = "__end__";
+// Synthetic entry node id used to model a START fan-out (START -> A, START -> B,
+// ...). LangGraph.js runs every START successor in parallel; the AST-only shim
+// has no runtime to resolve that, so when START has >=2 successors we
+// materialise `__start__` as a Control entry node with one edge to each
+// successor, letting reachability flow to all parallel entries (rather than the
+// pre-fix behaviour of keeping a single one and false-flagging the rest).
+const LG_START_NODE = "__start__";
 const START_IDENTS = new Set(["START", "__start__"]);
 const END_IDENTS = new Set(["END", "__end__"]);
 
@@ -172,6 +179,39 @@ class GraphBuilder {
     this.compiled = false;
     this.handlers = new Map(); // node id -> handler AST node (for Command goto)
     this.nodeEnds = new Map(); // node id -> ends:[...] static-routing dest list
+    // Every node id that START routes to, collected from BOTH plain
+    // `addEdge(START, X)` edges AND `addConditionalEdges(START, router, [...])`
+    // pathMaps/router dests. We collect them all (instead of keeping the first
+    // as `entry` and dropping the rest) so a START fan-out can be modelled as a
+    // synthetic `__start__` Control node that reaches every parallel entry.
+    // Insertion order is preserved so the single-successor entry stays stable.
+    this.startSuccessors = new Set();
+    // Node ids contributed by each distinct `new StateGraph(...)` root in this
+    // (possibly varname-merged) builder. Two roots covering DISJOINT node sets
+    // mean the file declared several independent graphs that happened to reuse
+    // the same variable name (`const workflow = new StateGraph(...)` x3 — the
+    // Magic-Resume shape); we surface that as an ambiguous entry so reachability
+    // skips rather than false-flagging graphs 2..N. Keyed by the StateGraph
+    // NewExpression node identity (stable across a fluent chain).
+    this.rootNodeSets = new Map(); // NewExpression node -> Set<node id>
+  }
+
+  // Record that `id` is a START successor (an entry candidate). Kept separate
+  // from `recordEntry` so a >=2-way fan-out is not lossily collapsed to one.
+  addStartSuccessor(id) {
+    if (id && id !== LG_START && id !== LG_END) this.startSuccessors.add(id);
+  }
+
+  // Attribute a freshly-registered node id to the StateGraph root it was added
+  // through, so a disjoint-root-set (multi-graph) file can be detected.
+  recordRootNode(rootNode, id) {
+    if (!rootNode || !id) return;
+    let set = this.rootNodeSets.get(rootNode);
+    if (!set) {
+      set = new Set();
+      this.rootNodeSets.set(rootNode, set);
+    }
+    set.add(id);
   }
 
   ensureNode(id, name, type, pos) {
@@ -204,9 +244,11 @@ class GraphBuilder {
   pushEdge(src, dst, condition) {
     const srcSent = src === LG_START || src === LG_END;
     const dstSent = dst === LG_START || dst === LG_END;
-    // START -> user node: set entry, drop edge.
+    // START -> user node: record the successor (entry candidate), drop the edge.
+    // The actual entry (single node vs synthetic `__start__` fan-out) is
+    // resolved once, in the post-pass, after every START successor is known.
     if (src === LG_START) {
-      this.recordEntry(dst);
+      this.addStartSuccessor(dst);
       return;
     }
     // user node -> END: drop edge, mark exit on source.
@@ -805,6 +847,16 @@ function extract(content, filePath) {
                 classifyHandler(args[1]),
                 posOf(sourceFile, node, filePath)
               );
+              // Attribute this node to the StateGraph root it was added through,
+              // so several `new StateGraph(...)` decls merged under one reused
+              // variable name (Magic-Resume's three `const workflow = ...`) are
+              // detectable as a disjoint-node multi-graph file. The chained
+              // `new StateGraph(...).addNode(...)` receiver resolves to its own
+              // NewExpression; a later `workflow.addNode(...)` (no inline root)
+              // returns null and is simply skipped here (it belongs to whichever
+              // root the varname already owns).
+              const sgRoot = stateGraphRootOf(recv);
+              if (sgRoot) b.recordRootNode(sgRoot, id);
               // Stash the handler AST node so a post-pass can scan its body for
               // `new Command({goto: ...})` dynamic routing (gap 2).
               if (args[1]) b.handlers.set(id, args[1]);
@@ -866,7 +918,44 @@ function extract(content, filePath) {
 
   function handleConditional(b, args) {
     const src = stringOf(args[0]) || sentinelOf(args[0]);
-    if (!src || src === LG_START || src === LG_END) return;
+    if (!src || src === LG_END) return;
+    // Conditional edges sourced from START — `addConditionalEdges(START, router,
+    // ["A","B"])` (or an object pathMap, or a router returning string literals).
+    // Each branch target is a START successor / parallel entry. The pre-fix
+    // early-return on `src === LG_START` dropped these entirely, so the lone /
+    // first listed successor never became the entry and the rest false-fired
+    // unreachable. We harvest every branch target as a START successor; the
+    // entry (single node vs synthetic `__start__` fan-out) is resolved later.
+    if (src === LG_START) {
+      const routerArg = args[1];
+      const pathMap = args[2];
+      const harvest = (dest) => {
+        if (!dest || dest === LG_START || dest === LG_END) return;
+        b.addStartSuccessor(nodeId(dest));
+      };
+      if (pathMap && ts.isObjectLiteralExpression(pathMap)) {
+        for (const prop of pathMap.properties) {
+          if (!ts.isPropertyAssignment(prop)) continue;
+          harvest(sentinelOf(prop.initializer) || stringOf(prop.initializer));
+        }
+      } else if (pathMap && ts.isArrayLiteralExpression(pathMap)) {
+        for (const el of pathMap.elements) {
+          harvest(sentinelOf(el) || stringOf(el));
+        }
+      }
+      // No / opaque pathMap: fall back to the router's string-literal returns
+      // (best-effort), mirroring the user-node no-pathMap materialisation below.
+      let routerFn = null;
+      if (routerArg) {
+        if (ts.isIdentifier(routerArg)) routerFn = fnDecls.get(routerArg.text) || null;
+        else if (ts.isArrowFunction(routerArg) || ts.isFunctionExpression(routerArg))
+          routerFn = routerArg;
+      }
+      if (routerFn) {
+        for (const d of collectRouterReturns(routerFn)) harvest(d);
+      }
+      return;
+    }
     const srcId = nodeId(src);
     // Router is args[1]; pathMap is args[2] (object literal or array).
     const routerArg = args[1];
@@ -986,7 +1075,7 @@ function extract(content, filePath) {
   // be a phantom in the Go rules. Runs only on the selected graph, matching the
   // Python `_augment_runtime_graph_with_command_goto` per-payload augmentation.
   {
-    const existing = new Set(best.edges.map((e) => `${e.from} ${e.to}`));
+    const existing = new Set(best.edges.map((e) => `${e.from} ${e.to}`));
     // `addNode(name, handler, { ends: [...] })` static-routing post-pass. The
     // `ends` array names a node's possible Command-goto destinations
     // declaratively (newer StateGraph API). We materialise an over-approximated
@@ -1006,7 +1095,7 @@ function extract(content, filePath) {
         if (dest === LG_START) continue;
         const destId = nodeId(dest);
         if (!best.nodes.has(destId)) continue; // gate: known node only
-        const key = `${nodeIdStr} ${destId}`;
+        const key = `${nodeIdStr} ${destId}`;
         if (existing.has(key)) continue;
         best.edges.push({ from: nodeIdStr, to: destId, condition: "ends" });
         existing.add(key);
@@ -1025,7 +1114,7 @@ function extract(content, filePath) {
         if (dest === LG_START) continue;
         const destId = nodeId(dest);
         if (!best.nodes.has(destId)) continue; // gate: known node only
-        const key = `${nodeIdStr} ${destId}`;
+        const key = `${nodeIdStr} ${destId}`;
         if (existing.has(key)) continue;
         best.edges.push({ from: nodeIdStr, to: destId, condition: "command_goto" });
         existing.add(key);
@@ -1033,17 +1122,130 @@ function extract(content, filePath) {
     }
   }
 
-  // Entry fallback: first node when neither START edge nor setEntryPoint set.
+  // --- entry resolution -----------------------------------------------------
+  // Precedence (each step is mutually exclusive with the wild data):
+  //   (0) Multi-graph collapse — several `new StateGraph(...)` decls merged
+  //       under one reused variable name, covering DISJOINT node sets. There is
+  //       no single canonical entry; flag entry_ambiguous + empty entry so
+  //       reachability skips (it already skips on EntryAmbiguous && empty entry)
+  //       rather than false-flagging graphs 2..N as unreachable. Mirrors the
+  //       pydantic-graph multi-`Graph()` disjoint-node-set fix (#36). MUST run
+  //       before the START fan-out resolution: the merged builder has one START
+  //       successor PER subgraph, and synthesising `__start__` over them would
+  //       wrongly conflate the graphs into one (and defeat the skip).
+  //   (1) START fan-out — when START routes to >=2 successors, model `__start__`
+  //       as a synthetic Control entry node with an edge to each successor so
+  //       reachability flows to every parallel entry.
+  //   (2) Single START successor / explicit setEntryPoint — entry = that node
+  //       (byte-identical to the pre-fix single-entry behaviour: no `__start__`
+  //       node is materialised).
+  //   (3) Fallback — first registered node.
   let entry = best.entry;
-  const nodes = Array.from(best.nodes.values());
-  if (!entry && nodes.length) entry = nodes[0].id;
+  let entryAmbiguous = false;
 
-  return {
+  // (0a) File-global multi-graph detection (coarse, robust across builder styles
+  // — codex #49). Count distinct `new StateGraph(...)` roots that are assigned to
+  // a variable (declaration OR reassignment) or `.compile()`d, across the WHOLE
+  // file (not just `best`): >=2 means the file declares multiple independent
+  // graphs with no single canonical entry. The per-`best` disjoint check (0b)
+  // below only attributes fluent-chain roots, so it misses identifier-receiver /
+  // reassigned / different-varname multi-graph files (`let wf = new StateGraph();
+  // ...; wf = new StateGraph();` or two `const wf1/wf2`), including ones mixing
+  // `addEdge(START,…)` and `setEntryPoint(…)`. Flagging entry_ambiguous makes
+  // reachability skip rather than false-flagging the other graphs' nodes; the
+  // 1-root START fan-out path is unaffected. Per-graph reachability/cycle coverage
+  // on multi-graph files is the deferred multi-graph-emission gap (#42).
+  {
+    const sgRoots = new Set();
+    const walkSG = (n) => {
+      if (ts.isVariableDeclaration(n) && n.initializer) {
+        const r = stateGraphRootOf(n.initializer);
+        if (r) sgRoots.add(r);
+      } else if (
+        ts.isBinaryExpression(n) &&
+        n.operatorToken.kind === ts.SyntaxKind.EqualsToken
+      ) {
+        const r = stateGraphRootOf(n.right);
+        if (r) sgRoots.add(r);
+      } else if (
+        ts.isCallExpression(n) &&
+        ts.isPropertyAccessExpression(n.expression) &&
+        n.expression.name.text === "compile"
+      ) {
+        const r = stateGraphRootOf(n.expression.expression);
+        if (r) sgRoots.add(r);
+      }
+      ts.forEachChild(n, walkSG);
+    };
+    walkSG(sourceFile);
+    if (sgRoots.size >= 2) entryAmbiguous = true;
+  }
+
+  // (0b) Disjoint-root multi-graph detection. Only non-empty root sets count; a
+  // pair of roots with no shared node id means two genuinely separate graphs
+  // (one root can never form a disjoint pair, so single-graph files and the
+  // START-fan-out files below can't false-fire). Cheap pairwise check — the
+  // root count is tiny.
+  {
+    const rootSets = [];
+    for (const s of best.rootNodeSets.values()) {
+      if (s.size) rootSets.push(s);
+    }
+    for (let i = 0; i < rootSets.length && !entryAmbiguous; i++) {
+      for (let j = i + 1; j < rootSets.length; j++) {
+        let disjoint = true;
+        for (const id of rootSets[i]) {
+          if (rootSets[j].has(id)) { disjoint = false; break; }
+        }
+        if (disjoint) { entryAmbiguous = true; break; }
+      }
+    }
+  }
+
+  if (entryAmbiguous) {
+    entry = ""; // no canonical entry across disjoint graphs
+  } else if (!entry) {
+    // No explicit setEntryPoint — resolve from the START successors.
+    const succs = Array.from(best.startSuccessors).filter((id) => best.nodes.has(id));
+    if (succs.length >= 2) {
+      // START fan-out: synthesise a `__start__` entry that reaches each parallel
+      // successor. Type is "parallel" — NOT the "llm" default, and deliberately
+      // NOT "control": the Go side aliases the wire-string "control" to
+      // NodeTypeLoop, which trips loop_guard ("no MaxIterations") on the
+      // synthetic node (a NEW false positive). "parallel" is semantically honest
+      // (START runs its successors in parallel) and is inert — no per-type rule
+      // gates on NodeTypeParallel, so the synthetic entry fires nothing itself.
+      best.ensureNode(
+        LG_START_NODE,
+        LG_START_NODE,
+        "parallel",
+        { file: filePath || "", line: 0, col: 0 }
+      );
+      const existing = new Set(best.edges.map((e) => `${e.from} ${e.to}`));
+      for (const dst of succs) {
+        const key = `${LG_START_NODE} ${dst}`;
+        if (existing.has(key)) continue;
+        best.edges.push({ from: LG_START_NODE, to: dst });
+        existing.add(key);
+      }
+      entry = LG_START_NODE;
+    } else if (succs.length === 1) {
+      entry = succs[0];
+    }
+  }
+
+  const nodes = Array.from(best.nodes.values());
+  // (3) Fallback: first node when no entry resolved and not ambiguous.
+  if (!entry && !entryAmbiguous && nodes.length) entry = nodes[0].id;
+
+  const result = {
     nodes,
     edges: best.edges,
     entry_node_id: entry,
     metadata: emptyMeta(filePath),
   };
+  if (entryAmbiguous) result.entry_ambiguous = true;
+  return result;
 }
 
 function emptyMeta(filePath) {

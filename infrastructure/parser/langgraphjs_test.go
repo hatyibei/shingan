@@ -510,6 +510,150 @@ func TestLangGraphJSParser_BindEndsRouting(t *testing.T) {
 	}
 }
 
+// TestLangGraphJSParser_StartFanOut covers the START fan-out false positive
+// (dogfood: linancn/tiangong-ai-langgraph-server learning_path_agent.ts +
+// single_question_agent.ts). When START routes to MULTIPLE entry nodes (plain
+// `addEdge(START, X)` edges AND/OR a conditional-from-START), LangGraph.js runs
+// them all in parallel. The pre-fix shim kept ONE as the entry and dropped the
+// rest, so the others fired a FALSE unreachable_node @1.0. The fix models
+// `__start__` as a synthetic Control entry node with an edge to each successor,
+// so reachability flows to every parallel entry.
+func TestLangGraphJSParser_StartFanOut(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "start_fanout.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, id := range []string{"getGraph", "getRefs", "getPortrait", "getKnowledge"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Fatalf("expected node %q (nodes=%v)", id, nodeIDsJS(graph))
+		}
+	}
+	// >=2 START successors -> synthetic __start__ Control entry node, typed so
+	// no per-type rule (loop_guard etc.) fires on it.
+	start, ok := graph.Nodes["__start__"]
+	if !ok {
+		t.Fatalf("expected synthetic __start__ entry node for a START fan-out (nodes=%v)", nodeIDsJS(graph))
+	}
+	if start.Type == domain.NodeTypeLoop || start.Type == domain.NodeTypeControl {
+		t.Errorf("synthetic __start__ must not be a Loop/Control type (trips loop_guard); got %q", start.Type)
+	}
+	if start.Type == domain.NodeTypeLLM {
+		t.Errorf("synthetic __start__ must not be LLM-typed (trips cost/prompt rules); got %q", start.Type)
+	}
+	if graph.EntryNodeID != "__start__" {
+		t.Errorf("EntryNodeID = %q, want %q", graph.EntryNodeID, "__start__")
+	}
+	// __start__ must have an edge to EVERY parallel entry (the 3 plain + 1
+	// conditional successors).
+	for _, id := range []string{"getGraph", "getRefs", "getPortrait", "getKnowledge"} {
+		if !hasEdgeJS(graph, "__start__", id) {
+			t.Errorf("expected synthetic edge __start__->%s (edges=%v)", id, graph.Edges)
+		}
+	}
+
+	// Load-bearing acceptance: NONE of the parallel entries may be flagged
+	// unreachable — that is the exact wild false positive.
+	reach := rules.NewReachabilityChecker().Analyze(graph)
+	for _, f := range reach {
+		if f.RuleName == "unreachable_node" {
+			t.Errorf("FALSE unreachable_node in a START fan-out graph: %+v (edges=%v)", f, graph.Edges)
+		}
+	}
+	// And the synthetic __start__ node must itself trip nothing across the full
+	// registered rule suite (the OnNode grep misses global/dataflow rules, so
+	// exercise every builtin against the real graph).
+	for _, rule := range rules.AllBuiltins() {
+		for _, f := range rule.Analyze(graph) {
+			if f.NodeID == "__start__" {
+				t.Errorf("synthetic __start__ node must trip no rule, got %s: %+v", f.RuleName, f)
+			}
+		}
+	}
+}
+
+// TestLangGraphJSParser_StartConditionalSingle locks the single-successor path:
+// a conditional-from-START with exactly ONE branch target (the wild
+// kg_textbook_agent.ts shape, `addConditionalEdges(START, router,
+// ["getChapters"])`). The pre-fix shim early-returned on a START source, so the
+// lone successor never became the entry and fired a FALSE unreachable. With
+// exactly one START successor the entry resolves to that node and NO synthetic
+// __start__ node is materialised (single-entry behaviour is byte-identical to a
+// plain `addEdge(START, x)`).
+func TestLangGraphJSParser_StartConditionalSingle(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "start_conditional_single.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, id := range []string{"getChapters", "getContents", "generateKG"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Fatalf("expected node %q (nodes=%v)", id, nodeIDsJS(graph))
+		}
+	}
+	// Single START successor: entry IS that node, and no synthetic __start__.
+	if graph.EntryNodeID != "getChapters" {
+		t.Errorf("EntryNodeID = %q, want %q (single conditional-from-START successor)", graph.EntryNodeID, "getChapters")
+	}
+	if _, ok := graph.Nodes["__start__"]; ok {
+		t.Errorf("a single START successor must NOT materialise a synthetic __start__ node (nodes=%v)", nodeIDsJS(graph))
+	}
+	if graph.EntryAmbiguous {
+		t.Errorf("single-graph file must not be EntryAmbiguous")
+	}
+	// No false unreachable: getChapters (the real entry) was the pre-fix FP.
+	reach := rules.NewReachabilityChecker().Analyze(graph)
+	for _, f := range reach {
+		if f.RuleName == "unreachable_node" {
+			t.Errorf("FALSE unreachable_node in single-conditional-START graph: %+v (edges=%v)", f, graph.Edges)
+		}
+	}
+}
+
+// TestLangGraphJSParser_MultiStateGraph covers the multi-graph collapse false
+// positive (dogfood: LinMoQC/Magic-Resume graphs.ts). When one file declares
+// MULTIPLE `new StateGraph(...).compile()` graphs that REUSE the same variable
+// name, the per-varname builder merges them under one root with one entry, so
+// nodes of graphs 2..N fire FALSE unreachable. The fix detects the disjoint
+// per-root node sets and flags entry_ambiguous (entry empty), so reachability
+// skips the graph. Mirrors the pydantic-graph multi-`Graph()` fix (#36).
+func TestLangGraphJSParser_MultiStateGraph(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "multi_state_graph.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	// Every graph's nodes are preserved in the catalog (we suppress the entry,
+	// not the nodes).
+	for _, id := range []string{"preparer", "researcher", "analyzer", "combiner", "rewriter", "finalizer"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Errorf("expected node %q preserved in catalog (nodes=%v)", id, nodeIDsJS(graph))
+		}
+	}
+	// Disjoint multi-graph -> EntryAmbiguous + empty entry.
+	if !graph.EntryAmbiguous {
+		t.Errorf("expected EntryAmbiguous=true for a multi-StateGraph file with disjoint node sets")
+	}
+	if graph.EntryNodeID != "" {
+		t.Errorf("EntryNodeID = %q, want \"\" (ambiguous across disjoint graphs)", graph.EntryNodeID)
+	}
+	// Load-bearing acceptance: reachability SKIPS the graph (no false
+	// unreachable on graphs 2..N), exactly as the EntryAmbiguous && empty-entry
+	// branch in reachability.go specifies.
+	reach := rules.NewReachabilityChecker().Analyze(graph)
+	for _, f := range reach {
+		if f.RuleName == "unreachable_node" {
+			t.Errorf("multi-StateGraph file must not produce unreachable_node FPs: %+v", f)
+		}
+	}
+}
+
 // --- small assertion helpers ------------------------------------------------
 
 func nodeIDsJS(g *domain.WorkflowGraph) []string {
@@ -568,5 +712,27 @@ func TestLangGraphJSParser_AmbiguousMethodHandler(t *testing.T) {
 	}
 	if hasEdgeJS(graph, "router", "wrong_target") {
 		t.Errorf("ambiguous this.route must not graft the decoy class's goto: router->wrong_target (edges=%v)", graph.Edges)
+	}
+}
+
+// TestLangGraphJSParser_MultiStateGraphIdentifierStyle guards the codex #49 fix:
+// multiple StateGraph graphs via a reused variable name + identifier-style
+// addNode + mixed addEdge(START)/setEntryPoint are detected as multi-graph via
+// the file-global StateGraph-root count (the per-builder fluent disjoint check
+// misses this style), so no node is falsely unreachable across the graphs.
+func TestLangGraphJSParser_MultiStateGraphIdentifierStyle(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+	graph, err := p.ParseFile(filepath.Join(dir, "multi_state_graph_identifier.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	if !graph.EntryAmbiguous || graph.EntryNodeID != "" {
+		t.Errorf("expected EntryAmbiguous + empty entry for an identifier-style multi-StateGraph file, got ambiguous=%v entry=%q", graph.EntryAmbiguous, graph.EntryNodeID)
+	}
+	for _, f := range rules.NewReachabilityChecker().Analyze(graph) {
+		if f.RuleName == "unreachable_node" {
+			t.Errorf("identifier-style multi-StateGraph must not produce unreachable_node FPs: %+v", f)
+		}
 	}
 }
