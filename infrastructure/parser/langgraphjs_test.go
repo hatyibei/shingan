@@ -736,3 +736,56 @@ func TestLangGraphJSParser_MultiStateGraphIdentifierStyle(t *testing.T) {
 		}
 	}
 }
+
+// TestLangGraphJSParser_TernaryRouter guards the ternary-return-router fix: a
+// path-map-less addConditionalEdges whose (concise-arrow) router returns a
+// ternary must have BOTH branch destinations harvested, so neither "answer" nor
+// "rewrite" is falsely unreachable.
+func TestLangGraphJSParser_TernaryRouter(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+	graph, err := p.ParseFile(filepath.Join(dir, "ternary_router.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, id := range []string{"grade", "answer", "rewrite"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Fatalf("expected node %q (nodes=%v)", id, nodeIDsJS(graph))
+		}
+	}
+	if !hasEdgeJS(graph, "grade", "answer") || !hasEdgeJS(graph, "grade", "rewrite") {
+		t.Errorf("ternary router branches must both be edges (grade->answer, grade->rewrite), edges=%v", graph.Edges)
+	}
+	for _, f := range rules.NewReachabilityChecker().Analyze(graph) {
+		if f.RuleName == "unreachable_node" {
+			t.Errorf("ternary router must not leave a node falsely unreachable: %+v", f)
+		}
+	}
+}
+
+// TestLangGraphJSParser_DualRouterLocalScope guards the codex #51 fix: two
+// routers that reuse the same local binding name (`const next = …`) must each
+// resolve to their OWN value, so g1->answer and g2->rewrite (not g2->answer),
+// and "rewrite" is not falsely unreachable.
+func TestLangGraphJSParser_DualRouterLocalScope(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+	graph, err := p.ParseFile(filepath.Join(dir, "ternary_router_dual.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	if !hasEdgeJS(graph, "g1", "answer") {
+		t.Errorf("expected g1->answer (routeA local next), edges=%v", graph.Edges)
+	}
+	if !hasEdgeJS(graph, "g2", "rewrite") {
+		t.Errorf("expected g2->rewrite (routeB local next, NOT cross-wired to answer), edges=%v", graph.Edges)
+	}
+	if hasEdgeJS(graph, "g2", "answer") {
+		t.Errorf("g2 must NOT resolve to answer (file-global binding collision), edges=%v", graph.Edges)
+	}
+	for _, f := range rules.NewReachabilityChecker().Analyze(graph) {
+		if f.RuleName == "unreachable_node" {
+			t.Errorf("dual-router local-scope must not leave a node unreachable: %+v", f)
+		}
+	}
+}
