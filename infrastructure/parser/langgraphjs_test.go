@@ -723,16 +723,11 @@ func TestLangGraphJSParser_SecretInPromptSafe(t *testing.T) {
 	if sp, _ := agent.Config["system_prompt"].(string); sp == "" {
 		t.Fatalf("expected config.system_prompt to be populated for the safe fixture (else the no-FP claim is vacuous)")
 	}
-	// The whole security suite must be silent on this node — secret rule AND the
-	// prompt_injection_sink path rule (the extracted text must not turn a trivial
-	// node into a spurious sink with a reachable source).
-	for _, rule := range rules.AllBuiltins() {
-		for _, f := range rule.Analyze(graph) {
-			if f.RuleName == "secret_in_prompt_template" {
-				t.Errorf("FALSE secret_in_prompt_template on an env-var-only prompt: %+v", f)
-			}
-		}
-	}
+	// Acceptance: the safe fixture must produce ZERO security findings across the
+	// full builtin suite — not just the secret rule. The extracted env-var-only
+	// prompt must not trip secret_in_prompt_template, nor turn the node into a
+	// spurious prompt_injection_sink, nor anything else security-related.
+	assertNoSecurityFindingsJS(t, graph, rules.AllBuiltins())
 }
 
 // TestLangGraphJSParser_UnboundedToolArgFires is the security acceptance test
@@ -806,6 +801,61 @@ func TestLangGraphJSParser_UnboundedToolArgSafe(t *testing.T) {
 	for _, f := range rules.NewUnboundedToolArgChecker().Analyze(graph) {
 		if f.RuleName == "unbounded_tool_arg" && f.Severity == domain.Warning {
 			t.Errorf("FALSE unbounded_tool_arg Warning on a fully-bounded tool schema: %+v", f)
+		}
+	}
+	// Acceptance: ZERO security findings across the full builtin suite.
+	assertNoSecurityFindingsJS(t, graph, rules.AllBuiltins())
+}
+
+// TestLangGraphJSParser_PromptInjectionSinkFires demonstrates the THIRD named
+// rule enabled by the same config.system_prompt extraction: a user-input source
+// (node named `user_query`) reaching an LLM whose system_prompt was lifted from
+// the handler body makes prompt_injection_sink fire. (The extraction drops
+// `${…}` interpolations — the conservative choice that keeps secret scanning
+// clean — so this fires at Warning rather than the substitution-driven Critical;
+// firing at all is the load-bearing assertion.)
+func TestLangGraphJSParser_PromptInjectionSinkFires(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "prompt_injection_vuln.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	agent, ok := graph.Nodes["agent"]
+	if !ok {
+		t.Fatalf("expected node %q (nodes=%v)", "agent", nodeIDsJS(graph))
+	}
+	if sp, _ := agent.Config["system_prompt"].(string); sp == "" {
+		t.Fatalf("expected agent.config.system_prompt populated (the sink classification depends on it)")
+	}
+	var hits []domain.Finding
+	for _, f := range rules.NewPromptInjectionSink().Analyze(graph) {
+		if f.RuleName == "prompt_injection_sink" && f.NodeID == "agent" {
+			hits = append(hits, f)
+		}
+	}
+	if len(hits) == 0 {
+		t.Fatalf("expected prompt_injection_sink to FIRE: user_query -> agent (system_prompt sink), got none")
+	}
+}
+
+// assertNoSecurityFindingsJS fails the test if any of the three security rules
+// named by this slice (secret_in_prompt_template, prompt_injection_sink,
+// unbounded_tool_arg) fires on graph — used to prove a safe fixture produces
+// ZERO security findings (the acceptance no-FP criterion).
+func assertNoSecurityFindingsJS(t *testing.T, graph *domain.WorkflowGraph, allRules []domain.AnalysisRule) {
+	t.Helper()
+	securityRules := map[string]bool{
+		"secret_in_prompt_template": true,
+		"prompt_injection_sink":     true,
+		"unbounded_tool_arg":        true,
+	}
+	for _, rule := range allRules {
+		for _, f := range rule.Analyze(graph) {
+			if securityRules[f.RuleName] {
+				t.Errorf("FALSE security finding on a safe fixture: %s on %q (%v): %s", f.RuleName, f.NodeID, f.Severity, f.Message)
+			}
 		}
 	}
 }
