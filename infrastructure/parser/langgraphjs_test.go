@@ -762,3 +762,30 @@ func TestLangGraphJSParser_TernaryRouter(t *testing.T) {
 		}
 	}
 }
+
+// TestLangGraphJSParser_DualRouterLocalScope guards the codex #51 fix: two
+// routers that reuse the same local binding name (`const next = …`) must each
+// resolve to their OWN value, so g1->answer and g2->rewrite (not g2->answer),
+// and "rewrite" is not falsely unreachable.
+func TestLangGraphJSParser_DualRouterLocalScope(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+	graph, err := p.ParseFile(filepath.Join(dir, "ternary_router_dual.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	if !hasEdgeJS(graph, "g1", "answer") {
+		t.Errorf("expected g1->answer (routeA local next), edges=%v", graph.Edges)
+	}
+	if !hasEdgeJS(graph, "g2", "rewrite") {
+		t.Errorf("expected g2->rewrite (routeB local next, NOT cross-wired to answer), edges=%v", graph.Edges)
+	}
+	if hasEdgeJS(graph, "g2", "answer") {
+		t.Errorf("g2 must NOT resolve to answer (file-global binding collision), edges=%v", graph.Edges)
+	}
+	for _, f := range rules.NewReachabilityChecker().Analyze(graph) {
+		if f.RuleName == "unreachable_node" {
+			t.Errorf("dual-router local-scope must not leave a node unreachable: %+v", f)
+		}
+	}
+}

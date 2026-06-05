@@ -371,13 +371,33 @@ function collectAnnotationDests(typeNode, out) {
 // annotation. Body harvest recurses every `return` (not just the tail), so a
 // `return END` nested in an `if` is caught; the annotation harvest catches END
 // exits a fully-opaque body would otherwise hide.
-function collectRouterReturns(fnNode, varInits) {
+function collectRouterReturns(fnNode) {
   const dests = new Set();
   if (!fnNode) return dests;
+  // Local `const/let X = …` bindings declared INSIDE this router fn, so a
+  // `const next = "rewrite"; return next` resolves to THIS router's binding —
+  // not a same-named binding in another router (a file-global map keeps only the
+  // first declaration and would cross-wire routers — codex #51). First binding
+  // per name within the fn wins.
+  const localBindings = new Map();
+  const collectBindings = (n) => {
+    if (
+      ts.isVariableDeclaration(n) &&
+      n.name &&
+      ts.isIdentifier(n.name) &&
+      n.initializer &&
+      !localBindings.has(n.name.text)
+    ) {
+      localBindings.set(n.name.text, n.initializer);
+    }
+    ts.forEachChild(n, collectBindings);
+  };
+  if (fnNode.body) collectBindings(fnNode.body);
+
   // Resolve a returned expression to its destination string(s). Recurses through
   // parentheses, ternary branches (`cond ? "a" : "b"` — BOTH arms are dests), and
-  // a const-bound identifier (`const t = "a"; return t`). Without the ternary /
-  // const recursion a path-map-less `addConditionalEdges(node, router)` whose
+  // a locally-bound identifier (`const t = "a"; return t`). Without the ternary /
+  // binding recursion a path-map-less `addConditionalEdges(node, router)` whose
   // router returns a ternary dropped the targets → false unreachable on them
   // (dogfood: ternary-return routers, e.g. `s.ok ? "answer" : "rewrite"`).
   const addDest = (e, seen) => {
@@ -392,11 +412,11 @@ function collectRouterReturns(fnNode, varInits) {
     if (sent) { dests.add(sent); return; }
     const s = stringOf(e);
     if (s) { dests.add(s); return; }
-    if (ts.isIdentifier(e) && varInits && varInits.has(e.text)) {
+    if (ts.isIdentifier(e) && localBindings.has(e.text)) {
       seen = seen || new Set();
       if (seen.has(e.text)) return; // guard self-referential bindings
       seen.add(e.text);
-      addDest(varInits.get(e.text), seen);
+      addDest(localBindings.get(e.text), seen);
     }
   };
   const visit = (n) => {
@@ -975,7 +995,7 @@ function extract(content, filePath) {
           routerFn = routerArg;
       }
       if (routerFn) {
-        for (const d of collectRouterReturns(routerFn, varInits)) harvest(d);
+        for (const d of collectRouterReturns(routerFn)) harvest(d);
       }
       return;
     }
@@ -1038,7 +1058,7 @@ function extract(content, filePath) {
         routerFn = routerArg;
     }
     if (routerFn) {
-      const dests = collectRouterReturns(routerFn, varInits);
+      const dests = collectRouterReturns(routerFn);
       for (const d of dests) {
         if (d === LG_END) sawEnd = true;
       }
