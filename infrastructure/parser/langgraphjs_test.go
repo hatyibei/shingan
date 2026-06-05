@@ -735,6 +735,81 @@ func TestLangGraphJSParser_SecretInPromptSafe(t *testing.T) {
 	}
 }
 
+// TestLangGraphJSParser_UnboundedToolArgFires is the security acceptance test
+// for tool-schema extraction. The shim resolves the aggregate
+// `new ToolNode([tool(…)])` to its tool() definitions, converts the zod schema
+// to a merged JSON-schema config.args_schema, and the Go `unbounded_tool_arg`
+// rule scans it. The vuln fixture's tool has an unbounded `query: z.string()`
+// (no maxLength) and `tags: z.array(z.string())` (no maxItems), so the rule MUST
+// fire on the aggregate tool node.
+func TestLangGraphJSParser_UnboundedToolArgFires(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "tool_schema_vuln.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	tn, ok := graph.Nodes["toolsNode"]
+	if !ok {
+		t.Fatalf("expected node %q (nodes=%v)", "toolsNode", nodeIDsJS(graph))
+	}
+	if tn.Type != domain.NodeTypeTool {
+		t.Fatalf("node toolsNode type = %q, want tool (unbounded rule only runs on Tool nodes)", tn.Type)
+	}
+	// The extraction must have produced the JSON-schema envelope the rule walks:
+	// {type:object, properties:{…}}. A bare {field:…} (no envelope) silently
+	// no-ops, so assert the shape rather than just presence.
+	sch, _ := tn.Config["args_schema"].(map[string]any)
+	if sch == nil {
+		t.Fatalf("expected config.args_schema map on the aggregate tool node, got %T (%v)", tn.Config["args_schema"], tn.Config["args_schema"])
+	}
+	if sch["type"] != "object" {
+		t.Fatalf("args_schema.type = %v, want object (rule descends via properties)", sch["type"])
+	}
+	if _, ok := sch["properties"].(map[string]any); !ok {
+		t.Fatalf("args_schema must carry a properties map, got %v", sch["properties"])
+	}
+
+	findings := rules.NewUnboundedToolArgChecker().Analyze(graph)
+	var hits []domain.Finding
+	for _, f := range findings {
+		if f.RuleName == "unbounded_tool_arg" && f.NodeID == "toolsNode" {
+			hits = append(hits, f)
+		}
+	}
+	if len(hits) < 2 {
+		t.Fatalf("expected >=2 unbounded_tool_arg findings (string query + array tags), got %d: %+v", len(hits), hits)
+	}
+}
+
+// TestLangGraphJSParser_UnboundedToolArgSafe is the no-false-positive companion:
+// a tool whose zod schema bounds every field (z.string().max(4000),
+// z.array(...).max(16)). The shim still converts the schema, but the Go rule
+// must produce ZERO Warnings — every field has its bound.
+func TestLangGraphJSParser_UnboundedToolArgSafe(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "tool_schema_safe.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	tn, ok := graph.Nodes["toolsNode"]
+	if !ok {
+		t.Fatalf("expected node %q (nodes=%v)", "toolsNode", nodeIDsJS(graph))
+	}
+	// Sanity: the schema WAS extracted (so the no-FP claim is not vacuous).
+	if _, ok := tn.Config["args_schema"].(map[string]any); !ok {
+		t.Fatalf("expected config.args_schema to be populated for the safe tool fixture")
+	}
+	for _, f := range rules.NewUnboundedToolArgChecker().Analyze(graph) {
+		if f.RuleName == "unbounded_tool_arg" && f.Severity == domain.Warning {
+			t.Errorf("FALSE unbounded_tool_arg Warning on a fully-bounded tool schema: %+v", f)
+		}
+	}
+}
+
 // --- small assertion helpers ------------------------------------------------
 
 func nodeIDsJS(g *domain.WorkflowGraph) []string {

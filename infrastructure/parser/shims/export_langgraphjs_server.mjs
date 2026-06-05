@@ -145,6 +145,131 @@ function staticTextOf(arg) {
   return null;
 }
 
+// ----- zod → JSON-schema conversion (security: unbounded_tool_arg) ----------
+// The Go rule `unbounded_tool_arg` scans a Tool node's `config.args_schema` as a
+// JSON-schema map and flags a string field with no `maxLength` or an array with
+// no `maxItems`. langgraph-js tools declare their args as a zod schema on the
+// `tool(fn, { schema: z.object({…}) })` DEFINITION. We convert the common zod
+// forms to the JSON-schema shape the rule walks:
+//   z.string()            -> {"type":"string"}
+//   z.string().max(4000)  -> {"type":"string","maxLength":4000}
+//   z.number()/.int()     -> {"type":"number"}  (z.number().max(n) -> "maximum")
+//   z.array(x)            -> {"type":"array","items":<x>}  (.max(n)->"maxItems")
+//   z.object({a:…,b:…})   -> {"type":"object","properties":{a:…,b:…}}
+// Exotic forms (unions, .refine, .transform, custom) degrade to null and are
+// omitted — never fabricated (ADR-015). `.optional()`/`.nullable()`/`.describe()`/
+// `.default()` are transparent wrappers: we unwrap to the inner type and ignore
+// the modifier (presence/optionality doesn't affect the unbounded-arg scan).
+
+// Read a numeric literal from a `.max(n)` / `.length(n)` argument, else null.
+function numericArg(arg) {
+  if (!arg) return null;
+  if (ts.isNumericLiteral(arg)) {
+    const v = Number(arg.text);
+    return Number.isFinite(v) ? v : null;
+  }
+  // `-1` etc. (PrefixUnaryExpression) — not a meaningful bound; ignore.
+  return null;
+}
+
+// Walk a zod expression's fluent chain, collecting the base `z.<type>(...)` call
+// and the trailing `.method(args)` modifiers (max/min/length/optional/…). Returns
+// { base, mods: [{name, args}] } or null when the head is not a `z.<type>` call.
+function zodChain(expr) {
+  const mods = [];
+  let cur = expr;
+  // Unwrap trailing `.method(...)` calls until we reach the base `z.<type>(...)`.
+  while (cur && ts.isCallExpression(cur) && ts.isPropertyAccessExpression(cur.expression)) {
+    const methodName = cur.expression.name.text;
+    const recv = cur.expression.expression;
+    // Base case: `z.string(...)` / `z.object(...)` — the receiver of this call's
+    // property access is the `z` identifier (or aliased import).
+    if (ts.isIdentifier(recv) && (recv.text === "z" || recv.text === "zod")) {
+      mods.reverse();
+      return { type: methodName, baseCall: cur, mods };
+    }
+    // Modifier: `.max(4000)` / `.optional()` — record and descend.
+    mods.push({ name: methodName, args: cur.arguments });
+    cur = recv;
+  }
+  return null;
+}
+
+// Convert a zod schema AST expression to a JSON-schema map, or null when the
+// form is not one of the handled common cases.
+function zodToJsonSchema(expr, depth) {
+  depth = depth || 0;
+  if (!expr || depth > 8) return null; // guard pathological nesting
+  const chain = zodChain(expr);
+  if (!chain) return null;
+  const { type, baseCall, mods } = chain;
+
+  // Find a modifier by name (last one wins, already in call order).
+  const modVal = (name) => {
+    let v = null;
+    for (const m of mods) {
+      if (m.name === name && m.args && m.args.length) {
+        const n = numericArg(m.args[0]);
+        if (n != null) v = n;
+      }
+    }
+    return v;
+  };
+
+  switch (type) {
+    case "string":
+    case "enum": {
+      const out = { type: "string" };
+      // `.max(n)` or `.length(n)` both impose an upper bound.
+      const mx = modVal("max");
+      const len = modVal("length");
+      const bound = mx != null ? mx : len;
+      if (bound != null) out.maxLength = bound;
+      return out;
+    }
+    case "number":
+    case "bigint": {
+      const out = { type: "number" };
+      const mx = modVal("max");
+      if (mx != null) out.maximum = mx;
+      return out;
+    }
+    case "boolean":
+      return { type: "boolean" };
+    case "array": {
+      const out = { type: "array" };
+      const inner = baseCall.arguments && baseCall.arguments[0];
+      const itemSchema = inner ? zodToJsonSchema(inner, depth + 1) : null;
+      if (itemSchema) out.items = itemSchema;
+      const mx = modVal("max");
+      const len = modVal("length");
+      const bound = mx != null ? mx : len;
+      if (bound != null) out.maxItems = bound;
+      return out;
+    }
+    case "object": {
+      const out = { type: "object", properties: {} };
+      const inner = baseCall.arguments && baseCall.arguments[0];
+      if (inner && ts.isObjectLiteralExpression(inner)) {
+        for (const prop of inner.properties) {
+          if (!ts.isPropertyAssignment(prop)) continue;
+          let key = "";
+          if (ts.isIdentifier(prop.name)) key = prop.name.text;
+          else if (ts.isStringLiteralLike(prop.name)) key = prop.name.text;
+          if (!key) continue;
+          const fieldSchema = zodToJsonSchema(prop.initializer, depth + 1);
+          if (fieldSchema) out.properties[key] = fieldSchema;
+        }
+      }
+      return out;
+    }
+    default:
+      // optional/nullable/default/describe applied directly on a `z.<exotic>` we
+      // don't model, or an unhandled base (union, record, …) -> omit gracefully.
+      return null;
+  }
+}
+
 // Constructor name of a `new Foo(...)` / `new ns.Foo(...)` expression, else "".
 function ctorName(newExpr) {
   if (!newExpr || !ts.isNewExpression(newExpr)) return "";
@@ -972,6 +1097,123 @@ function extract(content, filePath) {
     return collectPromptStrings(fn);
   }
 
+  // ----- tool-schema extraction (security: unbounded_tool_arg) --------------
+  // For a Tool node handler that is (or resolves to) `new ToolNode([t1, t2, …])`,
+  // resolve each list element to its `tool(fn, { schema: z.object({…}) })`
+  // DEFINITION and convert the zod schema to JSON-schema. The aggregate ToolNode
+  // is the in-graph node, so we attach a MERGED args_schema envelope
+  // `{type:"object", properties:{<tool>_<field>: …}}` to it — name-namespaced by
+  // tool so two tools sharing a field name don't collide. Attaching to the
+  // existing aggregate adds NO new nodes (no reachability FP risk). Returns the
+  // merged schema map, or null when no element resolves to a real zod-schema tool
+  // (so a `new ToolNode([{}, {}])` of non-tool refs — node_types.ts — yields
+  // nothing and gains no finding). Modeling note: merging onto the aggregate can
+  // only under-report (a bounded field never masks an unbounded one across tools
+  // because properties are namespaced), never false-positive.
+
+  // Resolve a single tool list element to its `tool(...)` CallExpression, through
+  // one identifier hop (`const searchTool = tool(...)`). Returns the call or null.
+  function resolveToolCall(el, seen) {
+    if (!el) return null;
+    if (
+      ts.isCallExpression(el) &&
+      ts.isIdentifier(el.expression) &&
+      el.expression.text === "tool"
+    ) {
+      return el;
+    }
+    if (ts.isIdentifier(el)) {
+      const nm = el.text;
+      seen = seen || new Set();
+      if (seen.has(nm)) return null;
+      seen.add(nm);
+      const init = varInits.get(nm);
+      if (init) return resolveToolCall(init, seen);
+    }
+    return null;
+  }
+
+  // Extract the JSON-schema map from one `tool(fn, { schema: z.object({…}) })`
+  // call's options object, or null when no convertible zod schema is present.
+  function schemaFromToolCall(call) {
+    const opts = call.arguments && call.arguments[1];
+    if (!opts || !ts.isObjectLiteralExpression(opts)) return null;
+    let toolName = "";
+    let schemaExpr = null;
+    for (const prop of opts.properties) {
+      if (!ts.isPropertyAssignment(prop)) continue;
+      let key = "";
+      if (ts.isIdentifier(prop.name)) key = prop.name.text;
+      else if (ts.isStringLiteralLike(prop.name)) key = prop.name.text;
+      if (key === "name") {
+        const nm = staticTextOf(prop.initializer);
+        if (nm) toolName = nm;
+      } else if (key === "schema") {
+        schemaExpr = prop.initializer;
+      }
+    }
+    if (!schemaExpr) return null;
+    const js = zodToJsonSchema(schemaExpr);
+    if (!js) return null;
+    return { name: toolName, schema: js };
+  }
+
+  // For a Tool node handler arg, build the merged args_schema, or null.
+  function extractToolSchemaForHandler(handlerArg) {
+    // Resolve the handler to a `new ToolNode([...])` construct (directly, or via
+    // a `const toolNode = new ToolNode([...])` identifier hop through varInits).
+    let toolNodeExpr = null;
+    const resolveCtor = (arg, seen) => {
+      if (!arg) return null;
+      if (ts.isNewExpression(arg) && ctorName(arg) === "ToolNode") return arg;
+      if (ts.isIdentifier(arg)) {
+        const nm = arg.text;
+        seen = seen || new Set();
+        if (seen.has(nm)) return null;
+        seen.add(nm);
+        const init = varInits.get(nm);
+        if (init) return resolveCtor(init, seen);
+      }
+      return null;
+    };
+    toolNodeExpr = resolveCtor(handlerArg);
+    if (!toolNodeExpr) return null;
+
+    // First arg is the tools list: an inline array, or an identifier bound to one
+    // (`const tools = [searchTool, calcTool]`).
+    let listExpr = toolNodeExpr.arguments && toolNodeExpr.arguments[0];
+    if (listExpr && ts.isIdentifier(listExpr)) {
+      const init = varInits.get(listExpr.text);
+      if (init) listExpr = init;
+    }
+    if (!listExpr || !ts.isArrayLiteralExpression(listExpr)) return null;
+
+    const merged = { type: "object", properties: {} };
+    let any = false;
+    let idx = 0;
+    for (const el of listExpr.elements) {
+      const call = resolveToolCall(el);
+      idx += 1;
+      if (!call) continue; // non-tool reference (e.g. `{}`) — skip, no fabrication
+      const got = schemaFromToolCall(call);
+      if (!got) continue;
+      const ns = (got.name || `tool${idx}`).replace(/[^A-Za-z0-9_]/g, "_");
+      const props = got.schema && got.schema.properties;
+      if (props && typeof props === "object") {
+        // z.object root: namespace each field by tool name.
+        for (const [field, fieldSchema] of Object.entries(props)) {
+          merged.properties[`${ns}_${field}`] = fieldSchema;
+          any = true;
+        }
+      } else {
+        // Non-object root schema (rare): attach under the tool name directly.
+        merged.properties[ns] = got.schema;
+        any = true;
+      }
+    }
+    return any ? merged : null;
+  }
+
   // Harvest `new Command({goto: X})` / `Command({goto: X})` destinations from a
   // handler function body. Returns a Set of resolved destinations where each is
   // either the LG_END sentinel or a string node name. `goto` may be a string
@@ -1107,6 +1349,18 @@ function extract(content, filePath) {
                 const prompt = extractPromptForHandler(args[1]);
                 if (prompt && !nodeObj.config.system_prompt) {
                   nodeObj.config.system_prompt = prompt;
+                }
+              }
+              // Tool-schema extraction (security: unbounded_tool_arg). For a Tool
+              // node that is/resolves to `new ToolNode([tool(…), …])`, convert the
+              // tools' zod schemas to a merged JSON-schema args_schema so the Go
+              // rule can flag an unbounded string/array field. Only attach when a
+              // real zod schema resolves (a ToolNode of non-tool refs yields
+              // nothing — no new finding); never clobber an existing value.
+              if (nodeType === "tool" && args[1]) {
+                const schema = extractToolSchemaForHandler(args[1]);
+                if (schema && !nodeObj.config.args_schema) {
+                  nodeObj.config.args_schema = schema;
                 }
               }
               // Attribute this node to the StateGraph root it was added through,
