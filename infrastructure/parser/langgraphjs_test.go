@@ -995,3 +995,44 @@ func TestLangGraphJSParser_DualRouterLocalScope(t *testing.T) {
 		}
 	}
 }
+
+// TestLangGraphJSParser_EnumToolBounded guards codex #52: a z.enum([...]) tool arg
+// is a FINITE set (bounded by its longest literal) and must NOT fire unbounded_tool_arg.
+func TestLangGraphJSParser_EnumToolBounded(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+	graph, err := p.ParseFile(filepath.Join(dir, "tool_schema_enum.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, f := range rules.AllBuiltins() {
+		for _, fd := range f.Analyze(graph) {
+			if fd.RuleName == "unbounded_tool_arg" {
+				t.Errorf("z.enum arg is bounded; must not fire unbounded_tool_arg: %+v", fd)
+			}
+		}
+	}
+}
+
+// TestLangGraphJSParser_DualPromptLocalScope guards codex #52: two handlers reusing
+// `const systemPrompt = …` must each resolve to their OWN value, so a secret in one
+// handler does not leak into the other (no cross-handler false secret finding).
+func TestLangGraphJSParser_DualPromptLocalScope(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+	graph, err := p.ParseFile(filepath.Join(dir, "dual_prompt_scope.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	var secretNodes []string
+	for _, f := range rules.AllBuiltins() {
+		for _, fd := range f.Analyze(graph) {
+			if fd.RuleName == "secret_in_prompt_template" {
+				secretNodes = append(secretNodes, fd.NodeID)
+			}
+		}
+	}
+	if len(secretNodes) != 1 || secretNodes[0] != "a" {
+		t.Errorf("secret must fire ONLY on node \"a\" (its own binding), got %v", secretNodes)
+	}
+}

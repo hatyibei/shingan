@@ -223,7 +223,24 @@ function zodToJsonSchema(expr, depth) {
       // `.max(n)` or `.length(n)` both impose an upper bound.
       const mx = modVal("max");
       const len = modVal("length");
-      const bound = mx != null ? mx : len;
+      let bound = mx != null ? mx : len;
+      // A `z.enum([...])` is a FINITE set — bounded by its longest literal. Derive
+      // a maxLength from the enum members so unbounded_tool_arg does NOT flag a
+      // closed enum as an unbounded string (codex #52). z.enum literals are always
+      // string literals.
+      if (
+        bound == null &&
+        type === "enum" &&
+        baseCall.arguments &&
+        baseCall.arguments[0] &&
+        ts.isArrayLiteralExpression(baseCall.arguments[0])
+      ) {
+        let longest = 0;
+        for (const el of baseCall.arguments[0].elements) {
+          if (ts.isStringLiteralLike(el)) longest = Math.max(longest, el.text.length);
+        }
+        if (longest > 0) bound = longest;
+      }
       if (bound != null) out.maxLength = bound;
       return out;
     }
@@ -974,7 +991,7 @@ function extract(content, filePath) {
   // prompt string. Handles a string/template literal directly and a
   // prompt-named identifier resolved one hop through varInits/fnDecls
   // (`const systemPrompt = "…"; …invoke(systemPrompt)`). Returns text or null.
-  function resolvePromptText(expr, seen) {
+  function resolvePromptText(expr, seen, localBindings) {
     const lit = staticTextOf(expr);
     if (lit != null) return lit;
     if (expr && ts.isIdentifier(expr)) {
@@ -982,8 +999,13 @@ function extract(content, filePath) {
       seen = seen || new Set();
       if (seen.has(nm)) return null;
       seen.add(nm);
-      const init = varInits.get(nm);
-      if (init) return resolvePromptText(init, seen);
+      // Prefer a binding declared INSIDE the handler being scanned (codex #52):
+      // two handlers reusing `const systemPrompt = …` must each resolve to their
+      // OWN value, not the file-global first declaration (which could leak an
+      // earlier node's secret into a later safe node). Fall back to a module-level
+      // binding only when the name isn't local to this handler.
+      const init = (localBindings && localBindings.get(nm)) || varInits.get(nm);
+      if (init) return resolvePromptText(init, seen, localBindings);
     }
     return null;
   }
@@ -1004,6 +1026,23 @@ function extract(content, filePath) {
       seenText.add(text);
       parts.push(text);
     };
+    // Bindings declared INSIDE this handler, so a prompt identifier resolves to
+    // this handler's own `const systemPrompt = …` before any file-global one
+    // (codex #52). First binding per name within the handler wins.
+    const localBindings = new Map();
+    const collectLocal = (n) => {
+      if (
+        ts.isVariableDeclaration(n) &&
+        n.name &&
+        ts.isIdentifier(n.name) &&
+        n.initializer &&
+        !localBindings.has(n.name.text)
+      ) {
+        localBindings.set(n.name.text, n.initializer);
+      }
+      ts.forEachChild(n, collectLocal);
+    };
+    collectLocal(fn.body);
 
     const visit = (n) => {
       // Don't descend into nested handler functions — their prompts belong to
@@ -1018,7 +1057,7 @@ function extract(content, filePath) {
 
         if (cn && PROMPT_MESSAGE_CTORS.has(cn)) {
           const a0 = n.arguments && n.arguments[0];
-          add(resolvePromptText(a0));
+          add(resolvePromptText(a0, undefined, localBindings));
         }
         // 2. `.invoke("…")` / `.stream("…")` / `.invoke([...])` on a model-like
         //    receiver — capture string-literal args and the contents of an
@@ -1030,7 +1069,7 @@ function extract(content, filePath) {
           receiverIsModelLike(callee.expression)
         ) {
           for (const a of n.arguments || []) {
-            const direct = resolvePromptText(a);
+            const direct = resolvePromptText(a, undefined, localBindings);
             if (direct != null) add(direct);
             // `model.invoke([msg, msg, …])` — array elements are visited by the
             // normal walk below (message ctors / {role,content}); nothing more
@@ -1053,7 +1092,7 @@ function extract(content, filePath) {
             if (r != null) role = r.toLowerCase();
           } else if (key === "content") {
             hasContentKey = true;
-            content = resolvePromptText(prop.initializer);
+            content = resolvePromptText(prop.initializer, undefined, localBindings);
           }
         }
         // A `{role, content}` shaped object whose role is a known message role
