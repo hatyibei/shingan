@@ -736,3 +736,29 @@ func TestLangGraphJSParser_MultiStateGraphIdentifierStyle(t *testing.T) {
 		}
 	}
 }
+
+// TestLangGraphJSParser_TernaryRouter guards the ternary-return-router fix: a
+// path-map-less addConditionalEdges whose (concise-arrow) router returns a
+// ternary must have BOTH branch destinations harvested, so neither "answer" nor
+// "rewrite" is falsely unreachable.
+func TestLangGraphJSParser_TernaryRouter(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+	graph, err := p.ParseFile(filepath.Join(dir, "ternary_router.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, id := range []string{"grade", "answer", "rewrite"} {
+		if _, ok := graph.Nodes[id]; !ok {
+			t.Fatalf("expected node %q (nodes=%v)", id, nodeIDsJS(graph))
+		}
+	}
+	if !hasEdgeJS(graph, "grade", "answer") || !hasEdgeJS(graph, "grade", "rewrite") {
+		t.Errorf("ternary router branches must both be edges (grade->answer, grade->rewrite), edges=%v", graph.Edges)
+	}
+	for _, f := range rules.NewReachabilityChecker().Analyze(graph) {
+		if f.RuleName == "unreachable_node" {
+			t.Errorf("ternary router must not leave a node falsely unreachable: %+v", f)
+		}
+	}
+}

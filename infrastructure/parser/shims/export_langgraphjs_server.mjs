@@ -371,22 +371,45 @@ function collectAnnotationDests(typeNode, out) {
 // annotation. Body harvest recurses every `return` (not just the tail), so a
 // `return END` nested in an `if` is caught; the annotation harvest catches END
 // exits a fully-opaque body would otherwise hide.
-function collectRouterReturns(fnNode) {
+function collectRouterReturns(fnNode, varInits) {
   const dests = new Set();
   if (!fnNode) return dests;
-  const visit = (n) => {
-    if (ts.isReturnStatement(n) && n.expression) {
-      const e = n.expression;
-      const sent = sentinelOf(e);
-      if (sent) dests.add(sent);
-      else {
-        const s = stringOf(e);
-        if (s) dests.add(s);
-      }
+  // Resolve a returned expression to its destination string(s). Recurses through
+  // parentheses, ternary branches (`cond ? "a" : "b"` — BOTH arms are dests), and
+  // a const-bound identifier (`const t = "a"; return t`). Without the ternary /
+  // const recursion a path-map-less `addConditionalEdges(node, router)` whose
+  // router returns a ternary dropped the targets → false unreachable on them
+  // (dogfood: ternary-return routers, e.g. `s.ok ? "answer" : "rewrite"`).
+  const addDest = (e, seen) => {
+    if (!e) return;
+    if (ts.isParenthesizedExpression(e)) return addDest(e.expression, seen);
+    if (ts.isConditionalExpression(e)) {
+      addDest(e.whenTrue, seen);
+      addDest(e.whenFalse, seen);
+      return;
     }
+    const sent = sentinelOf(e);
+    if (sent) { dests.add(sent); return; }
+    const s = stringOf(e);
+    if (s) { dests.add(s); return; }
+    if (ts.isIdentifier(e) && varInits && varInits.has(e.text)) {
+      seen = seen || new Set();
+      if (seen.has(e.text)) return; // guard self-referential bindings
+      seen.add(e.text);
+      addDest(varInits.get(e.text), seen);
+    }
+  };
+  const visit = (n) => {
+    if (ts.isReturnStatement(n) && n.expression) addDest(n.expression);
     ts.forEachChild(n, visit);
   };
-  if (fnNode.body) visit(fnNode.body);
+  if (fnNode.body) {
+    // Block body → harvest every `return`. A concise arrow body (`(s) => EXPR`,
+    // e.g. `(s) => s.ok ? "answer" : "rewrite"`) has NO ReturnStatement — the
+    // body itself is the returned expression, so harvest it directly.
+    if (ts.isBlock(fnNode.body)) visit(fnNode.body);
+    else addDest(fnNode.body);
+  }
   // Return-type annotation (gap 3a): `function route(s): "tools" | typeof END`.
   if (fnNode.type) collectAnnotationDests(fnNode.type, dests);
   return dests;
@@ -952,7 +975,7 @@ function extract(content, filePath) {
           routerFn = routerArg;
       }
       if (routerFn) {
-        for (const d of collectRouterReturns(routerFn)) harvest(d);
+        for (const d of collectRouterReturns(routerFn, varInits)) harvest(d);
       }
       return;
     }
@@ -1015,7 +1038,7 @@ function extract(content, filePath) {
         routerFn = routerArg;
     }
     if (routerFn) {
-      const dests = collectRouterReturns(routerFn);
+      const dests = collectRouterReturns(routerFn, varInits);
       for (const d of dests) {
         if (d === LG_END) sawEnd = true;
       }

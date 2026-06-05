@@ -6,6 +6,13 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ### Fixed
 
+- **langgraph-js ternary-return router false `unreachable_node`** (2nd external
+  dogfood run) — a path-map-less `addConditionalEdges(node, router)` whose router
+  returns its destination via a ternary (`cond ? "answer" : "rewrite"`, in a
+  concise-arrow body or via a `const t = …; return t` binding) dropped both
+  branch targets, falsely flagging them unreachable. The router-return harvester
+  now recurses through ternary arms, parentheses, concise arrow bodies, and
+  const-bound identifiers (if / switch-return routers already worked).
 - **`unreachable_node` false positives surfaced by the external dogfood loop**
   (35 real OSS repos scanned; these FPs would have caused false upstream reports):
   - **langgraph-js START fan-out** — when `__start__` routes to ≥2 nodes
