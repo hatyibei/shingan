@@ -1,0 +1,414 @@
+# Instincts generated from https://github.com/hatyibei/shingan
+# Generated: 2026-06-05T13:42:58.445Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: shingan-commit-conventional
+trigger: "when writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Commit Conventional
+
+## Action
+
+Use conventional commit format with prefixes: feat, test, docs
+
+## Evidence
+
+- 4 commits analyzed
+- Detected conventional commit pattern
+- Examples: feat(langgraph-js): extract LLM prompt strings so secret_in_prompt_template fires, test(langgraph-js): prove all 3 security rules + ZERO-finding safe fixtures
+
+---
+id: shingan-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Commit Length
+
+## Action
+
+Write moderate-length commit messages (~72 characters)
+
+## Evidence
+
+- Average commit message length: 72 chars
+- Based on 4 commits
+
+---
+id: shingan-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Naming Files
+
+## Action
+
+Use snake_case naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: snake_case
+
+---
+id: shingan-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: shingan-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: shingan-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: shingan-workflow-add-security-rule-support-for-langgraph-js
+trigger: "when doing add security rule support for langgraph js"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Workflow Add Security Rule Support For Langgraph Js
+
+## Action
+
+Follow the add-security-rule-support-for-langgraph-js workflow:
+1. Update infrastructure/parser/shims/export_langgraphjs_server.mjs to extract new config or schema for the rule.
+2. Add or update test fixtures in testdata/langgraphjs/ (e.g., *_safe.ts and *_vuln.ts) to exercise both safe and vulnerable cases.
+3. Update or create Go test assertions in infrastructure/parser/langgraphjs_test.go to check that the rule fires or does not fire as expected.
+4. Run regression tests to ensure no unintended changes to existing fixtures.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: infrastructure/parser/shims/export_langgraphjs_server.mjs, testdata/langgraphjs/*_safe.ts, testdata/langgraphjs/*_vuln.ts
+
+---
+id: shingan-workflow-add-test-fixture-and-go-test-for-langgraph-js-rule
+trigger: "when doing add test fixture and go test for langgraph js rule"
+confidence: 0.6
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/hatyibei/shingan
+---
+
+# Shingan Workflow Add Test Fixture And Go Test For Langgraph Js Rule
+
+## Action
+
+Follow the add-test-fixture-and-go-test-for-langgraph-js-rule workflow:
+1. Create or update a test fixture in testdata/langgraphjs/ (e.g., prompt_injection_vuln.ts).
+2. Update infrastructure/parser/langgraphjs_test.go to add or broaden test assertions for the fixture.
+3. Run Go tests to verify correct rule behavior.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~2x per month
+- Files: testdata/langgraphjs/*.ts, infrastructure/parser/langgraphjs_test.go
+
+---
+id: shingan-coding-filename-snake-case
+trigger: "When creating or renaming a file in the repository"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Coding Filename Snake Case
+
+## Action
+
+Use snake_case for file names
+
+## Evidence
+
+- Pattern in namingConventions.files: snake_case
+
+---
+id: shingan-coding-function-camel-case
+trigger: "When defining a function"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Coding Function Camel Case
+
+## Action
+
+Name the function using camelCase
+
+## Evidence
+
+- Pattern in namingConventions.functions: camelCase
+
+---
+id: shingan-coding-class-pascal-case
+trigger: "When declaring a class"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Coding Class Pascal Case
+
+## Action
+
+Name the class using PascalCase
+
+## Evidence
+
+- Pattern in namingConventions.classes: PascalCase
+
+---
+id: shingan-coding-constant-screaming-snake-case
+trigger: "When declaring a constant"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Coding Constant Screaming Snake Case
+
+## Action
+
+Name the constant using SCREAMING_SNAKE_CASE
+
+## Evidence
+
+- Pattern in namingConventions.constants: SCREAMING_SNAKE_CASE
+
+---
+id: shingan-coding-import-relative
+trigger: "When importing modules within the codebase"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Coding Import Relative
+
+## Action
+
+Use relative import paths
+
+## Evidence
+
+- Pattern in importStyle: relative
+
+---
+id: shingan-coding-export-named
+trigger: "When exporting functions, classes, or constants"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Coding Export Named
+
+## Action
+
+Use named exports
+
+## Evidence
+
+- Pattern in exportStyle: named
+
+---
+id: shingan-testing-add-test-fixture
+trigger: "When adding a new security rule or feature for langgraph-js"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Testing Add Test Fixture
+
+## Action
+
+Create or update test fixtures in testdata/langgraphjs/ with *_safe.ts and *_vuln.ts files
+
+## Evidence
+
+- Workflow: add-security-rule-support-for-langgraph-js
+- Workflow: add-test-fixture-and-go-test-for-langgraph-js-rule
+- Pattern in files: testdata/langgraphjs/*_safe.ts, testdata/langgraphjs/*_vuln.ts
+
+---
+id: shingan-testing-update-go-test
+trigger: "When adding or updating a test fixture for langgraph-js"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Testing Update Go Test
+
+## Action
+
+Update infrastructure/parser/langgraphjs_test.go to assert rule firing or non-firing
+
+## Evidence
+
+- Workflow: add-security-rule-support-for-langgraph-js
+- Workflow: add-test-fixture-and-go-test-for-langgraph-js-rule
+- Pattern in files: infrastructure/parser/langgraphjs_test.go
+
+---
+id: shingan-testing-run-go-tests
+trigger: "When test fixtures or Go test assertions are added or updated"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Testing Run Go Tests
+
+## Action
+
+Run Go tests to verify correct rule behavior and regression
+
+## Evidence
+
+- Workflow: add-security-rule-support-for-langgraph-js
+- Workflow: add-test-fixture-and-go-test-for-langgraph-js-rule
+
+---
+id: shingan-git-conventional-commit
+trigger: "When writing a commit message"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Git Conventional Commit
+
+## Action
+
+Use conventional commit format with a prefix (feat, test, docs), optional scope, and a concise message (~72 chars)
+
+## Evidence
+
+- Pattern in commits.type: conventional
+- Pattern in commits.prefixes: feat, test, docs
+- Pattern in commits.averageLength: 72
+- Examples: feat(langgraph-js): extract LLM prompt strings so secret_in_prompt_template fires
+
+---
+id: shingan-workflow-add-security-rule-support
+trigger: "When someone wants to add support for a new security rule or static analysis in langgraph-js graphs"
+confidence: 0.95
+domain: workflow
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Workflow Add Security Rule Support
+
+## Action
+
+Update export_langgraphjs_server.mjs, add/update testdata/langgraphjs/*_safe.ts and *_vuln.ts, update langgraphjs_test.go, and run regression tests
+
+## Evidence
+
+- Workflow: add-security-rule-support-for-langgraph-js
+- Example commit sequences and files
+
+---
+id: shingan-workflow-add-test-fixture
+trigger: "When someone wants to add or improve test coverage for a security rule in langgraph-js"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: hatyibei/shingan
+---
+
+# Shingan Workflow Add Test Fixture
+
+## Action
+
+Create or update a test fixture in testdata/langgraphjs/ and update langgraphjs_test.go to assert correct rule firing or non-firing, then run Go tests
+
+## Evidence
+
+- Workflow: add-test-fixture-and-go-test-for-langgraph-js-rule
+- Example commit sequences and files
+
