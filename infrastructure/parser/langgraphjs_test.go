@@ -654,6 +654,212 @@ func TestLangGraphJSParser_MultiStateGraph(t *testing.T) {
 	}
 }
 
+// TestLangGraphJSParser_SecretInPromptFires is the security acceptance test for
+// prompt-string extraction. The shim lifts the static prompt text out of an LLM
+// handler body into config.system_prompt; the Go `secret_in_prompt_template`
+// rule then scans it. The vuln fixture embeds an AWS access key (AKIA…) and a
+// hyphen-free OpenAI key (sk-…) inside a `{role:"system", content:…}` message,
+// so the rule MUST fire on the LLM node. Before this change config carried only
+// graph structure (no system_prompt), so the rule could never fire.
+func TestLangGraphJSParser_SecretInPromptFires(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "secret_prompt_vuln.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	agent, ok := graph.Nodes["agent"]
+	if !ok {
+		t.Fatalf("expected node %q (nodes=%v)", "agent", nodeIDsJS(graph))
+	}
+	if agent.Type != domain.NodeTypeLLM {
+		t.Fatalf("node agent type = %q, want llm (secret rule only runs on LLM nodes)", agent.Type)
+	}
+	// The extraction must have populated config.system_prompt with the secret.
+	sp, _ := agent.Config["system_prompt"].(string)
+	if !strings.Contains(sp, "AKIAIOSFODNN7EXAMPLE") {
+		t.Fatalf("config.system_prompt does not contain the extracted secret; got %q", sp)
+	}
+
+	findings := rules.NewSecretInPromptTemplate().Analyze(graph)
+	var hits []domain.Finding
+	for _, f := range findings {
+		if f.RuleName == "secret_in_prompt_template" && f.NodeID == "agent" {
+			hits = append(hits, f)
+		}
+	}
+	if len(hits) == 0 {
+		t.Fatalf("expected secret_in_prompt_template to FIRE on the agent LLM node, got none (system_prompt=%q)", sp)
+	}
+	// The AWS key is the highest-confidence exact-static match; it must be the
+	// finding's severity (Critical), proving a real secret (not a false hit).
+	for _, f := range hits {
+		if f.Severity != domain.Critical {
+			t.Errorf("secret_in_prompt_template severity = %v, want Critical (AKIA/sk- exact match): %+v", f.Severity, f)
+		}
+	}
+}
+
+// TestLangGraphJSParser_SecretInPromptSafe is the no-false-positive companion: a
+// prompt that references the API key only via process.env.OPENAI_API_KEY (no
+// literal secret). The shim still lifts the prompt text, but the Go rule strips
+// process.env / ${…} placeholders before matching, so it must produce ZERO
+// findings. Guards against the extraction turning a legitimate env-driven prompt
+// into a false positive.
+func TestLangGraphJSParser_SecretInPromptSafe(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "secret_prompt_safe.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	agent, ok := graph.Nodes["agent"]
+	if !ok {
+		t.Fatalf("expected node %q (nodes=%v)", "agent", nodeIDsJS(graph))
+	}
+	// Sanity: the prompt WAS extracted (so this is a real no-FP, not a no-op).
+	if sp, _ := agent.Config["system_prompt"].(string); sp == "" {
+		t.Fatalf("expected config.system_prompt to be populated for the safe fixture (else the no-FP claim is vacuous)")
+	}
+	// Acceptance: the safe fixture must produce ZERO security findings across the
+	// full builtin suite — not just the secret rule. The extracted env-var-only
+	// prompt must not trip secret_in_prompt_template, nor turn the node into a
+	// spurious prompt_injection_sink, nor anything else security-related.
+	assertNoSecurityFindingsJS(t, graph, rules.AllBuiltins())
+}
+
+// TestLangGraphJSParser_UnboundedToolArgFires is the security acceptance test
+// for tool-schema extraction. The shim resolves the aggregate
+// `new ToolNode([tool(…)])` to its tool() definitions, converts the zod schema
+// to a merged JSON-schema config.args_schema, and the Go `unbounded_tool_arg`
+// rule scans it. The vuln fixture's tool has an unbounded `query: z.string()`
+// (no maxLength) and `tags: z.array(z.string())` (no maxItems), so the rule MUST
+// fire on the aggregate tool node.
+func TestLangGraphJSParser_UnboundedToolArgFires(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "tool_schema_vuln.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	tn, ok := graph.Nodes["toolsNode"]
+	if !ok {
+		t.Fatalf("expected node %q (nodes=%v)", "toolsNode", nodeIDsJS(graph))
+	}
+	if tn.Type != domain.NodeTypeTool {
+		t.Fatalf("node toolsNode type = %q, want tool (unbounded rule only runs on Tool nodes)", tn.Type)
+	}
+	// The extraction must have produced the JSON-schema envelope the rule walks:
+	// {type:object, properties:{…}}. A bare {field:…} (no envelope) silently
+	// no-ops, so assert the shape rather than just presence.
+	sch, _ := tn.Config["args_schema"].(map[string]any)
+	if sch == nil {
+		t.Fatalf("expected config.args_schema map on the aggregate tool node, got %T (%v)", tn.Config["args_schema"], tn.Config["args_schema"])
+	}
+	if sch["type"] != "object" {
+		t.Fatalf("args_schema.type = %v, want object (rule descends via properties)", sch["type"])
+	}
+	if _, ok := sch["properties"].(map[string]any); !ok {
+		t.Fatalf("args_schema must carry a properties map, got %v", sch["properties"])
+	}
+
+	findings := rules.NewUnboundedToolArgChecker().Analyze(graph)
+	var hits []domain.Finding
+	for _, f := range findings {
+		if f.RuleName == "unbounded_tool_arg" && f.NodeID == "toolsNode" {
+			hits = append(hits, f)
+		}
+	}
+	if len(hits) < 2 {
+		t.Fatalf("expected >=2 unbounded_tool_arg findings (string query + array tags), got %d: %+v", len(hits), hits)
+	}
+}
+
+// TestLangGraphJSParser_UnboundedToolArgSafe is the no-false-positive companion:
+// a tool whose zod schema bounds every field (z.string().max(4000),
+// z.array(...).max(16)). The shim still converts the schema, but the Go rule
+// must produce ZERO Warnings — every field has its bound.
+func TestLangGraphJSParser_UnboundedToolArgSafe(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "tool_schema_safe.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	tn, ok := graph.Nodes["toolsNode"]
+	if !ok {
+		t.Fatalf("expected node %q (nodes=%v)", "toolsNode", nodeIDsJS(graph))
+	}
+	// Sanity: the schema WAS extracted (so the no-FP claim is not vacuous).
+	if _, ok := tn.Config["args_schema"].(map[string]any); !ok {
+		t.Fatalf("expected config.args_schema to be populated for the safe tool fixture")
+	}
+	for _, f := range rules.NewUnboundedToolArgChecker().Analyze(graph) {
+		if f.RuleName == "unbounded_tool_arg" && f.Severity == domain.Warning {
+			t.Errorf("FALSE unbounded_tool_arg Warning on a fully-bounded tool schema: %+v", f)
+		}
+	}
+	// Acceptance: ZERO security findings across the full builtin suite.
+	assertNoSecurityFindingsJS(t, graph, rules.AllBuiltins())
+}
+
+// TestLangGraphJSParser_PromptInjectionSinkFires demonstrates the THIRD named
+// rule enabled by the same config.system_prompt extraction: a user-input source
+// (node named `user_query`) reaching an LLM whose system_prompt was lifted from
+// the handler body makes prompt_injection_sink fire. (The extraction drops
+// `${…}` interpolations — the conservative choice that keeps secret scanning
+// clean — so this fires at Warning rather than the substitution-driven Critical;
+// firing at all is the load-bearing assertion.)
+func TestLangGraphJSParser_PromptInjectionSinkFires(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "prompt_injection_vuln.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	agent, ok := graph.Nodes["agent"]
+	if !ok {
+		t.Fatalf("expected node %q (nodes=%v)", "agent", nodeIDsJS(graph))
+	}
+	if sp, _ := agent.Config["system_prompt"].(string); sp == "" {
+		t.Fatalf("expected agent.config.system_prompt populated (the sink classification depends on it)")
+	}
+	var hits []domain.Finding
+	for _, f := range rules.NewPromptInjectionSink().Analyze(graph) {
+		if f.RuleName == "prompt_injection_sink" && f.NodeID == "agent" {
+			hits = append(hits, f)
+		}
+	}
+	if len(hits) == 0 {
+		t.Fatalf("expected prompt_injection_sink to FIRE: user_query -> agent (system_prompt sink), got none")
+	}
+}
+
+// assertNoSecurityFindingsJS fails the test if any of the three security rules
+// named by this slice (secret_in_prompt_template, prompt_injection_sink,
+// unbounded_tool_arg) fires on graph — used to prove a safe fixture produces
+// ZERO security findings (the acceptance no-FP criterion).
+func assertNoSecurityFindingsJS(t *testing.T, graph *domain.WorkflowGraph, allRules []domain.AnalysisRule) {
+	t.Helper()
+	securityRules := map[string]bool{
+		"secret_in_prompt_template": true,
+		"prompt_injection_sink":     true,
+		"unbounded_tool_arg":        true,
+	}
+	for _, rule := range allRules {
+		for _, f := range rule.Analyze(graph) {
+			if securityRules[f.RuleName] {
+				t.Errorf("FALSE security finding on a safe fixture: %s on %q (%v): %s", f.RuleName, f.NodeID, f.Severity, f.Message)
+			}
+		}
+	}
+}
+
 // --- small assertion helpers ------------------------------------------------
 
 func nodeIDsJS(g *domain.WorkflowGraph) []string {
@@ -787,5 +993,46 @@ func TestLangGraphJSParser_DualRouterLocalScope(t *testing.T) {
 		if f.RuleName == "unreachable_node" {
 			t.Errorf("dual-router local-scope must not leave a node unreachable: %+v", f)
 		}
+	}
+}
+
+// TestLangGraphJSParser_EnumToolBounded guards codex #52: a z.enum([...]) tool arg
+// is a FINITE set (bounded by its longest literal) and must NOT fire unbounded_tool_arg.
+func TestLangGraphJSParser_EnumToolBounded(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+	graph, err := p.ParseFile(filepath.Join(dir, "tool_schema_enum.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	for _, f := range rules.AllBuiltins() {
+		for _, fd := range f.Analyze(graph) {
+			if fd.RuleName == "unbounded_tool_arg" {
+				t.Errorf("z.enum arg is bounded; must not fire unbounded_tool_arg: %+v", fd)
+			}
+		}
+	}
+}
+
+// TestLangGraphJSParser_DualPromptLocalScope guards codex #52: two handlers reusing
+// `const systemPrompt = …` must each resolve to their OWN value, so a secret in one
+// handler does not leak into the other (no cross-handler false secret finding).
+func TestLangGraphJSParser_DualPromptLocalScope(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+	graph, err := p.ParseFile(filepath.Join(dir, "dual_prompt_scope.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	var secretNodes []string
+	for _, f := range rules.AllBuiltins() {
+		for _, fd := range f.Analyze(graph) {
+			if fd.RuleName == "secret_in_prompt_template" {
+				secretNodes = append(secretNodes, fd.NodeID)
+			}
+		}
+	}
+	if len(secretNodes) != 1 || secretNodes[0] != "a" {
+		t.Errorf("secret must fire ONLY on node \"a\" (its own binding), got %v", secretNodes)
 	}
 }

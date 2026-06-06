@@ -4,6 +4,24 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Added
+
+- **Security/cost rules now fire on the langgraph-js parser.** The AST shim
+  previously extracted only graph structure, so `secret_in_prompt_template`,
+  `prompt_injection_sink`, and `unbounded_tool_arg` never fired on
+  `@langchain/langgraph` workflows (shingan's security value proposition didn't
+  reach the biggest TS agent framework). The shim now lifts security-relevant
+  config out of node handlers: LLM-node **prompt strings** (`SystemMessage("…")`,
+  `{role:"system",content:"…"}`, model `.invoke`/`.stream` string args, and
+  prompt-named `const` bindings) → `config.system_prompt`; and tool **zod
+  schemas** (`tool(fn,{schema:z.object({…})})` resolved through a `ToolNode`
+  aggregate) → `config.args_schema` as JSON-schema (`z.string().max(n)` →
+  `maxLength`, `z.array().max(n)` → `maxItems`, etc.). Extraction is additive —
+  it adds no nodes/edges (so it cannot create an `unreachable_node` FP) and
+  degrades gracefully on exotic zod / unresolvable prompts (ADR-015). Verified:
+  hardcoded `AKIA…`/`sk-…` in a prompt and an unbounded `z.string()` arg now
+  fire; `process.env.…` prompts and `z.string().max(4000)` args stay clean.
+
 ### Fixed
 
 - **langgraph-js ternary-return router false `unreachable_node`** (2nd external
