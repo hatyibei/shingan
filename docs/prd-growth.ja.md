@@ -68,7 +68,7 @@ org dashboard)と公開 FP ベンチマークが揃うまで本格攻略しな�
 | 段階 | 現有資産 | ギャップ |
 |---|---|---|
 | **Discover** | README(日英)、badges、[comparison](./comparison.ja.md)、OWASP マッピング表、dogfood 実績テーブル | デモ GIF / 動画なし。shingan.dev 未稼働。GitHub Marketplace / VS Code Marketplace 未掲載。技術記事ゼロ。awesome リスト未掲載 |
-| **Try** | `npx --yes shingan-lint demo`(ゼロインストール・30 秒)、Docker、go install | Homebrew なし。pre-commit hook なし。`demo` の存在自体が README を読まないと分からない |
+| **Try** | `npx --yes shingan-lint demo`(ゼロインストール・30 秒)、Docker、go install、pre-commit hook(2026-06-10 追加) | Homebrew なし。`demo` の存在自体が README を読まないと分からない |
 | **Adopt** | GitHub Action + SARIF + sticky PR コメント、`.shingan.yaml`、`--baseline` / `--since` 段階導入 | セットアップが手作業(`shingan init` がない)。推奨が informational CI 止まりで「習慣化」の強制力が弱い |
 | **Retain** | LSP / MCP の日常導線、リリース速度 | 定着を測る手段ゼロ(テレメトリなし)。v0.10 PR bot が最大のリテンション機能 |
 | **Advocate** | case-studies 3 本、Critical FP ゼロ記録 | 「scanned with Shingan」バッジなし。上流 OSS への CI 採用 PR 未実施。testimonial なし。コミュニティルールゼロ |
@@ -146,7 +146,7 @@ NSM: 週次解析ワークフロー数 (代理: npm週次DL + Action利用リポ
 | 1 | README 冒頭にデモ GIF / asciinema(`npx demo` の 30 秒) | S | 高 | Discover→Try | 露出→実行の転換率を直接押し上げる最安の一手 |
 | 2 | GitHub Marketplace に Action 掲載 | S | 高 | Discover | `action.yml` は完成済み。README の v1.0 予定を前倒し (ADR-019) |
 | 3 | Homebrew tap (`hatyibei/homebrew-shingan`) | S | 高 | Try | GoReleaser `brews:` の設定追加のみ。Go/CLI ユーザーの標準導線 |
-| 4 | pre-commit hook (`.pre-commit-hooks.yaml`) | S | 中 | Adopt | Python (LangGraph / CrewAI) ユーザーの標準習慣に同乗 |
+| 4 | pre-commit hook (`.pre-commit-hooks.yaml`) | S | 中 | Adopt | Python (LangGraph / CrewAI) ユーザーの標準習慣に同乗。**実装済み (2026-06-10)** — [docs/pre-commit.md](./pre-commit.md) |
 | 5 | VS Code Marketplace に拡張公開 | M | 中 | Discover→Retain | `extensions/vscode-shingan/` 既存。v0.10 タイミング (ADR-019) |
 | - | winget / scoop / apt | - | 低 | - | 見送り (ADR-019)。需要シグナルが出るまで追加しない |
 
