@@ -26,9 +26,16 @@
 10. [ADR-010: Plugin SDK internal-first 戦略](#adr-010)
 11. [ADR-011: 主戦場 LangGraph シフト (ADR-002 補正)](#adr-011)
 12. [ADR-012: multi-file directory analysis — per-file independent graph](#adr-012)
-13. [Appendix A: 用語集](#appendix-a)
-14. [Appendix B: SamuraiAI ↔ ADK-Go ノードマッピング](#appendix-b)
-15. [Appendix C: 解析ルール詳細仕様](#appendix-c)
+13. [ADR-013: CrewAI parser — LangGraph PythonWorker 再利用戦略](#adr-013)
+14. [ADR-016: Baseline Fingerprint Stability](#adr-016)
+15. [ADR-017: application 層の yaml / plugin 依存 — 実依存グラフの明文化（Onion 例外）](#adr-017)
+16. [ADR-018: ML-based dynamic confidence — capture-only feedback store（学習層は defer）](#adr-018)
+17. [ADR-019: 成長・配布チャネル戦略](#adr-019)
+18. [Appendix A: 用語集](#appendix-a)
+19. [Appendix B: SamuraiAI ↔ ADK-Go ノードマッピング](#appendix-b)
+20. [Appendix C: 解析ルール詳細仕様](#appendix-c)
+
+> ※ ADR-014 / ADR-015 は欠番（014 は変更履歴のみに記録、015 は plan file 上の決定で本文化されていない）。
 
 ---
 
@@ -1500,6 +1507,7 @@ merge 後の graph は entry を 1 つしか持たないため、最初に encou
 
 ---
 
+<a id="adr-013"></a>
 # ADR-013: CrewAI parser — LangGraph PythonWorker 再利用戦略
 
 **ステータス**: Accepted (2026-05-06)
@@ -1599,6 +1607,7 @@ CrewAI で発火する builtin rule:
 
 ---
 
+<a id="adr-016"></a>
 # ADR-016: Baseline Fingerprint Stability
 
 ## ステータス
@@ -1651,6 +1660,7 @@ Baseline JSON は `{"version": 2, ...}` 形式。`version` 不在 or `1` は leg
 
 ---
 
+<a id="adr-017"></a>
 # ADR-017: application 層の yaml / plugin 依存 — 実依存グラフの明文化（Onion 例外）
 
 ## ステータス
@@ -1734,6 +1744,7 @@ plugin/plugin.go             → github.com/hatyibei/shingan/domain
 
 ---
 
+<a id="adr-018"></a>
 # ADR-018: ML-based dynamic confidence — capture-only feedback store（学習層は defer）
 
 ## ステータス
@@ -1804,6 +1815,147 @@ Bayesian/ML の較正エンジンは **意図的に defer** する。本 increme
 
 ---
 
+<a id="adr-019"></a>
+# ADR-019: 成長・配布チャネル戦略 — npx ゼロフリクション + GitHub Action を主獲得チャネルとする
+
+## ステータス
+採用 (2026-06-10, v0.9.x)
+
+## コンテキスト
+
+v0.9.1 を npm に公開して 1 週間弱。プロダクト表面は既に広い —
+npm / go install / Docker (GHCR) / GitHub Releases / GitHub Action + SARIF /
+LSP / MCP / Plugin SDK (`experimental:`) — が、これらは「作った」だけで
+「届けて」いない。メンテナは 1 名で、成長に投じられる時間は機能開発と
+ゼロサムである。
+
+成長戦略の実行計画は [docs/prd-growth.ja.md](docs/prd-growth.ja.md)
+(成長戦略 PRD) に切り出すが、PRD の施策群は「どの獲得チャネルを主軸に
+据えるか」という一段上の決定に依存する。この決定がないと、施策の優先順位が
+場当たりになり、単独メンテナの時間が分散して全チャネルが中途半端になる。
+
+関連する既存決定:
+
+- **ADR-011**(主戦場 LangGraph シフト)— 主ペルソナは LangGraph / CrewAI を
+  書く個人開発者と定めた。獲得チャネルはこのペルソナの生活導線上にあるべき。
+- **ADR-010**(Plugin SDK internal-first → v0.9 experimental 公開)—
+  コミュニティルールによるエコシステム成長はこの決定の延長線上にある。
+- **ADR-018**(capture-only feedback store)— 「解析パイプラインに何も
+  読み戻さない」という保守的な境界設計。テレメトリ判断でも同型の保守性を
+  採る根拠になる。
+
+また README は「informational CI (`continue-on-error`) が現時点の推奨」
+という operational gap を自認しており、blocking CI を売りにした
+エンタープライズ向け展開は v0.10 (PR bot / baseline 完成) まで成立しない。
+
+## 選択肢
+
+### 選択肢A: npx ゼロフリクションデモ + GitHub Action を主チャネル(developer-led, bottom-up)
+
+既存の `npx --yes shingan-lint demo`(30 秒・セットアップ不要)を入口の
+中心に置き、README デモ GIF → npx demo → GitHub Action という導線に投資を
+集中する。配布面は設定変更だけで増やせるもの(Homebrew tap / pre-commit /
+GitHub Marketplace 掲載)を優先。Web サイトは薄い LP に留める。
+
+### 選択肢B: Web サイト先行(shingan.dev をハブにしたコンテンツマーケ)
+
+shingan.dev にドキュメントサイト + ブラウザ playground を構築し、SEO と
+コンテンツマーケで流入を作る。記事・チュートリアルは自サイトに集約する。
+
+### 選択肢C: エンタープライズ / AppSec 先行
+
+org dashboard・SSO・監査レポート・営業資料を前倒しし、P2(プラットフォーム /
+AppSec チーム)への直接アプローチで「組織一括導入」を狙う。
+
+## 決定
+
+**選択肢A を採用する。** 付随して以下の 4 点を確定する:
+
+1. **配布チャネル拡張**: Homebrew tap(GoReleaser `brews:` 設定)・
+   pre-commit hook(`.pre-commit-hooks.yaml`)・GitHub Marketplace への
+   Action 掲載は即時(v0.9.x)。VS Code Marketplace への拡張公開は v0.10。
+   winget / scoop / apt は需要シグナルが出るまで見送り。
+   ※ README ロードマップは「Marketplace listing = v1.0」としていたが、
+   本 ADR で **v0.9.x に前倒し**する(掲載は機能安定性と独立であり、
+   Discover 面の確保は早いほど複利が効く)。
+2. **テレメトリ**: **v0.10 まで導入しない。** 導入を再検討する場合も
+   opt-in(`SHINGAN_TELEMETRY=1` または `.shingan.yaml` での明示)・匿名・
+   送信内容は version / rule-count のみ・ソースコードやワークフロー内容は
+   一切送信しない、を不変条件とする。ADR-018 が feedback store に課した
+   「パイプラインに何も読み戻さない」境界と同型の保守性を、外向きデータにも
+   適用する。
+3. **サイト戦略**: shingan.dev は GitHub Pages の薄い LP(価値提案 +
+   `npx demo` コマンド + docs へのリンク集)に限定する。技術コンテンツは
+   Zenn / dev.to / Show HN など**既存の流通網を持つ場**に置き、自サイトへの
+   SEO 投資はしない。
+4. **計測**: 成功判定は PRD §8 の代理指標(npm 週次 DL / Action 利用
+   リポジトリ数 / Stars)で行い、**計測のためのコード変更はしない**。
+
+## 根拠
+
+### 選択肢B(サイト先行)を却下する理由
+
+1. サイト + playground の構築・維持は単独メンテナの数週間を消費するが、
+   構築期間中の配布増はゼロ。一方 Homebrew / Marketplace 掲載は各半日で
+   恒久的な面を取れる。
+2. 主ペルソナ(ADR-011: LangGraph / CrewAI 開発者)の生活導線は npm・
+   GitHub・IDE であり、独立サイトは導線の外にある。検索流入は OWASP /
+   agent security 関連でまだ母数が小さく、SEO の回収が遅い。
+3. playground は Python subprocess(LangGraph / CrewAI シム)をブラウザで
+   再現できず、看板機能を見せられない。`npx demo` の方が実物に近い。
+
+### 選択肢C(エンタープライズ先行)を却下する理由
+
+1. blocking CI に耐える運用面(PR bot / baseline 完成 / 公開 FP ベンチ
+   マーク)は v0.10 まで揃わない。README が自認する gap を抱えたまま
+   AppSec チームに売り込むのは信頼を毀損する。
+2. 公開 FP ベンチマーク(v0.9 既定)前に procurement / vendor 評価へ進む
+   手段がない。順序として bottom-up での実績形成が先。
+3. 営業・サポート対応は単独メンテナのスループットを最も食う活動であり、
+   現体制では持続不能。
+
+### 選択肢A を採用する理由
+
+1. **限界費用がほぼゼロ**: `npx demo`・Action・SARIF・sticky PR コメントは
+   実装済み。残る投資は「見せ方」(GIF / Marketplace 掲載 / tap 設定)のみで、
+   いずれも S 工数。
+2. **ペルソナ整合**: ADR-011 の主戦場決定とチャネルが一致する。開発者は
+   npm / GitHub / IDE で発見し、その場で試し、その場で採用する。
+3. **先例**: ESLint / Prettier / ruff など developer-led で立ち上がった
+   リンター系 OSS はいずれも「ゼロ設定の最初の 1 分」と CI 統合を主チャネル
+   としてカテゴリを取った。Shingan は同型のプロダクトである。
+4. **テレメトリ非導入はポジショニングの一部**: PII 漏洩・prompt injection を
+   検出するセキュリティツールが利用データを送信するのは自己矛盾になる。
+   postinstall でのバイナリダウンロードという信頼支出を既に求めている以上、
+   「何も送らない」は明文化された競争優位として扱う。
+
+## 結果
+
+- [docs/prd-growth.ja.md](docs/prd-growth.ja.md) が本決定を施策・KPI・
+  マイルストーンに展開する(ペルソナ定義・ファネル分析・KPI ツリーは PRD 側が
+  正)。
+- README ロードマップの「Marketplace listing (v1.0)」は v0.9.x 前倒しに
+  読み替える(README 本文の更新は別コミットで行う)。
+- 配布面の追加(Homebrew tap / pre-commit / Marketplace)は GoReleaser・
+  リポジトリ設定の変更として v0.9.x 内で実施する。
+- テレメトリ関連のコードは v0.10 まで一切追加しない。再検討時は本 ADR の
+  改訂として記録する。
+
+### トレードオフ
+
+- **bottom-up 成長は遅い**: 複利は効くが立ち上がりは線形。エンタープライズ
+  収益シグナルの獲得は v0.10 以降に後ろ倒しになる。これは意図した遅延である。
+- **テレメトリなし = リテンションが見えない**: 定着の判断は代理指標
+  (バージョン追従ラグ・DL 反復パターン)のノイズを受け入れる。信頼という
+  資産との交換であり、受容する。
+- **配布面の維持コスト**: Homebrew / pre-commit / Marketplace はリリース
+  ごとの動作確認対象を増やす。GoReleaser 自動化で吸収するが、壊れた場合の
+  一次対応は単独メンテナに乗る。
+- **SEO 地盤の放棄**: 自サイトを薄く保つ分、検索面は将来の競合に取られうる。
+  カテゴリ確立後(v1.0 以降)に再投資判断する。
+
+---
+
 # 変更履歴
 
 | 日付 | 変更内容 | 変更者 |
@@ -1818,3 +1970,4 @@ Bayesian/ML の較正エンジンは **意図的に defer** する。本 increme
 | 2026-06-03 | ADR-016 追加。baseline fingerprint から message 全文を除外し `(rule, node_id, source_file, message_digest)` に変更。message のルール文言 typo 修正・数値変動・i18n で baseline が無効化される問題を解消。JSON schema v2 化 (v1 後方互換 load)、`RuleWithMessageTemplate` で安定 ID を提供可能に。 | hatyibei |
 | 2026-06-03 | ADR-017 追加。外部セキュリティレビュー (#31) が「application は domain のみに依存」というドキュメントとコード実態 (`application → yaml.v3` / `application → plugin → domain/rules・version・x/mod/semver`) の乖離を指摘。忠実なリファクタは公開 SDK (`plugin`) 面に波及するため、Option B（実依存グラフの明文化 + 限定例外の受容）を採用。コード変更なし。 | hatyibei |
 | 2026-06-04 | ADR-018 追加。#3 (ML-based dynamic confidence) の第一歩として **capture-only** な feedback store のみを実装し、Bayesian/ML 較正エンジンは意図的に defer。既存 `domain.FindingFingerprint` をキーに `FeedbackRecord{Fingerprint, Label(tp\|fp), Source, Timestamp}` を JSONL 永続化 (`infrastructure/feedback` + `shingan feedback`)。`shingan analyze` の挙動はゼロ変更。将来の学習層の design knobs（学習粒度 `rule × ConfidenceReason`、`exact_static_match` は学習対象外、prior strength `k`、バケット最小観測数、CI 決定性のため事後下限でゲート）を記録。 | hatyibei |
+| 2026-06-10 | ADR-019 追加。成長・配布チャネル戦略を確定 — npx ゼロフリクションデモ + GitHub Action を主獲得チャネル（選択肢A、developer-led）に採用。配布拡張は Homebrew tap / pre-commit / GitHub Marketplace を v0.9.x 即時（README の v1.0 予定を前倒し）、VS Code Marketplace は v0.10、winget/scoop は見送り。テレメトリは v0.10 まで非導入（再検討時も opt-in・匿名・version/rule-count のみ）。shingan.dev は薄い LP に限定しコンテンツは既存流通網（Zenn/dev.to/HN）へ。実行計画として `docs/prd-growth.ja.md`（成長戦略 PRD: ペルソナ・ファネル分析・KPI ツリー・3/6/12ヶ月目標・施策一覧）を新規作成。目次に ADR-013/016/017/018/019 を追補しアンカーを復元 | hatyibei |
