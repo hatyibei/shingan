@@ -164,6 +164,19 @@ docker pull ghcr.io/hatyibei/shingan:latest
 docker run --rm ghcr.io/hatyibei/shingan demo
 ```
 
+### pre-commit hook
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/hatyibei/shingan
+    rev: v0.9.1
+    hooks:
+      - id: shingan
+```
+
+コミットのたびにエージェントワークフローを解析します。format / input の設定は [docs/pre-commit.md](./docs/pre-commit.md)(英語)を参照。
+
 ## 使い方
 
 JSON入力の例 (デフォルト):
@@ -295,8 +308,8 @@ go test -tags=demo -v -run TestDemo_ .
 - **v0.6** (2026-05): ESLint方式 visitor + 3層分離 (ADR-006/007)、shingan-lsp、shingan-mcp、LangGraph parser、20 ルール、`shingan-lint` npm 配布、tag→Release→npm-publish 自動化 ✓
 - **v0.7** (May 2026): n8n parser (純 Go、JSON DSL)、bilingual EN/JA docs ✓
 - **v0.8** (May 2026): CrewAI parser (Python shim、LangGraph PythonWorker 再利用)、6 frameworks 対応 ✓
-- **v0.9+**: Mastra parser (TypeScript bridge)、ルール 30+、Plugin SDK 公開準備、公式サイト + 動画
-- **v1.0**: 5+ framework × 25+ rules、Plugin SDK GA、Marketplace 公開
+- **v0.9+**: Mastra parser (TypeScript bridge)、ルール 30+、Plugin SDK 公開準備、公式サイト + 動画、GitHub Marketplace 掲載 + pre-commit hook（ADR-019 で前倒し）
+- **v1.0**: 5+ framework × 25+ rules、Plugin SDK GA
 
 ## 開発
 

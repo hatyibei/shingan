@@ -1,0 +1,30 @@
+# pre-commit hooks for https://github.com/hatyibei/shingan
+#
+# Runs `shingan analyze` against the repository before each commit so dangerous
+# workflow structures (infinite loops, cost explosions, PII leak paths,
+# prompt-injection sinks) are caught before they ever reach CI.
+#
+# The default targets LangGraph projects (the primary supported framework,
+# ADR-011). Override `args` in your .pre-commit-config.yaml to match your
+# project, e.g.:
+#
+#   repos:
+#     - repo: https://github.com/hatyibei/shingan
+#       rev: v0.9.1
+#       hooks:
+#         - id: shingan
+#           args: ["analyze", "--format", "crewai", "--input", "./agents/"]
+#
+# Supported formats: json, adk-go, samurai, langgraph, n8n, crewai,
+# langgraph-js, pydantic-graph, llamaindex, autogen, mastra, openai-agents.
+
+- id: shingan
+  name: shingan (AI agent workflow static analysis)
+  description: >-
+    Static analysis for AI agent workflows — detects infinite loops, runaway
+    cost paths, PII leaks, and prompt-injection sinks before runtime.
+  entry: shingan
+  args: ["analyze", "--format", "langgraph", "--input", "."]
+  language: golang
+  pass_filenames: false
+  files: \.(py|go|ts|mts|json)$
