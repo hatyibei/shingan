@@ -164,6 +164,19 @@ docker pull ghcr.io/hatyibei/shingan:latest
 docker run --rm ghcr.io/hatyibei/shingan demo
 ```
 
+### pre-commit hook
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/hatyibei/shingan
+    rev: v0.9.1
+    hooks:
+      - id: shingan
+```
+
+Analyzes your agent workflows before every commit. See [docs/pre-commit.md](./docs/pre-commit.md) for format/input configuration.
+
 ## Usage
 
 JSON input (default format):
@@ -374,8 +387,8 @@ Every dogfood-driven FP fix shipped since v0.5 is listed in [docs/benchmarks.md 
 - **v0.6** (May 2026): ESLint-style visitor + 3-tier split (ADR-006/007), shingan-lsp, shingan-mcp, LangGraph parser, 20 rules, `shingan-lint` npm distribution, tag→release→npm-publish automation ✓
 - **v0.7** (May 2026): n8n parser (pure Go, JSON DSL), bilingual EN/JA docs ✓
 - **v0.8** (May 2026): CrewAI parser (Python shim, reuses LangGraph PythonWorker), 6 frameworks total ✓
-- **v0.9+**: Mastra parser (TypeScript bridge), 30+ rules, Plugin SDK preview, official site + demo video
-- **v1.0**: 5+ frameworks × 25+ rules, Plugin SDK GA, Marketplace listing
+- **v0.9+**: Mastra parser (TypeScript bridge), 30+ rules, Plugin SDK preview, official site + demo video, GitHub Marketplace listing + pre-commit hook (pulled forward per ADR-019)
+- **v1.0**: 5+ frameworks × 25+ rules, Plugin SDK GA
 
 ## Development
 
