@@ -4,6 +4,7 @@ package rules
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/hatyibei/shingan/domain"
 )
@@ -86,7 +87,20 @@ func (c *CycleDetector) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
 		// Extend path with the current node for descendants to inspect.
 		currentPath := append(path, nodeID)
 
-		for _, edge := range graph.OutgoingEdges(nodeID) {
+		// Walk outgoing edges in a deterministic order. OutgoingEdges follows
+		// the parser's edge-construction order, which for the n8n parser is
+		// driven by Go map iteration (non-deterministic). Since the DFS visit
+		// order decides WHICH node of a multi-node cycle is reported as the
+		// back-edge target, an unsorted walk makes cycle_detection
+		// non-deterministic — the same workflow flags a different node each run.
+		outgoing := graph.OutgoingEdges(nodeID)
+		sort.Slice(outgoing, func(i, j int) bool {
+			if outgoing[i].To != outgoing[j].To {
+				return outgoing[i].To < outgoing[j].To
+			}
+			return outgoing[i].Condition < outgoing[j].Condition
+		})
+		for _, edge := range outgoing {
 			target := edge.To
 
 			switch state[target] {
@@ -127,7 +141,14 @@ func (c *CycleDetector) Analyze(graph *domain.WorkflowGraph) []domain.Finding {
 	}
 
 	// Also visit nodes not reachable from the entry to catch isolated cycles.
+	// Sorted for determinism: map iteration order would otherwise vary the DFS
+	// start node across runs (see the outgoing-edge sort above).
+	isolated := make([]string, 0, len(graph.Nodes))
 	for id := range graph.Nodes {
+		isolated = append(isolated, id)
+	}
+	sort.Strings(isolated)
+	for _, id := range isolated {
 		if state[id] == unvisited {
 			dfs(id, nil)
 		}
