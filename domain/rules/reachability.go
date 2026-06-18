@@ -2,6 +2,7 @@ package rules
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/hatyibei/shingan/domain"
 )
@@ -92,23 +93,47 @@ func (r *ReachabilityChecker) Analyze(graph *domain.WorkflowGraph) []domain.Find
 	}
 
 	// BFS to collect all reachable node IDs.
+	// n8n langchain sub-resources (model / tool / memory / output parser)
+	// attach to an AI Agent via ai_* edges that point sub-resource → Agent.
+	// For REACHABILITY these must be undirected: a sub-resource of a reachable
+	// Agent is itself reachable (the Agent invokes it at runtime). Without
+	// this, every model/tool/memory node in a langchain workflow is a spurious
+	// unreachable_node FP. We add only a reverse lookup here, so the directed
+	// graph that cycle_detection consumes is left untouched (a directed ai_*
+	// edge must NOT become a 2-cycle).
+	aiReverse := make(map[string][]string)
+	for id := range graph.Nodes {
+		for _, edge := range graph.OutgoingEdges(id) {
+			if strings.HasPrefix(edge.Condition, "ai_") {
+				aiReverse[edge.To] = append(aiReverse[edge.To], edge.From)
+			}
+		}
+	}
+
 	visited := make(map[string]bool, len(graph.Nodes))
 	queue := []string{graph.EntryNodeID}
 	visited[graph.EntryNodeID] = true
+
+	visit := func(target string) {
+		if !visited[target] {
+			if _, ok := graph.Nodes[target]; ok {
+				visited[target] = true
+				queue = append(queue, target)
+			}
+			// dangling edge reference — out of scope for this rule, skip
+		}
+	}
 
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
 
 		for _, edge := range graph.OutgoingEdges(current) {
-			target := edge.To
-			if !visited[target] {
-				if _, ok := graph.Nodes[target]; ok {
-					visited[target] = true
-					queue = append(queue, target)
-				}
-				// dangling edge reference — out of scope for this rule, skip
-			}
+			visit(edge.To)
+		}
+		// Undirected traversal of ai_* sub-resource edges only.
+		for _, src := range aiReverse[current] {
+			visit(src)
 		}
 	}
 

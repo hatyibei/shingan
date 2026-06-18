@@ -204,6 +204,49 @@ func TestReachabilityChecker_NilGraph(t *testing.T) {
 	}
 }
 
+// n8n langchain sub-resources attach to an AI Agent via ai_* edges pointing
+// sub-resource → Agent. They must be reachable once the Agent is, even though
+// nothing flows INTO them. Without undirected ai_* handling this is a
+// systematic unreachable_node FP on every langchain AI workflow.
+func TestReachabilityChecker_AISubResourceReachableViaAgent(t *testing.T) {
+	graph := mustBuild(t, testutil.NewBuilder().
+		AddNode("trigger", domain.NodeTypeControl).
+		AddNode("agent", domain.NodeTypeLLM).
+		AddNode("model", domain.NodeTypeLLM).
+		AddNode("tool", domain.NodeTypeTool).
+		AddEdge("trigger", "agent").
+		AddConditionalEdge("model", "agent", "ai_languageModel").
+		AddConditionalEdge("tool", "agent", "ai_tool").
+		Entry("trigger"))
+
+	findings := rules.NewReachabilityChecker().Analyze(graph)
+	if len(findings) != 0 {
+		t.Errorf("ai_* sub-resources of a reachable Agent must be reachable; got %d findings: %+v", len(findings), findings)
+	}
+}
+
+// The undirected ai_* hop must not leak: if the Agent itself is unreachable,
+// its sub-resources stay unreachable (no spurious reachability via ai_* alone).
+func TestReachabilityChecker_AISubResourceUnreachableIfAgentIsolated(t *testing.T) {
+	graph := mustBuild(t, testutil.NewBuilder().
+		AddNode("trigger", domain.NodeTypeControl).
+		AddNode("sink", domain.NodeTypeOutput).
+		AddNode("agent", domain.NodeTypeLLM).
+		AddNode("model", domain.NodeTypeLLM).
+		AddEdge("trigger", "sink").
+		AddConditionalEdge("model", "agent", "ai_languageModel").
+		Entry("trigger"))
+
+	findings := rules.NewReachabilityChecker().Analyze(graph)
+	got := map[string]bool{}
+	for _, f := range findings {
+		got[f.NodeID] = true
+	}
+	if !got["agent"] || !got["model"] {
+		t.Errorf("isolated Agent + its ai_* sub-resource must both be unreachable; got %+v", findings)
+	}
+}
+
 // TestReachabilityChecker_Confidence verifies all findings have Confidence == 1.0.
 func TestReachabilityChecker_Confidence(t *testing.T) {
 	// Graph with an unreachable node.
