@@ -130,6 +130,44 @@ func TestCycleDetector_Critical_NonControlCycle(t *testing.T) {
 	}
 }
 
+// A multi-node cycle that is NOT reachable from the entry is discovered via the
+// isolated-cycle pass, whose DFS start order used to follow Go map iteration —
+// so the reported back-edge node varied run to run. Both the isolated-start
+// order and the per-node outgoing-edge order are now sorted, so the reported
+// node must be stable across repeated analyses (and equal to the sorted-first
+// node "a", since DFS a→b→c closes back onto a).
+func TestCycleDetector_DeterministicIsolatedCycle(t *testing.T) {
+	// Nodes added out of order to make the pre-fix map-iteration flakiness
+	// surface; entry is an unrelated, edge-less Output node.
+	g := mustBuild(t, testutil.NewBuilder().
+		AddNode("entry", domain.NodeTypeOutput).
+		AddNode("c", domain.NodeTypeLLM).
+		AddNode("a", domain.NodeTypeLLM).
+		AddNode("b", domain.NodeTypeLLM).
+		AddEdge("a", "b").
+		AddEdge("b", "c").
+		AddEdge("c", "a"). // isolated 3-node cycle a→b→c→a
+		Entry("entry"))
+
+	checker := rules.NewCycleDetector()
+	nodeOf := func() string {
+		fs := checker.Analyze(g)
+		if len(fs) != 1 {
+			t.Fatalf("expected exactly 1 cycle finding, got %d: %+v", len(fs), fs)
+		}
+		return fs[0].NodeID
+	}
+	want := nodeOf()
+	for i := 0; i < 50; i++ {
+		if got := nodeOf(); got != want {
+			t.Fatalf("run %d reported node %q, want %q — cycle_detection is non-deterministic", i, got, want)
+		}
+	}
+	if want != "a" {
+		t.Errorf("deterministic cycle node = %q, want %q", want, "a")
+	}
+}
+
 // Case 6: max_iterations が境界値 99 → 正常（検出ゼロ）
 func TestCycleDetector_NoFindings_MaxIterations99(t *testing.T) {
 	g := mustBuild(t, testutil.NewBuilder().
