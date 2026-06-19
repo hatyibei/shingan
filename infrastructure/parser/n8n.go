@@ -410,6 +410,16 @@ func pickEntryNode(nodes map[string]*domain.Node, order []string, edges []domain
 func mapN8nNodeType(t string) (domain.NodeType, string) {
 	lt := strings.ToLower(t)
 
+	// Triggers FIRST — before the broad "n8n-nodes-langchain → LLM" rule below.
+	// @n8n/n8n-nodes-langchain.chatTrigger / manualChatTrigger contain
+	// "n8n-nodes-langchain", so without this they were mis-typed as LLM, lost
+	// their trigger category, and were never picked as the entry node. In an
+	// AI chat workflow the chatTrigger is usually the ONLY entry, so the whole
+	// graph (Agent + model + memory + tools) then became unreachable_node FPs.
+	if containsAny(lt, "webhook", "trigger") {
+		return domain.NodeTypeTool, "trigger"
+	}
+
 	// LLM family — explicit patterns first because some patterns overlap
 	// with the Tool default ("api" e.g. "openai" contains "ai" but not "api").
 	switch {
@@ -434,12 +444,8 @@ func mapN8nNodeType(t string) (domain.NodeType, string) {
 		return domain.NodeTypeCondition, ""
 	}
 
-	// Triggers / webhooks — entry node candidates. Note: n8n type strings
-	// for triggers usually end in "trigger" or are "webhook"; we also accept
-	// "manualtrigger" because the manual-fire button is a common entry.
-	if containsAny(lt, "webhook", "trigger") {
-		return domain.NodeTypeTool, "trigger"
-	}
+	// (Trigger / webhook classification happens at the top of this function,
+	// before the langchain→LLM rule, so chatTrigger is not mis-typed as LLM.)
 
 	// HTTP / API.
 	if containsAny(lt, "httprequest", "http", ".api", "rest") {

@@ -325,6 +325,36 @@ func TestN8nParser_AIAgentNode(t *testing.T) {
 	checkNodeType(t, graph, "PromptChain", domain.NodeTypeLLM)
 }
 
+// TestN8nParser_ChatTriggerIsEntry guards the classification-order fix:
+// @n8n/n8n-nodes-langchain.chatTrigger contains "n8n-nodes-langchain", so the
+// broad langchain→LLM rule would mis-type it as an LLM, strip its trigger
+// category, and leave it unpicked as the entry — orphaning the whole AI chat
+// workflow downstream. It must be a trigger Tool AND the chosen entry node.
+func TestN8nParser_ChatTriggerIsEntry(t *testing.T) {
+	input := []byte(`{
+		"name": "Chat Agent",
+		"nodes": [
+			{"id": "1", "name": "When chat message received", "type": "@n8n/n8n-nodes-langchain.chatTrigger",  "parameters": {}, "position": [0, 0]},
+			{"id": "2", "name": "AI Agent",                    "type": "@n8n/n8n-nodes-langchain.agent",        "parameters": {}, "position": [0, 0]},
+			{"id": "3", "name": "OpenAI Chat Model",           "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi", "parameters": {}, "position": [0, 0]}
+		],
+		"connections": {
+			"When chat message received": { "main": [[{"node": "AI Agent", "type": "main", "index": 0}]] },
+			"OpenAI Chat Model": { "ai_languageModel": [[{"node": "AI Agent", "type": "ai_languageModel", "index": 0}]] }
+		}
+	}`)
+
+	p := parser.NewN8nParser()
+	graph, err := p.Parse(input)
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	checkNodeType(t, graph, "When chat message received", domain.NodeTypeTool)
+	if graph.EntryNodeID != "When chat message received" {
+		t.Errorf("entry = %q, want the chatTrigger node (else the workflow orphans)", graph.EntryNodeID)
+	}
+}
+
 // TestN8nParser_NodeIDFromName validates that a node's "name" field becomes
 // its Node.ID in the resulting WorkflowGraph (n8n connections key by name).
 func TestN8nParser_NodeIDFromName(t *testing.T) {
