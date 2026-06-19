@@ -355,6 +355,50 @@ func TestN8nParser_ChatTriggerIsEntry(t *testing.T) {
 	}
 }
 
+// TestN8nParser_IndependentMainSubgraphRoot guards the entryRootIDs fix (#57):
+// n8n bundles independent flows in one document. A second flow whose head has
+// no incoming main edge ("Set domain") is a legitimate execution entry and must
+// be wired from the synthesised virtual root, so reachability does not report
+// its whole subgraph as unreachable_node. A fully-detached node ("Dead": no in,
+// no out) is NOT a root and must stay flaggable.
+func TestN8nParser_IndependentMainSubgraphRoot(t *testing.T) {
+	input := []byte(`{
+		"name": "Multi-flow",
+		"nodes": [
+			{"id": "1", "name": "Trigger",     "type": "n8n-nodes-base.manualTrigger", "parameters": {}, "position": [0, 0]},
+			{"id": "2", "name": "Main Step",   "type": "n8n-nodes-base.set",            "parameters": {}, "position": [0, 0]},
+			{"id": "3", "name": "Set domain",  "type": "n8n-nodes-base.set",            "parameters": {}, "position": [0, 0]},
+			{"id": "4", "name": "Get website", "type": "n8n-nodes-base.httpRequest",    "parameters": {}, "position": [0, 0]},
+			{"id": "5", "name": "Dead",        "type": "n8n-nodes-base.set",            "parameters": {}, "position": [0, 0]}
+		],
+		"connections": {
+			"Trigger":    { "main": [[{"node": "Main Step",   "type": "main", "index": 0}]] },
+			"Set domain": { "main": [[{"node": "Get website", "type": "main", "index": 0}]] }
+		}
+	}`)
+
+	p := parser.NewN8nParser()
+	graph, err := p.Parse(input)
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if graph.EntryNodeID != "__n8n_multi_trigger_root__" {
+		t.Fatalf("EntryNodeID = %q, want the synthesised virtual root", graph.EntryNodeID)
+	}
+	rooted := map[string]bool{}
+	for _, e := range graph.Edges {
+		if e.From == "__n8n_multi_trigger_root__" {
+			rooted[e.To] = true
+		}
+	}
+	if !rooted["Trigger"] || !rooted["Set domain"] {
+		t.Errorf("both Trigger and the independent head \"Set domain\" must be virtual-root children; got %v", rooted)
+	}
+	if rooted["Dead"] {
+		t.Errorf("fully-detached \"Dead\" must NOT be a root (it should stay unreachable_node)")
+	}
+}
+
 // TestN8nParser_NodeIDFromName validates that a node's "name" field becomes
 // its Node.ID in the resulting WorkflowGraph (n8n connections key by name).
 func TestN8nParser_NodeIDFromName(t *testing.T) {
