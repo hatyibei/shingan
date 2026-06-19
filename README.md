@@ -177,6 +177,26 @@ repos:
 
 Analyzes your agent workflows before every commit. See [docs/pre-commit.md](./docs/pre-commit.md) for format/input configuration.
 
+### AI coding agent hook (Claude Code)
+
+Catch infinite loops, cost explosions and missing error paths the moment your
+agent *writes* a workflow — one loop iteration before the commit hook, inside
+the agent's own edit loop.
+
+```bash
+shingan hook install          # registers a PostToolUse hook in .claude/settings.json
+# or, for every project:
+shingan hook install --global # → ~/.claude/settings.json
+```
+
+Now whenever the agent saves a workflow file, shingan analyzes it with
+`--format auto` (no per-project config). A **Critical** finding exits 2 with the
+reason on stderr, so the agent reads it, adds the missing `recursion_limit` /
+`max_iterations` / error branch, and re-saves on the spot. Warnings are
+surfaced but never block; non-workflow files are skipped. Works across every
+supported framework via auto-detection. The hook is the `shingan` binary
+itself — no extra script, `jq`, or Python required.
+
 ## Usage
 
 JSON input (default format):
