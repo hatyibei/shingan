@@ -107,7 +107,7 @@ needing your own input file.`,
 	}
 
 	cmd.Flags().StringVar(&flags.input, "input", "", "Path to the workflow file or directory (required)")
-	cmd.Flags().StringVar(&flags.format, "format", "json", "Input format: json, adk-go, samurai, langgraph, n8n, crewai, langgraph-js, pydantic-graph, llamaindex, autogen, mastra, or openai-agents")
+	cmd.Flags().StringVar(&flags.format, "format", "json", "Input format: auto, json, adk-go, samurai, langgraph, n8n, crewai, langgraph-js, pydantic-graph, llamaindex, autogen, mastra, or openai-agents. 'auto' infers from extension + content (ideal for editor/agent hooks).")
 	cmd.Flags().StringVar(&flags.output, "output", "json", "Output format: json, markdown, or sarif")
 	cmd.Flags().StringVar(&flags.outputFile, "output-file", "", "Output file path (default: stdout)")
 	cmd.Flags().Float64Var(&flags.minConfidence, "min-confidence", 0.0, "Exclude findings with confidence below this threshold (0.0–1.0)")
@@ -129,6 +129,16 @@ func executeAnalyze(flags *analyzeFlags) (int, error) {
 	inputFormat := flags.format
 	if inputFormat == "" {
 		inputFormat = "json"
+	}
+	if inputFormat == "auto" {
+		detected := detectFormat(flags.input)
+		if detected == "" {
+			return 1, fmt.Errorf(
+				"--format auto could not detect a supported workflow format for %q; pass --format explicitly (json, adk-go, langgraph, n8n, crewai, langgraph-js, pydantic-graph, llamaindex, autogen, mastra, openai-agents)",
+				flags.input)
+		}
+		fmt.Fprintf(os.Stderr, "shingan: auto-detected format %q\n", detected)
+		inputFormat = detected
 	}
 	outputFormat := flags.output
 	if outputFormat == "" {
