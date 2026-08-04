@@ -1,6 +1,7 @@
 package rules_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/hatyibei/shingan/domain"
@@ -381,6 +382,56 @@ func TestCycleDetector_NoEndBranchIsCritical(t *testing.T) {
 	}
 	if findings[0].Severity != domain.Critical {
 		t.Errorf("severity = %v, want Critical (no exit branch)", findings[0].Severity)
+	}
+}
+
+// TestCycleDetector_StructuralExitEdge_BoundedRevisionLoop reproduces the
+// real-world finding filed as open_deep_research#269
+// (langchain-ai/open_deep_research legacy/graph.py): a human-in-the-loop
+// plan-revision cycle
+//
+//	generate_report_plan → human_feedback → generate_report_plan → …
+//
+// that exits only when the operator accepts the plan
+// (human_feedback → build_section_with_web_research, the research path).
+//
+// Unlike TestCycleDetector_HasEndBranchExit — which routes to the END
+// sentinel and is surfaced via the parser's Node.HasExitBranch flag —
+// here the exit is a STRUCTURAL edge to a real in-graph node outside the
+// cycle. That drives cycleHasExit's edge-scan branch (an in-cycle node
+// with an outgoing edge whose target is not in the cycle set), which no
+// other domain test exercised. The cycle is bounded (an accept path
+// exists) but has no explicit max_iterations / recursion_limit guard, so
+// the rule must classify it as a Warning at confidence 0.9 rather than a
+// Critical graph-definition error, and must report the LLM cycle-entry
+// node (generate_report_plan), matching the shingan trace in the issue.
+func TestCycleDetector_StructuralExitEdge_BoundedRevisionLoop(t *testing.T) {
+	g := mustBuild(t, testutil.NewBuilder().
+		AddNode("generate_report_plan", domain.NodeTypeLLM).
+		AddNode("human_feedback", domain.NodeTypeHuman).
+		// The accept path leaves the cycle: it is the structural exit edge.
+		AddNode("build_section_with_web_research", domain.NodeTypeLLM).
+		AddEdge("generate_report_plan", "human_feedback").
+		AddEdge("human_feedback", "generate_report_plan").            // revise → back edge
+		AddEdge("human_feedback", "build_section_with_web_research"). // accept → exit
+		Entry("generate_report_plan"))
+
+	findings := rules.NewCycleDetector().Analyze(g)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d: %+v", len(findings), findings)
+	}
+	f := findings[0]
+	if f.Severity != domain.Warning {
+		t.Errorf("Severity = %v, want Warning (bounded cycle with a structural exit edge)", f.Severity)
+	}
+	if f.NodeID != "generate_report_plan" {
+		t.Errorf("NodeID = %q, want %q (LLM cycle-entry node reported in the issue)", f.NodeID, "generate_report_plan")
+	}
+	if f.Confidence != 0.9 {
+		t.Errorf("Confidence = %.2f, want 0.90", f.Confidence)
+	}
+	if !strings.Contains(f.Message, "bounded cycle through non-Loop node") {
+		t.Errorf("Message = %q, want it to describe a bounded cycle through a non-Loop node", f.Message)
 	}
 }
 
