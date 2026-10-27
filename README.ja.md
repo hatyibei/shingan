@@ -177,6 +177,18 @@ repos:
 
 コミットのたびにエージェントワークフローを解析します。format / input の設定は [docs/pre-commit.md](./docs/pre-commit.md)(英語)を参照。
 
+### AI コーディングエージェントの hook（Claude Code）
+
+エージェントがワークフローを**書いた瞬間**に、無限ループ・コスト爆発・エラー処理漏れを検出します。commit hook より1ループ早く、エージェント自身の編集ループの中で効きます。
+
+```bash
+shingan hook install          # .claude/settings.json に PostToolUse hook を登録
+# 全プロジェクト共通にするなら:
+shingan hook install --global # → ~/.claude/settings.json
+```
+
+以降、エージェントがワークフローファイルを保存するたびに、shingan が `--format auto`（プロジェクトごとの設定不要）で解析します。**Critical** が出ると exit 2 で理由を stderr に返すので、エージェントはそれを読んで不足している `recursion_limit` / `max_iterations` / エラー分岐を追加し、その場で再保存します。Warning は通知のみで block しません。ワークフロー以外のファイルはスキップ。対応フレームワークすべてで自動判定が効きます。hook の実体は `shingan` バイナリ自身なので、追加スクリプトや `jq` / Python は不要です。
+
 ## 使い方
 
 JSON入力の例 (デフォルト):

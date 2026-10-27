@@ -86,6 +86,7 @@ Output: markdown, JSON, or SARIF (GitHub Code Scanning compatible).`,
 	}
 
 	cmd.AddCommand(newAnalyzeCmd())
+	cmd.AddCommand(newHookCmd())
 	cmd.AddCommand(newDemoCmd())
 	cmd.AddCommand(newListRulesCmd())
 	cmd.AddCommand(newExplainCmd())
