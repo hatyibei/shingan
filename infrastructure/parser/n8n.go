@@ -292,13 +292,13 @@ func (p *N8nParser) Parse(input []byte) (*domain.WorkflowGraph, error) {
 	// the Deep Research / Multi-Agent workflows in Zie619/n8n-workflows.
 	// When >1 entry candidate exists we synthesise a virtual root node
 	// connected to each so reachability rules see the full union.
-	triggerIDs := allTriggerNodeIDs(nodes, nodeOrder, edges)
+	rootIDs := entryRootIDs(nodes, nodeOrder, edges)
 	var entryID string
-	if len(triggerIDs) >= 2 {
+	if len(rootIDs) >= 2 {
 		const virtualRoot = "__n8n_multi_trigger_root__"
 		nodes[virtualRoot] = &domain.Node{
 			ID:   virtualRoot,
-			Name: "(virtual multi-trigger root)",
+			Name: "(virtual multi-root entry)",
 			Type: domain.NodeTypeTool,
 			Config: map[string]any{
 				"category": "trigger",
@@ -306,7 +306,7 @@ func (p *N8nParser) Parse(input []byte) (*domain.WorkflowGraph, error) {
 			},
 			ToolCategory: "trigger",
 		}
-		for _, tid := range triggerIDs {
+		for _, tid := range rootIDs {
 			edges = append(edges, domain.Edge{From: virtualRoot, To: tid})
 		}
 		entryID = virtualRoot
@@ -321,22 +321,39 @@ func (p *N8nParser) Parse(input []byte) (*domain.WorkflowGraph, error) {
 	}, nil
 }
 
-// allTriggerNodeIDs returns every node ID whose `Config["category"]`
-// is "trigger" — the substring-matched `webhook` / `*Trigger` /
-// `manualTrigger` / `respondToWebhook` family. We deliberately exclude
-// "orphaned" non-trigger nodes (no incoming edge) because those are
-// exactly the case `unreachable_node` is supposed to flag.
+// entryRootIDs returns the node IDs that should seed reachability: every
+// trigger, PLUS the head of every independent main subgraph — a node with no
+// incoming `main` edge but at least one outgoing `main` edge.
 //
-// Returns the IDs in declaration order so the synthesised virtual root
-// is deterministic.
-func allTriggerNodeIDs(nodes map[string]*domain.Node, order []string, _ []domain.Edge) []string {
+// n8n documents routinely bundle several independent flows: a triggered main
+// flow alongside manually-run fragments or sub-workflow bodies that the author
+// starts from an arbitrary node. The head of each such fragment is a legitimate
+// execution entry, so seeding reachability only from triggers reported the
+// entire fragment as unreachable_node (dogfood: 125 FPs across 308 workflows,
+// e.g. the crawler subgraph rooted at "Set domain (URL)").
+//
+// Fully-detached nodes (no incoming AND no outgoing main edge) are NOT roots,
+// so genuinely dead nodes still surface as unreachable_node. ai_* edges are
+// ignored here: the reachability rule already treats them as undirected, and a
+// sub-resource (model/memory/tool) has only ai_* edges, so it never becomes a
+// spurious root. Returns IDs in declaration order for a deterministic root.
+func entryRootIDs(nodes map[string]*domain.Node, order []string, edges []domain.Edge) []string {
+	mainIn := make(map[string]int)
+	mainOut := make(map[string]int)
+	for _, e := range edges {
+		if strings.HasPrefix(e.Condition, "ai_") {
+			continue
+		}
+		mainOut[e.From]++
+		mainIn[e.To]++
+	}
 	out := make([]string, 0, 4)
 	for _, id := range order {
 		n, ok := nodes[id]
 		if !ok || n == nil {
 			continue
 		}
-		if n.GetToolCategory() == "trigger" {
+		if n.GetToolCategory() == "trigger" || (mainIn[id] == 0 && mainOut[id] > 0) {
 			out = append(out, id)
 		}
 	}
