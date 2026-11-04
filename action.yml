@@ -7,7 +7,7 @@ branding:
 
 inputs:
   format:
-    description: "Input format (json / adk-go / samurai)"
+    description: "Input format: auto / json / adk-go / samurai / langgraph / n8n / crewai / langgraph-js / pydantic-graph / llamaindex / autogen / mastra / openai-agents ('auto' infers from extension + content)"
     required: false
     default: "adk-go"
   input:

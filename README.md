@@ -119,7 +119,7 @@ cat > workflow.json <<'EOF'
   ]
 }
 EOF
-npx --yes shingan-lint analyze --input workflow.json --output markdown
+npx --yes shingan-lint analyze workflow.json
 ```
 
 ## Install
@@ -199,13 +199,22 @@ itself — no extra script, `jq`, or Python required.
 
 ## Usage
 
-JSON input (default format):
+Point it at a file or a directory — the framework is detected from the
+extension and content, and findings print as Markdown in a terminal (JSON when
+piped or redirected):
 
 ```bash
-shingan analyze --input workflow.json --output markdown
+shingan analyze workflow.json          # shingan JSON graph or n8n export
+shingan analyze ./n8n-workflows/       # every n8n export in the folder
+shingan analyze ./agents/              # LangGraph / CrewAI / ADK-Go / … project
 ```
 
-ADK-Go input (directory of `.go` files):
+`--format <name>` overrides detection, `-o json|markdown|sarif` overrides the
+output, and `--input <path>` still works in place of the positional path.
+Dependency trees (`node_modules`, `.venv`, `.git`, …) are skipped during
+directory walks.
+
+ADK-Go input (directory of `.go` files), explicit format:
 
 ```bash
 shingan analyze --format adk-go --input ./agents/ --output markdown

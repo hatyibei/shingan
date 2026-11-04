@@ -219,34 +219,69 @@ def _returned_node_name(expr: _ast.expr) -> Optional[str]:
     return _leaf_name(expr)
 
 
-def _run_body_return_names(run_fn) -> List[str]:
-    """Node/``End`` names from the ``return ...`` statements in run()'s body.
+def _is_const_false(test: _ast.expr) -> bool:
+    """True when an ``if`` / ``while`` test is a falsy literal (``False``,
+    ``0``, ``None``, ``""``) — i.e. its body can never execute."""
+    return isinstance(test, _ast.Constant) and not test.value
+
+
+def _is_const_true(test: _ast.expr) -> bool:
+    """True when an ``if`` test is a truthy literal — its ``else`` is dead."""
+    return isinstance(test, _ast.Constant) and bool(test.value)
+
+
+def _run_body_return_split(run_fn) -> Tuple[List[str], Set[str]]:
+    """Split run()'s ``return XNode()`` targets into (live, dead-only).
 
     The return-type ANNOTATION is pydantic-graph's documented contract, but
     real code frequently annotates only one of several returned node types
     (dogfood 2026-06-01: aidev9/tuts ``ModeratorNode`` is annotated
-    ``-> ProNode`` yet returns ``ProNode``/``ConNode``/``DecisionNode``).
-    Reading the body recovers the missing edges so we don't emit a false
-    no-exit cycle + false unreachable. Nested functions are skipped (their
-    returns are not this run()'s).
-    """
-    names: List[str] = []
-    if run_fn is None:
-        return names
+    ``-> ProNode`` yet returns ``ProNode``/``ConNode``/``DecisionNode``), so
+    the live body returns are unioned with the annotation to recover edges.
 
-    def visit(n: _ast.AST) -> None:
+    ``live`` are returns reachable under normal control flow, in source order.
+    ``dead`` are names returned ONLY inside statically-dead branches
+    (``if False:`` / ``if 0:`` bodies, the ``else`` of ``if True:``,
+    ``while False:`` bodies). The caller uses ``dead`` to drop an annotation
+    leaf whose only corresponding return the author explicitly disabled
+    (issue #40: X-Zero-L/pydantic-ai-deep-research ``HumanFeedback.run``
+    annotates ``Union['ReportPlanner', ...]`` but gates that return behind
+    ``if False:``, producing a cycle that can never execute). Only literal
+    constant conditions are treated as dead — no general constant folding —
+    so the pruning can't hide a real edge behind a condition we misjudged.
+    Nested functions are skipped (their returns are not this run()'s).
+    """
+    live: List[str] = []
+    dead: Set[str] = set()
+    if run_fn is None:
+        return live, dead
+
+    def visit(n: _ast.AST, is_dead: bool) -> None:
         if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef, _ast.Lambda)):
             return
         if isinstance(n, _ast.Return) and n.value is not None:
             nm = _returned_node_name(n.value)
             if nm:
-                names.append(nm)
+                if is_dead:
+                    dead.add(nm)
+                elif nm not in live:
+                    live.append(nm)
+            return
+        if isinstance(n, (_ast.If, _ast.While)):
+            body_dead = is_dead or _is_const_false(n.test)
+            else_dead = is_dead or (isinstance(n, _ast.If) and _is_const_true(n.test))
+            visit(n.test, is_dead)
+            for stmt in n.body:
+                visit(stmt, body_dead)
+            for stmt in n.orelse:
+                visit(stmt, else_dead)
+            return
         for child in _ast.iter_child_nodes(n):
-            visit(child)
+            visit(child, is_dead)
 
     for stmt in run_fn.body:
-        visit(stmt)
-    return names
+        visit(stmt, False)
+    return live, dead - set(live)
 
 
 # ----- graph builder ---------------------------------------------------------
@@ -389,12 +424,20 @@ class _PydanticGraphASTVisitor:
             # statements — the annotation is often incomplete in real code
             # (dogfood 2026-06-01), and missing those edges produced false
             # no-exit cycles + false unreachable findings.
+            # Annotation leaves whose ONLY body return sits in a statically-dead
+            # branch (`if False: return X()`) are dropped: the author disabled
+            # that transition, so drawing it fabricates an impossible cycle
+            # (issue #40). Leaves with no body return at all are kept — the
+            # node may be returned via a variable / helper we don't resolve.
+            live_returns, dead_returns = _run_body_return_split(run_fn)
             target_names: List[str] = []
             for leaf in _flatten_union(ann):
                 lname = _leaf_name(leaf)
+                if lname and lname in dead_returns:
+                    continue
                 if lname and lname not in target_names:
                     target_names.append(lname)
-            for lname in _run_body_return_names(run_fn):
+            for lname in live_returns:
                 if lname not in target_names:
                     target_names.append(lname)
 

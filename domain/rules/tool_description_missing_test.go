@@ -104,3 +104,31 @@ func TestToolDescriptionMissing_RespectsShinganIgnore(t *testing.T) {
 		t.Errorf("_shingan_ignore should suppress; got %+v", findings)
 	}
 }
+
+// Issue #39: a LangGraph prebuilt ToolNode is an aggregate dispatcher; the
+// descriptions the LLM reads live on the wrapped tools, so the dispatcher node
+// itself must not be flagged.
+func TestToolDescriptionMissing_SilentOnToolDispatcher(t *testing.T) {
+	g := graphWith(map[string]*domain.Node{
+		"tools": {
+			ID: "tools", Name: "tools", Type: domain.NodeTypeTool,
+			Config: map[string]any{"tool_dispatcher": true},
+		},
+	})
+	if findings := NewToolDescriptionMissingChecker().Analyze(g); len(findings) != 0 {
+		t.Errorf("tool_dispatcher node should not trigger; got %+v", findings)
+	}
+}
+
+// tool_dispatcher=false (or a non-bool value) must not suppress the rule.
+func TestToolDescriptionMissing_DispatcherFalseStillFires(t *testing.T) {
+	g := graphWith(map[string]*domain.Node{
+		"tools": {
+			ID: "tools", Name: "tools", Type: domain.NodeTypeTool,
+			Config: map[string]any{"tool_dispatcher": false},
+		},
+	})
+	if findings := NewToolDescriptionMissingChecker().Analyze(g); len(findings) != 1 {
+		t.Errorf("tool_dispatcher=false should still fire; got %+v", findings)
+	}
+}

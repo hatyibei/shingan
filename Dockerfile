@@ -15,10 +15,16 @@ COPY . .
 # arch, so single-arch local builds keep working.
 ARG TARGETOS=linux
 ARG TARGETARCH
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /out/shingan ./cmd/shingan \
- && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /out/shingan-api ./cmd/api \
- && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /out/shingan-runner ./cmd/runner \
- && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /out/shingan-web ./cmd/shingan-web
+# VERSION is threaded in by the release workflow (`--build-arg VERSION=<tag>`)
+# so `shingan version` inside the image reports the release instead of "dev".
+# Same ldflag goreleaser injects for the released binaries. Local builds
+# without the build-arg keep reporting "dev".
+ARG VERSION=dev
+RUN LDFLAGS="-s -w -X github.com/hatyibei/shingan/version.Version=${VERSION}" \
+ && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="${LDFLAGS}" -o /out/shingan ./cmd/shingan \
+ && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="${LDFLAGS}" -o /out/shingan-api ./cmd/api \
+ && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="${LDFLAGS}" -o /out/shingan-runner ./cmd/runner \
+ && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="${LDFLAGS}" -o /out/shingan-web ./cmd/shingan-web
 
 FROM gcr.io/distroless/static-debian12:nonroot
 

@@ -100,7 +100,7 @@ var secretPatterns = []secretPattern{
 	},
 	{
 		name:     "openai_api_key",
-		pattern:  regexp.MustCompile(`sk-[A-Za-z0-9]{20,}`),
+		pattern:  regexp.MustCompile(`sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}`),
 		severity: domain.Critical,
 	},
 	{

@@ -22,8 +22,8 @@ import (
 // analyzeFlags holds the parsed flag values for the analyze subcommand.
 type analyzeFlags struct {
 	input         string
-	format        string  // input format: "json" or "adk-go"
-	output        string  // output format: "json" or "markdown"
+	format        string  // input format; "" = auto-detect with json fallback, "auto" = strict auto-detect
+	output        string  // output format; "" = markdown on a terminal, json otherwise
 	outputFile    string  // output file path (empty = stdout)
 	minConfidence float64 // minimum confidence threshold (0.0 = include all)
 
@@ -54,10 +54,17 @@ func newAnalyzeCmd() *cobra.Command {
 	flags := &analyzeFlags{}
 
 	cmd := &cobra.Command{
-		Use:   "analyze",
+		Use:   "analyze [path]",
 		Short: "Analyze a workflow graph for structural issues",
 		Long: `analyze reads a WorkflowGraph from a file or directory, runs all built-in
 analysis rules concurrently, and writes the findings to stdout (or a file).
+
+The path can be given positionally or via --input. The input format is
+detected automatically from the file extension and content (n8n exports,
+LangGraph / CrewAI / LlamaIndex / AutoGen / pydantic-graph Python, LangGraph.js
+/ Mastra / OpenAI Agents TypeScript, ADK-Go); pass --format to override.
+Findings are printed as Markdown when stdout is a terminal and as JSON when it
+is piped or redirected; pass --output to override.
 
 Exit codes:
   0  No findings, or only Info-level findings
@@ -66,8 +73,12 @@ Exit codes:
 
 Tip: try ` + "`shingan demo`" + ` first to see a real findings report without
 needing your own input file.`,
-		Example: `  # JSON workflow (default format)
-  shingan analyze --input workflow.json --output markdown
+		Example: `  # Any supported workflow — format is auto-detected
+  shingan analyze workflow.json
+  shingan analyze ./agents/
+
+  # A folder of n8n exports
+  shingan analyze ./n8n-workflows/
 
   # ADK-Go: directory of *.go files
   shingan analyze --format adk-go --input ./agents/
@@ -81,7 +92,17 @@ needing your own input file.`,
 
   # Diff mode: only analyze files changed since main
   shingan analyze --format adk-go --input ./agents/ --since main`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 {
+				if flags.input != "" && flags.input != args[0] {
+					return fmt.Errorf("got both a positional path %q and --input %q; pass only one", args[0], flags.input)
+				}
+				flags.input = args[0]
+			}
+			if flags.input == "" {
+				return errors.New("no input given: pass a workflow file or directory, e.g. `shingan analyze workflow.json` (try `shingan demo` for a sample)")
+			}
 			// Thread cobra's writers through so wrappers and tests
 			// using root.SetOut/SetErr can capture report and warning
 			// output (Codex Slice B #2/#3). Existing CLI behaviour
@@ -106,9 +127,9 @@ needing your own input file.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&flags.input, "input", "", "Path to the workflow file or directory (required)")
-	cmd.Flags().StringVar(&flags.format, "format", "json", "Input format: auto, json, adk-go, samurai, langgraph, n8n, crewai, langgraph-js, pydantic-graph, llamaindex, autogen, mastra, or openai-agents. 'auto' infers from extension + content (ideal for editor/agent hooks).")
-	cmd.Flags().StringVar(&flags.output, "output", "json", "Output format: json, markdown, or sarif")
+	cmd.Flags().StringVar(&flags.input, "input", "", "Path to the workflow file or directory (or pass it as the positional argument)")
+	cmd.Flags().StringVar(&flags.format, "format", "", "Input format: auto, json, adk-go, samurai, langgraph, n8n, crewai, langgraph-js, pydantic-graph, llamaindex, autogen, mastra, or openai-agents. Default: auto-detect from extension + content, falling back to json. 'auto' detects strictly and errors when nothing matches (ideal for editor/agent hooks).")
+	cmd.Flags().StringVarP(&flags.output, "output", "o", "", "Output format: json, markdown, or sarif. Default: markdown when stdout is a terminal, json otherwise")
 	cmd.Flags().StringVar(&flags.outputFile, "output-file", "", "Output file path (default: stdout)")
 	cmd.Flags().Float64Var(&flags.minConfidence, "min-confidence", 0.0, "Exclude findings with confidence below this threshold (0.0–1.0)")
 	cmd.Flags().StringVar(&flags.since, "since", "", "Git ref (e.g. main, v0.4.0); analyze only files changed since this ref")
@@ -117,33 +138,21 @@ needing your own input file.`,
 	cmd.Flags().StringVar(&flags.policy, "policy", "", "Path to .shingan.yaml policy file (severity overrides + per-path disable). Default: walk up from CWD looking for .shingan.yaml")
 	cmd.Flags().IntVar(&flags.workers, "workers", 0, "Parallel worker processes for directory analysis of subprocess-backed parsers (LangGraph). 0=default (2), 1=serial")
 
-	_ = cmd.MarkFlagRequired("input")
-
 	return cmd
 }
 
 // executeAnalyze contains all business logic for the analyze command.
 // It returns the exit code (0/1/2) and any error encountered during execution.
 func executeAnalyze(flags *analyzeFlags) (int, error) {
-	// Apply defaults for zero-value flags (allows struct-literal construction in tests).
-	inputFormat := flags.format
-	if inputFormat == "" {
-		inputFormat = "json"
+	stderr := flags.stderr
+	if stderr == nil {
+		stderr = os.Stderr
 	}
-	if inputFormat == "auto" {
-		detected := detectFormat(flags.input)
-		if detected == "" {
-			return 1, fmt.Errorf(
-				"--format auto could not detect a supported workflow format for %q; pass --format explicitly (json, adk-go, langgraph, n8n, crewai, langgraph-js, pydantic-graph, llamaindex, autogen, mastra, openai-agents)",
-				flags.input)
-		}
-		fmt.Fprintf(os.Stderr, "shingan: auto-detected format %q\n", detected)
-		inputFormat = detected
+	inputFormat, err := resolveInputFormat(flags.format, flags.input, stderr)
+	if err != nil {
+		return 1, err
 	}
-	outputFormat := flags.output
-	if outputFormat == "" {
-		outputFormat = "json"
-	}
+	outputFormat := resolveOutputFormat(flags.output, flags.outputFile, flags.stdout)
 
 	// 0a. Plugin SDK ABI generation check. A wrapper binary that links a
 	//     plugin rule built against an incompatible plugin SDK signature is a
@@ -395,7 +404,10 @@ func loadAsMulti(path, inputFormat string, p application.WorkflowParser, allow [
 	}
 
 	// Directory input — pick the extension(s) by format.
-	var exts []string
+	var (
+		exts []string
+		keep func(string) bool
+	)
 	switch inputFormat {
 	case "adk-go":
 		exts = []string{".go"}
@@ -403,10 +415,34 @@ func loadAsMulti(path, inputFormat string, p application.WorkflowParser, allow [
 		exts = []string{".py"}
 	case "langgraph-js", "mastra", "openai-agents":
 		exts = langGraphJSExts
+	case "n8n":
+		// A folder of n8n exports usually sits next to unrelated JSON
+		// (package.json, tsconfig.json, credentials stubs). Only files whose
+		// content sniffs as an n8n workflow are parsed, so those neighbours
+		// are neither mis-parsed nor reported as noisy "skipping" warnings.
+		exts = []string{".json"}
+		keep = func(p string) bool { return detectFormatFile(p) == "n8n" }
 	default:
-		return nil, fmt.Errorf("directory input is only supported for adk-go, langgraph, crewai, langgraph-js, pydantic-graph, llamaindex, autogen, mastra, and openai-agents formats; use a single JSON file for json/samurai/n8n formats")
+		return nil, fmt.Errorf("directory input is only supported for adk-go, langgraph, crewai, langgraph-js, pydantic-graph, llamaindex, autogen, mastra, openai-agents, and n8n formats; use a single JSON file for json/samurai formats")
 	}
-	return parseSourceDirectoryAsMulti(path, p, allow, exts...)
+	return parseSourceDirectoryAsMulti(path, p, allow, keep, exts...)
+}
+
+// vendoredDirs are directory names never descended into during directory
+// analysis: dependency trees and tool caches hold thousands of third-party
+// files that are not the user's workflows (a LangGraph.js project's
+// node_modules alone would otherwise be walked and parsed file by file).
+// The root passed by the user is always walked, even if it has one of these
+// names, so `shingan analyze ./node_modules/foo` still works when asked for.
+var vendoredDirs = map[string]bool{
+	"node_modules":  true,
+	".git":          true,
+	".venv":         true,
+	"venv":          true,
+	"__pycache__":   true,
+	".tox":          true,
+	".mypy_cache":   true,
+	"site-packages": true,
 }
 
 // langGraphJSExts are the file extensions walked for the Node-backed
@@ -435,7 +471,7 @@ func extInSet(e string, exts []string) bool {
 //
 // Files that fail to parse are skipped with a warning (mirrors CLI
 // resilience for incremental refactors); fatal walk errors propagate.
-func parseSourceDirectoryAsMulti(dir string, p application.WorkflowParser, allow []string, exts ...string) ([]application.GraphWithSource, error) {
+func parseSourceDirectoryAsMulti(dir string, p application.WorkflowParser, allow []string, keep func(string) bool, exts ...string) ([]application.GraphWithSource, error) {
 	// Collect matching paths first so we can optionally fan them out across a
 	// worker pool (LangGraph) instead of parsing strictly serially.
 	var paths []string
@@ -443,10 +479,19 @@ func parseSourceDirectoryAsMulti(dir string, p application.WorkflowParser, allow
 		if walkErr != nil {
 			return fmt.Errorf("walk error at %q: %w", path, walkErr)
 		}
-		if info.IsDir() || !extInSet(filepath.Ext(path), exts) {
+		if info.IsDir() {
+			if path != dir && vendoredDirs[info.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !extInSet(filepath.Ext(path), exts) {
 			return nil
 		}
 		if allow != nil && !fileInAllowlist(path, allow) {
+			return nil
+		}
+		if keep != nil && !keep(path) {
 			return nil
 		}
 		paths = append(paths, path)

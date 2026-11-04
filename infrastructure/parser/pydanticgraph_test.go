@@ -409,3 +409,32 @@ func TestPydanticGraphParser_DuplicateGraphNotMultiGraph(t *testing.T) {
 		t.Errorf("EntryNodeID = %q, want %q (reachability must run)", graph.EntryNodeID, "Start")
 	}
 }
+
+// TestPydanticGraphParser_DeadBranchBackEdge covers issue #40: an annotation
+// leaf whose only body return is inside a statically-dead branch (`if False:` /
+// the else of `if True:`) is dropped, so cycle_detection does not report a loop
+// that can never execute. An annotation-only leaf with no body return at all
+// (Writer -> Reviewer, returned via a variable) is still kept.
+func TestPydanticGraphParser_DeadBranchBackEdge(t *testing.T) {
+	p := newPGParser(t)
+	dir := findPydanticGraphTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "dead_branch_backedge.py"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	if pgHasEdge(graph, "HumanFeedback", "ReportPlanner") {
+		t.Errorf("dead `if False:` back-edge HumanFeedback->ReportPlanner must be dropped (edges=%v)", graph.Edges)
+	}
+	if pgHasEdge(graph, "Reviewer", "Writer") {
+		t.Errorf("dead `else` of `if True:` edge Reviewer->Writer must not be drawn (edges=%v)", graph.Edges)
+	}
+	for _, e := range [][2]string{{"ReportPlanner", "HumanFeedback"}, {"HumanFeedback", "Writer"}, {"Writer", "Reviewer"}} {
+		if !pgHasEdge(graph, e[0], e[1]) {
+			t.Errorf("expected live edge %s->%s (edges=%v)", e[0], e[1], graph.Edges)
+		}
+	}
+	if fs := rules.NewCycleDetector().Analyze(graph); len(fs) != 0 {
+		t.Errorf("no executable cycle exists; cycle_detection reported %+v", fs)
+	}
+}
