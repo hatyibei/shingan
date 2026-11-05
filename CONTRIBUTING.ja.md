@@ -6,7 +6,7 @@ ShinganはAIエージェントワークフロー静的解析ツールです。�
 
 ## 開発環境
 
-- Go 1.25以上
+- Go 1.26以上
 - make
 - (optional) Vertex AI/Gemini 動作確認用にGCPプロジェクトとADC
 

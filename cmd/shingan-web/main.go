@@ -98,16 +98,19 @@ func run(ctx context.Context) error {
 	// router.Use applies middleware to all routes registered afterwards.
 	router.Use(shinganGuardMiddleware(sourceMap))
 
-	// Set up ADK REST API server directly (api.SetupSubrouters panics in v1.1.0
-	// because it passes nil DebugConfig to adkrest.NewServer; we bypass it by
-	// calling adkrest.NewServer ourselves with an explicit empty DebugConfig).
+	// Set up ADK REST API server directly so the Shingan guard middleware and
+	// the /api prefix stay under our control. (Originally a workaround for
+	// api.SetupSubrouters passing a nil DebugConfig in ADK v1.1.0; since ADK
+	// v1.9 DebugConfig is a value and a zero value selects the defaults.)
+	// AllowedOrigins / BindHost are left empty: the WebUI and the API are
+	// served from the same origin, which ADK's origin guard permits.
 	restServer, err := adkrest.NewServer(adkrest.ServerConfig{
 		SessionService:  config.SessionService,
 		MemoryService:   config.MemoryService,
 		AgentLoader:     config.AgentLoader,
 		ArtifactService: config.ArtifactService,
-		SSEWriteTimeout: 120 * time.Second,               // match api.NewLauncher default; zero causes instant SSE timeout
-		DebugConfig:     &adkrest.DebugTelemetryConfig{}, // avoid nil pointer in ADK v1.1.0
+		SSEWriteTimeout: 120 * time.Second, // match api.NewLauncher default; zero causes instant SSE timeout
+		DebugConfig:     adkrest.DebugTelemetryConfig{},
 	})
 	if err != nil {
 		return fmt.Errorf("create ADK REST server: %w", err)

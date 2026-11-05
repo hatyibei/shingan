@@ -4,7 +4,7 @@
 
 > **エージェントが金を溶かす前に、構造で止める。**
 
-![Go version](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go) ![License](https://img.shields.io/badge/License-MIT-green) ![CI](https://github.com/hatyibei/shingan/actions/workflows/ci.yml/badge.svg) [![npm](https://img.shields.io/npm/v/shingan-lint.svg)](https://www.npmjs.com/package/shingan-lint)
+![Go version](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go) ![License](https://img.shields.io/badge/License-MIT-green) ![CI](https://github.com/hatyibei/shingan/actions/workflows/ci.yml/badge.svg) [![npm](https://img.shields.io/npm/v/shingan-lint.svg)](https://www.npmjs.com/package/shingan-lint)
 
 > **ステータス: Beta。** 開発活発、v1.0 は `baseline` / `ignore` / severity policy / PR-bot 完成後の 2026 年後半を目標。**production-critical な CI gating には現状非推奨** — 今は `continue-on-error: true` の informational 統合を推奨。
 
@@ -254,7 +254,7 @@ shingan analyze --format adk-go --input examples/real/missing_handler.go --outpu
 - `functiontool.New(Config{Name: "..."}, handler)` で登録したツールのノード検出に対応済み（`Config.Name` フィールド経由でツール名を取得、ident参照を解決）
 - `functiontool.New[TArgs, TResults](...)` のジェネリクス型引数を `go/types` セカンドパスで解析し、TArgs の struct フィールド名から Tool カテゴリを推定（v0.2.0 で対応済み、`ParseFile` API 経由）。`missing_handler.go` の `browser_search` ツールが `functiontool.New` 経由で正しく検出される
 - LLMノードがToolノードへのエッジを持つがエラーハンドリング分岐がない場合も `error_handler_checker` が Warning を発火（ADK-Go の LLM→Tool エッジパターンに対応）
-- ADK-Go SDK は v1.1.0 で `go 1.25.0` 以上が必要（go.mod のminimum versionに反映済み）
+- Go 1.26 以上が必要（脆弱性修正済みの x/net / otel / grpc 依存が要求するため go.mod の minimum を引き上げ）。govulncheck 基準を満たすため toolchain は go1.26.10 に固定
 
 ```bash
 # demo タグでE2E自動検証
