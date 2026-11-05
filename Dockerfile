@@ -1,6 +1,6 @@
 # --platform=$BUILDPLATFORM pins the builder to the native arch so the Go
 # toolchain runs un-emulated; we cross-compile to the target arch below.
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
 
 WORKDIR /build
 

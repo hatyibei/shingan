@@ -6,7 +6,7 @@ Shingan is an AI agent workflow static analyzer. Contributions are welcome — n
 
 ## Development environment
 
-- Go 1.25+
+- Go 1.26+
 - `make`
 - (optional) GCP project with Application Default Credentials for Vertex AI / Gemini smoke tests
 

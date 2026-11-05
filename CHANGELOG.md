@@ -4,6 +4,19 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Security
+
+- **Go toolchain 1.25.11 → 1.26.10 and vulnerable dependencies upgraded** so the
+  govulncheck CI gate passes again. The Go 1.25 line's standard library has
+  reachable crypto/tls, crypto/x509, net/http, net/textproto and html/template
+  vulnerabilities that are fixed only in go1.26.9+. Modules: `golang.org/x/net`
+  v0.60.0, `golang.org/x/text` v0.42.0, `google.golang.org/grpc` v1.83.1,
+  `go.opentelemetry.io/otel*` v1.45.0 (`sdk/log` v0.21.0). The new dependency
+  set requires `go 1.26.0`, so the minimum Go for `go install` is now 1.26
+  (older toolchains auto-download it under the default `GOTOOLCHAIN=auto`).
+  CI, release, CodeQL, the composite action and the Docker builder image all
+  use 1.26.
+
 ### Changed
 
 - **`shingan analyze` is easier to call.** The path can be given positionally

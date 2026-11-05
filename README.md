@@ -4,7 +4,7 @@
 
 > **Your agent can spend money, leak data, and call tools before you notice. Shingan catches dangerous workflow structures before runtime.**
 
-![Go version](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go) ![License](https://img.shields.io/badge/License-MIT-green) ![CI](https://github.com/hatyibei/shingan/actions/workflows/ci.yml/badge.svg) [![npm](https://img.shields.io/npm/v/shingan-lint.svg)](https://www.npmjs.com/package/shingan-lint)
+![Go version](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go) ![License](https://img.shields.io/badge/License-MIT-green) ![CI](https://github.com/hatyibei/shingan/actions/workflows/ci.yml/badge.svg) [![npm](https://img.shields.io/npm/v/shingan-lint.svg)](https://www.npmjs.com/package/shingan-lint)
 
 > **Status: Beta.** Shingan is under active development; v1.0 is targeted for late 2026 once `baseline` / `ignore` / severity-policy / PR-bot land. **Not yet recommended for production-critical CI gating** — informational use (`continue-on-error: true`) is the recommended integration mode today.
 
@@ -304,7 +304,7 @@ shingan analyze --format adk-go --input examples/real/missing_handler.go --outpu
 - Resolves tool nodes registered through `functiontool.New(Config{Name: "..."}, handler)` by following `Config.Name` and ident references
 - Uses a `go/types` second pass to read `functiontool.New[TArgs, TResults](...)` generic arguments and infer Tool category from the `TArgs` struct fields (v0.2.0+, via `ParseFile`). This is how `missing_handler.go`'s `browser_search` tool is correctly detected.
 - `error_handler_checker` also fires when an LLM node carries a Tool edge but has no conditional branch (LLM→Tool pattern in ADK-Go)
-- ADK-Go SDK v1.1.0 requires `go 1.25.0`+; reflected in `go.mod`'s minimum version
+- Requires Go 1.26+ (`go.mod` minimum, raised by the patched x/net / otel / grpc dependency set); the toolchain is pinned to go1.26.10 for the govulncheck baseline
 
 ```bash
 # E2E auto-verification under the demo build tag
