@@ -313,3 +313,43 @@ func TestSecretInPromptTemplate_MessageIsRedacted(t *testing.T) {
 		t.Errorf("Suggestion missing redacted token: %s", findings[0].Suggestion)
 	}
 }
+
+// --- positive: modern OpenAI key formats (issue #53) -----------------------
+// sk-proj- / sk-svcacct- / sk-admin- keys carry hyphens and underscores in the
+// body, which the legacy `sk-[A-Za-z0-9]{20,}` pattern stopped matching at.
+
+func TestSecretInPromptTemplate_ModernOpenAIKeys_Critical(t *testing.T) {
+	keys := map[string]string{
+		"project":         "sk-proj-Ab3_dE5-fG7hIj9KlMnOpQrStUvWxYz0123456789",
+		"service_account": "sk-svcacct-Zy9_Xw8-Vu7tSr6QpOnMlKjIhGfEdCbA",
+		"admin":           "sk-admin-0a1B2c3D_4e5F6g7H-8i9J0kLmNoPqRs",
+	}
+	for label, key := range keys {
+		t.Run(label, func(t *testing.T) {
+			g := makePromptSecretGraph(map[string]any{
+				"model":         "gpt-4o-mini",
+				"system_prompt": "Call the API with " + key + " please.",
+			})
+			findings := NewSecretInPromptTemplate().Analyze(g)
+			if len(findings) != 1 {
+				t.Fatalf("expected 1 finding for %s key, got %d: %+v", label, len(findings), findings)
+			}
+			if !strings.Contains(findings[0].Message, "openai_api_key") {
+				t.Errorf("expected openai_api_key classification, got: %s", findings[0].Message)
+			}
+		})
+	}
+}
+
+// A hyphenated sk- token that is NOT one of the known modern prefixes (and too
+// short in its first alnum run) must stay silent — the broadening is scoped to
+// proj/svcacct/admin, not every `sk-foo-bar` slug.
+func TestSecretInPromptTemplate_HyphenatedSlug_NoFinding(t *testing.T) {
+	g := makePromptSecretGraph(map[string]any{
+		"model":         "gpt-4o-mini",
+		"system_prompt": "See the sk-learn-style-guide-for-preprocessing-steps doc.",
+	})
+	if findings := NewSecretInPromptTemplate().Analyze(g); len(findings) != 0 {
+		t.Fatalf("expected no finding for a non-key slug, got %+v", findings)
+	}
+}

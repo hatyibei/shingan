@@ -589,6 +589,14 @@ def _build_graph(graph_obj: Any, source_path: str) -> Dict[str, Any]:
             ) or type(handler).__name__
         except Exception:  # noqa: BLE001
             pass
+        # Prebuilt ToolNode is an aggregate dispatcher over the bound tools;
+        # their LLM-facing descriptions live on the individual tools, so
+        # description-oriented rules must skip it (issue #39).
+        try:
+            if type(handler).__name__ == "ToolNode":
+                cfg["tool_dispatcher"] = True
+        except Exception:  # noqa: BLE001
+            pass
         _ensure_node(node_id, str(name), ntype, pos, cfg)
 
     # Track entry candidates (first edge sourced from START wins).

@@ -441,6 +441,31 @@ func TestLangGraphJSParser_NodeTypes(t *testing.T) {
 	}
 }
 
+// TestLangGraphJSParser_ToolNodeDispatcherTag covers issue #39: handlers that
+// are (or resolve to) a prebuilt `new ToolNode(...)` are tagged
+// config.tool_dispatcher=true so tool_description_missing skips the aggregate,
+// while a plain tool-ish function ("runner") is NOT tagged.
+func TestLangGraphJSParser_ToolNodeDispatcherTag(t *testing.T) {
+	p := newJSParser(t)
+	dir := findLangGraphJSTestdata(t)
+
+	graph, err := p.ParseFile(filepath.Join(dir, "node_types.ts"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	want := map[string]bool{"step": true, "exec": true, "runner": false, "agent": false}
+	for id, tagged := range want {
+		n, ok := graph.Nodes[id]
+		if !ok {
+			t.Fatalf("expected node %q (nodes=%v)", id, nodeIDsJS(graph))
+		}
+		got, _ := n.Config["tool_dispatcher"].(bool)
+		if got != tagged {
+			t.Errorf("node %q tool_dispatcher = %v, want %v", id, got, tagged)
+		}
+	}
+}
+
 // TestLangGraphJSParser_BindEndsRouting covers the wild .bind(this)-handler +
 // addNode `{ ends: [...] }` shape (agentailor fullstack-langgraph-nextjs-agent).
 // Two gaps converge on one node: `tool_approval` is added as

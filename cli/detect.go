@@ -90,7 +90,13 @@ func detectTypeScript(body string) string {
 func detectFormatDir(dir string) string {
 	counts := map[string]int{}
 	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if p != dir && vendoredDirs[d.Name()] {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if containsAnyStr(p, "/node_modules/", "/.git/", "/dist/", "/build/") ||
@@ -108,7 +114,9 @@ func detectFormatDir(dir string) string {
 		if f == "json" { // weak fallback — never wins over a framework hit
 			continue
 		}
-		if n > bestN {
+		// Ties break lexicographically so the choice doesn't depend on Go's
+		// randomised map iteration order.
+		if n > bestN || (n == bestN && f < best) {
 			best, bestN = f, n
 		}
 	}

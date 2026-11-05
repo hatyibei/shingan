@@ -119,7 +119,7 @@ cat > workflow.json <<'EOF'
   ]
 }
 EOF
-npx --yes shingan-lint analyze --input workflow.json --output markdown
+npx --yes shingan-lint analyze workflow.json
 ```
 
 ## インストール
@@ -191,11 +191,15 @@ shingan hook install --global # → ~/.claude/settings.json
 
 ## 使い方
 
-JSON入力の例 (デフォルト):
+ファイルかディレクトリを渡すだけ。フレームワークは拡張子と中身から自動判定し、ターミナルでは Markdown、パイプ/リダイレクト時は JSON で出力します:
 
 ```bash
-shingan analyze --input workflow.json --output markdown
+shingan analyze workflow.json          # shingan JSON グラフ or n8n エクスポート
+shingan analyze ./n8n-workflows/       # フォルダ内の n8n エクスポートをまとめて解析
+shingan analyze ./agents/              # LangGraph / CrewAI / ADK-Go / … のプロジェクト
 ```
+
+`--format <name>` で判定を上書き、`-o json|markdown|sarif` で出力形式を上書き。従来どおり `--input <path>` も使えます。ディレクトリ走査では依存ツリー（`node_modules`、`.venv`、`.git` など）はスキップします。
 
 ADK-Go 入力の例（`.go` ファイルのディレクトリ）:
 

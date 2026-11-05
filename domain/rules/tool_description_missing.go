@@ -33,8 +33,10 @@ import (
 //     "Send email to recipient" passes even with no description field).
 //
 // The rule is silent on Tool nodes whose `category` is `trigger`
-// (webhooks / schedulers don't need an LLM-facing description) and on
-// nodes whose Config has `_shingan_ignore` containing this rule.
+// (webhooks / schedulers don't need an LLM-facing description), on
+// aggregate dispatcher nodes (`Config["tool_dispatcher"] == true`, e.g.
+// LangGraph's prebuilt ToolNode) and on nodes whose Config has
+// `_shingan_ignore` containing this rule.
 type ToolDescriptionMissingChecker struct{}
 
 // NewToolDescriptionMissingChecker returns a ready-to-use checker.
@@ -94,6 +96,12 @@ func evaluateToolDescription(n *domain.Node) (domain.Finding, bool) {
 	}
 	// Triggers / webhooks aren't LLM-facing — exempt.
 	if n.GetToolCategory() == "trigger" {
+		return domain.Finding{}, false
+	}
+	// Aggregate dispatchers (LangGraph prebuilt ToolNode) only route to the
+	// tools the LLM selected; the descriptions the model reads live on those
+	// individual tools, not on the dispatcher node (issue #39).
+	if v, ok := n.Config["tool_dispatcher"].(bool); ok && v {
 		return domain.Finding{}, false
 	}
 	// Honour node-level ignore (n8n JSON parity).

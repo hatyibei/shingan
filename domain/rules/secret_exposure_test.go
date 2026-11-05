@@ -255,3 +255,27 @@ func TestSecretExposure_Confidence_InfoPattern(t *testing.T) {
 		}
 	}
 }
+
+// ─── Issue #53: modern OpenAI key formats → Critical ────────────────────────
+
+func TestSecretExposure_ModernOpenAIKey_Critical(t *testing.T) {
+	for _, key := range []string{
+		"sk-proj-Ab3_dE5-fG7hIj9KlMnOpQrStUvWxYz0123456789",
+		"sk-svcacct-Zy9_Xw8-Vu7tSr6QpOnMlKjIhGfEdCbA",
+		"sk-admin-0a1B2c3D_4e5F6g7H-8i9J0kLmNoPqRs",
+	} {
+		g := buildSecret(t, testutil.NewBuilder().
+			AddNodeWithConfig("llm", domain.NodeTypeLLM, map[string]any{
+				"api_key": key,
+			}).
+			Entry("llm"))
+
+		findings := scanSecrets(g)
+		if len(findings) != 1 {
+			t.Fatalf("key %q: expected 1 finding, got %d: %+v", key[:10], len(findings), findings)
+		}
+		if findings[0].Severity != domain.Critical {
+			t.Errorf("key %q: Severity = %v, want Critical", key[:10], findings[0].Severity)
+		}
+	}
+}

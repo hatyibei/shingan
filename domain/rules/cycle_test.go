@@ -403,3 +403,58 @@ func TestCycleDetector_Confidence(t *testing.T) {
 		}
 	}
 }
+
+// Issue #43: the reported representative of an entry-reachable SCC must not
+// depend on the order the parser happened to emit edges in (several parsers
+// build edges from Go maps). Entry fans out into two different members of the
+// same cycle; every permutation of the edge list must report the same node.
+func TestCycleDetector_DeterministicAcrossEdgeOrder(t *testing.T) {
+	type e struct{ from, to string }
+	edges := []e{
+		{"entry", "search"},
+		{"entry", "write"},
+		{"search", "write"},
+		{"write", "review"},
+		{"review", "search"},
+	}
+	build := func(order []e) *domain.WorkflowGraph {
+		b := testutil.NewBuilder().
+			AddNode("entry", domain.NodeTypeLLM).
+			AddNode("write", domain.NodeTypeLLM).
+			AddNode("review", domain.NodeTypeLLM).
+			AddNode("search", domain.NodeTypeTool)
+		for _, ed := range order {
+			b = b.AddEdge(ed.from, ed.to)
+		}
+		return mustBuild(t, b.Entry("entry"))
+	}
+
+	var permute func(xs []e, k int, visit func([]e))
+	permute = func(xs []e, k int, visit func([]e)) {
+		if k == len(xs) {
+			visit(append([]e(nil), xs...))
+			return
+		}
+		for i := k; i < len(xs); i++ {
+			xs[k], xs[i] = xs[i], xs[k]
+			permute(xs, k+1, visit)
+			xs[k], xs[i] = xs[i], xs[k]
+		}
+	}
+
+	checker := rules.NewCycleDetector()
+	want := ""
+	permute(append([]e(nil), edges...), 0, func(order []e) {
+		fs := checker.Analyze(build(order))
+		if len(fs) != 1 {
+			t.Fatalf("order %v: expected 1 cycle finding, got %d: %+v", order, len(fs), fs)
+		}
+		if want == "" {
+			want = fs[0].NodeID
+			return
+		}
+		if fs[0].NodeID != want {
+			t.Fatalf("order %v reported %q, earlier orders reported %q — representative depends on edge order", order, fs[0].NodeID, want)
+		}
+	})
+}

@@ -68,7 +68,7 @@ demo exits with code 2.`,
 
 			fmt.Fprintln(flags.stderr)
 			fmt.Fprintf(flags.stderr, "shingan demo: exit code %d  (0=clean, 1=warning, 2=critical)\n", code)
-			fmt.Fprintln(flags.stderr, "Next:  shingan analyze --input <path/to/workflow.json>  (or --format adk-go, langgraph, n8n, crewai)")
+			fmt.Fprintln(flags.stderr, "Next:  shingan analyze <file-or-dir>  (format is auto-detected; --format to override)")
 
 			if code != 0 {
 				return &exitCodeError{code: code}

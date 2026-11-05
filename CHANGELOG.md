@@ -4,6 +4,27 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Changed
+
+- **`shingan analyze` is easier to call.** The path can be given positionally
+  (`shingan analyze workflow.json`, `shingan analyze ./agents/`); `--input`
+  still works. When `--format` is omitted the format is auto-detected from the
+  extension + content and falls back to `json` when nothing matches, so every
+  invocation that worked before still works — but an n8n export no longer fails
+  with `unknown node type string "n8n-nodes-base.…"` under the old json default.
+  Explicit `--format auto` stays strict (errors on unknown input) for hooks.
+  When `--output` is omitted, findings print as Markdown on a terminal and as
+  JSON when stdout is piped/redirected or `--output-file` is set (scripts and CI
+  see no change). `-o` is a new short alias for `--output`.
+- **Directory input for n8n.** `shingan analyze ./n8n-workflows/` analyzes every
+  JSON file that sniffs as an n8n export (one graph per file, ADR-012); unrelated
+  neighbours like `package.json` are ignored instead of warned about.
+- **Directory walks skip dependency trees** (`node_modules`, `.git`, `.venv`,
+  `venv`, `__pycache__`, `.tox`, `.mypy_cache`, `site-packages`) — a LangGraph.js
+  project's `node_modules` was previously walked file by file.
+- The pre-commit hook now defaults to `--format auto` instead of hard-coding
+  `--format langgraph`, so it works on non-LangGraph projects without config.
+
 ### Added
 
 - **Security/cost rules now fire on the langgraph-js parser.** The AST shim
@@ -23,6 +44,28 @@ All notable changes to Shingan are documented here. Format follows [Keep a Chang
   fire; `process.env.…` prompts and `z.string().max(4000)` args stay clean.
 
 ### Fixed
+
+- **Modern OpenAI keys were not detected** by `secret_in_prompt_template` /
+  `secret_exposure` (#53). `sk-proj-…`, `sk-svcacct-…` and `sk-admin-…` keys
+  carry `-`/`_` in the body, which the legacy `sk-[A-Za-z0-9]{20,}` pattern
+  stopped at. Both rules now match those prefixes (legacy keys still match).
+- **GHCR image reported version `dev`** (#48). The Dockerfile now takes a
+  `VERSION` build-arg injected into `version.Version`, and the release workflow
+  passes the tag from `docker/metadata-action`.
+- **`tool_description_missing` fired on LangGraph's prebuilt `ToolNode`** (#39).
+  The aggregate dispatcher's descriptions live on the wrapped tools; both the
+  langgraph-js and Python LangGraph shims now tag it `config.tool_dispatcher`
+  and the rule skips it (security rules such as `unbounded_tool_arg` still see
+  its merged schema).
+- **pydantic-graph: impossible cycle from an `if False:`-gated back-edge** (#40).
+  An annotation leaf whose only body return sits in a literal-constant dead
+  branch (`if False:` / `if 0:` / `while False:` / the `else` of `if True:`) is
+  no longer drawn as an edge. Leaves with no body return at all are still kept.
+- `--format auto` directory detection broke ties by Go map order; ties now
+  resolve lexicographically. The auto-detect notice is written to the command's
+  stderr writer instead of `os.Stderr` directly.
+- Regression test locking `cycle_detection`'s reported node across every edge
+  emission order (#43; the fix itself shipped in #56).
 
 - **langgraph-js ternary-return router false `unreachable_node`** (2nd external
   dogfood run) — a path-map-less `addConditionalEdges(node, router)` whose router

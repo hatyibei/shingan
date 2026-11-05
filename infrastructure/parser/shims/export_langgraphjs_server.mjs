@@ -1197,25 +1197,26 @@ function extract(content, filePath) {
     return { name: toolName, schema: js };
   }
 
+  // Resolve a node handler to its `new ToolNode([...])` construct (directly, or
+  // via a `const toolNode = new ToolNode([...])` identifier hop through
+  // varInits). Returns the NewExpression or null.
+  function resolveToolNodeCtor(arg, seen) {
+    if (!arg) return null;
+    if (ts.isNewExpression(arg) && ctorName(arg) === "ToolNode") return arg;
+    if (ts.isIdentifier(arg)) {
+      const nm = arg.text;
+      seen = seen || new Set();
+      if (seen.has(nm)) return null;
+      seen.add(nm);
+      const init = varInits.get(nm);
+      if (init) return resolveToolNodeCtor(init, seen);
+    }
+    return null;
+  }
+
   // For a Tool node handler arg, build the merged args_schema, or null.
   function extractToolSchemaForHandler(handlerArg) {
-    // Resolve the handler to a `new ToolNode([...])` construct (directly, or via
-    // a `const toolNode = new ToolNode([...])` identifier hop through varInits).
-    let toolNodeExpr = null;
-    const resolveCtor = (arg, seen) => {
-      if (!arg) return null;
-      if (ts.isNewExpression(arg) && ctorName(arg) === "ToolNode") return arg;
-      if (ts.isIdentifier(arg)) {
-        const nm = arg.text;
-        seen = seen || new Set();
-        if (seen.has(nm)) return null;
-        seen.add(nm);
-        const init = varInits.get(nm);
-        if (init) return resolveCtor(init, seen);
-      }
-      return null;
-    };
-    toolNodeExpr = resolveCtor(handlerArg);
+    const toolNodeExpr = resolveToolNodeCtor(handlerArg);
     if (!toolNodeExpr) return null;
 
     // First arg is the tools list: an inline array, or an identifier bound to one
@@ -1401,6 +1402,15 @@ function extract(content, filePath) {
                 if (schema && !nodeObj.config.args_schema) {
                   nodeObj.config.args_schema = schema;
                 }
+              }
+              // Aggregate dispatcher tagging (issue #39). A prebuilt
+              // `new ToolNode(tools)` graph node only dispatches to the tools
+              // the LLM picked; the LLM-facing descriptions live on the
+              // individual tool() objects, not on this node. Tag it so
+              // description-oriented rules (tool_description_missing) skip it
+              // while security rules (unbounded_tool_arg) still see its schema.
+              if (nodeType === "tool" && args[1] && resolveToolNodeCtor(args[1])) {
+                nodeObj.config.tool_dispatcher = true;
               }
               // Attribute this node to the StateGraph root it was added through,
               // so several `new StateGraph(...)` decls merged under one reused
