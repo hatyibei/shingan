@@ -6,13 +6,21 @@ on:
   pull_request:
     branches: ["**"]
 
+# Every job here only reads the repository (vet / test / build / govulncheck).
+# upload-artifact authenticates with the runner's artifact token, not with
+# GITHUB_TOKEN scopes, so read-only contents is enough.
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5.6.0
         with:
           go-version: "1.26.10"
           cache: true
@@ -23,8 +31,10 @@ jobs:
     name: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5.6.0
         with:
           go-version: "1.26.10"
           cache: true
@@ -32,7 +42,7 @@ jobs:
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
       - name: coverage summary
         run: go tool cover -func=coverage.out | tail -20
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4.6.2
         with:
           name: coverage
           path: coverage.out
@@ -47,8 +57,10 @@ jobs:
     name: govulncheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5.6.0
         with:
           go-version: "1.26.10"
           cache: true
@@ -62,8 +74,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [lint, test]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5.6.0
         with:
           go-version: "1.26.10"
           cache: true
@@ -87,12 +101,14 @@ jobs:
     runs-on: ubuntu-latest
     needs: [lint]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5.6.0
         with:
           go-version: "1.26.10"
           cache: true
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5.6.0
         with:
           python-version: "3.12"
       - name: install langgraph shim deps

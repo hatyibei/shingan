@@ -5,24 +5,34 @@ on:
     tags:
       - "v*"
 
+# Read-only by default. Each job below is granted only the write scopes it
+# actually needs (contents: write for the GitHub Release, id-token: write for
+# npm provenance, packages: write for GHCR).
 permissions:
-  contents: write
-  id-token: write # for npm --provenance in the called publish-npm job
+  contents: read
 
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub Release and upload assets (via API)
     steps:
-      - uses: actions/checkout@v4
+      # goreleaser only reads git locally (tags / log) and talks to GitHub via
+      # the API with GITHUB_TOKEN below; it never pushes, so the checkout token
+      # does not need to stay in .git/config.
+      - uses: actions/checkout@v4.4.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      # No build cache for release builds: published binaries must not be
+      # built from a cache another workflow run could have written.
+      - uses: actions/setup-go@v5.6.0
         with:
           go-version: "1.26.10"
-          cache: true
+          cache: false
 
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v6.4.0
         with:
           distribution: goreleaser
           version: "~> v2"
@@ -36,10 +46,15 @@ jobs:
   # not trigger other workflows — so the tag push alone now ships to npm.
   publish-npm:
     needs: goreleaser
+    permissions:
+      contents: read
+      id-token: write # for npm --provenance in the called workflow
     uses: ./.github/workflows/npm-publish.yml
     with:
       tag: ${{ github.ref_name }}
-    secrets: inherit
+    # Pass only the secret the called workflow declares, not every secret.
+    secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # Build + push the multi-arch container image to GHCR so the README's
   # `docker pull ghcr.io/hatyibei/shingan` actually resolves. Runs AFTER
@@ -52,13 +67,15 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@v3.7.0
+      - uses: docker/setup-buildx-action@v3.12.0
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -66,7 +83,7 @@ jobs:
 
       - name: Derive image tags
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v5.10.0
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
@@ -75,7 +92,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v6.19.2
         with:
           context: .
           platforms: linux/amd64,linux/arm64
