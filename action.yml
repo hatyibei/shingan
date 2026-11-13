@@ -65,7 +65,7 @@ runs:
         # decides; the exact patch matches go.mod's `toolchain` line, the
         # build that clears the govulncheck baseline (crypto/tls, crypto/x509,
         # net/http, html/template fixes in go1.26.9+).
-        go-version: "1.26.10"
+        go-version: "1.26.11"
         cache: true
 
     - name: Install Shingan

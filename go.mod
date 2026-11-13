@@ -7,7 +7,7 @@ go 1.26.0
 // vulnerabilities fixed only in go1.26.9+ (govulncheck CI gate, #28). Keeps
 // `go install …/cmd/shingan` (action.yml) and local builds on the same
 // patched stdlib the release ships.
-toolchain go1.26.10
+toolchain go1.26.11
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
